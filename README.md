@@ -14,7 +14,7 @@ This UserScript enhances your web browsing by automatically performing Optical C
 ### Quick Setup:
 
 1.  **Install a UserScript Manager**: Use an extension like [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
-2.  **Get a Gemini API Key**: Obtain one from [Google AI for Developers](https://ai.google.dev/).
+2.  **Get a Gemini API Key**: Obtain one from [Google AI Studio](https://aistudio.google.com/prompts/new_chat).
 3.  **Install the Script**: Install from the source link.
 4.  **Configure**: Click the **⚙️** icon on any webpage to open the settings. Paste your API key(s), adjust the settings to your liking, and click **Save and Reload**.
 
