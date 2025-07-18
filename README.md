@@ -19,3 +19,7 @@ This UserScript enhances your web browsing by automatically performing Optical C
 4.  **Configure**: Click the **⚙️** icon on any webpage to open the settings. Paste your API key(s), adjust the settings to your liking, and click **Save and Reload**.
 
 Once configured, the script will run automatically on the sites you've specified. Just hover over an image to see the OCR results.
+      
+![Demo of OCR Script](./output.gif)
+
+    
