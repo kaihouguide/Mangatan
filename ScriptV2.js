@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR with Gemini (MutationObserver + Persistent Cache)
+// @name         Automatic Content OCR with Gemini (Original Logic + Cache Skip)
 // @namespace    http://tampermonkey.net/
-// @version      3.3
-// @description  Reliably positions OCR by observing image 'src' changes, ensuring compatibility with lazy-loading sites. Uses Gemini 2.5, lookahead processing, and persistent caching.
+// @version      3.5
+// @description  Uses the original, reliable API logic while intelligently skipping OCR for any images already saved in the persistent cache.
 // @author       1Selxo (modified by Gemini)
 // @match        *://*/*
 // @grant        GM_setValue
@@ -84,7 +84,7 @@
         const exportCache = () => { const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(Object.fromEntries(PersistentCache.data), null, 2)); const downloadAnchorNode = document.createElement('a'); downloadAnchorNode.setAttribute("href", dataStr); downloadAnchorNode.setAttribute("download", "gemini-ocr-cache.json"); document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove(); showStatus('Cache exported successfully!', 'info'); };
         const importCache = (event) => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = async (e) => { try { const importedData = JSON.parse(e.target.result); const newCount = await PersistentCache.merge(importedData); alert(`Import complete. Merged ${newCount} new OCR entries into your cache. Please reload the page to see the changes.`); event.target.value = ''; } catch (err) { alert(`Failed to import cache file. Error: ${err.message}`); } }; reader.readAsText(file); };
 
-        // --- 4. CORE LOGIC (Major Change: Using MutationObserver) ---
+        // --- 4. CORE LOGIC (Restored Original Logic with Cache Skip) ---
         const ocrCache = new WeakMap();
         const imageQueue = [];
         let intersectionObserver;
@@ -94,45 +94,38 @@
         const initializeIntersectionObserver = () => { logDebug("Initializing Intersection Observer."); intersectionObserver = new IntersectionObserver((entries) => { entries.forEach(entry => { if (entry.isIntersecting) { const img = entry.target; const currentIndex = imageQueue.indexOf(img); logDebug(`Image #${currentIndex + 1} is now visible. Scheduling next batch.`); attemptToDisplayOcr(img); scheduleOcrForRange(currentIndex + 1, settings.lookaheadLimit); intersectionObserver.unobserve(img); } }); }, { rootMargin: '200px 0px' }); };
         function monitorContainer(container) { discoverAndQueueImages(container); const newImageObserver = new MutationObserver(() => { discoverAndQueueImages(container); }); newImageObserver.observe(container, { childList: true, subtree: true }); }
         function discoverAndQueueImages(container) { const images = Array.from(container.querySelectorAll('img:not([data-ocr-queued])')); if (images.length === 0) return; logDebug(`Discovered ${images.length} new images.`); images.forEach(img => { img.dataset.ocrQueued = 'true'; imageQueue.push(img); intersectionObserver.observe(img); }); if (imagesScheduledForOcr === 0 && imageQueue.length > 0) { logDebug("Kicking off initial OCR processing for the first batch."); scheduleOcrForRange(0, settings.lookaheadLimit); } }
-        function scheduleOcrForRange(startIndex, count) { logDebug(`Scheduling OCR for images from index ${startIndex} to ${startIndex + count - 1}.`); for (let i = 0; i < count; i++) { const imageIndex = startIndex + i; if (imageIndex >= imageQueue.length) break; const img = imageQueue[imageIndex]; if (!ocrCache.has(img)) { primeImage(img, imageIndex + 1); } else { attemptToDisplayOcr(img); } } }
+        function scheduleOcrForRange(startIndex, count) { logDebug(`Scheduling OCR for images from index ${startIndex} to ${startIndex + count - 1}.`); for (let i = 0; i < count; i++) { const imageIndex = startIndex + i; if (imageIndex >= imageQueue.length) break; const img = imageQueue[imageIndex]; if (!img.dataset.ocrPrimed) { primeImage(img, imageIndex + 1); } } }
 
         function primeImage(img, imageNumber) {
-            // New Robust Logic with MutationObserver
-            const observer = new MutationObserver((mutations) => {
-                for (const mutation of mutations) {
-                    if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
-                        logDebug(`'src' changed for image #${imageNumber}. Re-evaluating.`);
-                        // Give the browser a moment to render the new image
-                        setTimeout(() => attemptToDisplayOcr(img), 150);
-                        // Once the real src is set, we don't need to watch anymore.
-                        observer.disconnect();
-                    }
+            img.dataset.ocrPrimed = 'true'; // Mark as primed to avoid re-attaching listeners.
+            const realSrc = img.dataset.src || img.src;
+
+            // Check persistent cache first.
+            if (PersistentCache.has(realSrc)) {
+                logDebug(`[${imageNumber}/${imageQueue.length}] Found in backup. Skipping API call.`);
+                ocrCache.set(img, PersistentCache.get(realSrc));
+                img.addEventListener('load', () => attemptToDisplayOcr(img), { once: true });
+                // If already loaded by browser, trigger display manually.
+                if (img.complete) {
+                    attemptToDisplayOcr(img);
                 }
-            });
+                return; // Stop here if found in cache.
+            }
 
-            observer.observe(img, { attributes: true, attributeFilter: ['src'] });
-
-            // Also check on the standard load event as a fallback
+            // If not in cache, use original API logic.
             img.addEventListener('load', () => {
-                logDebug(`Image #${imageNumber} 'load' event fired. Re-validating OCR display.`);
-                setTimeout(() => attemptToDisplayOcr(img), 100);
+                logDebug(`Image #${imageNumber} 'load' event fired. It's not in cache, processing.`);
+                setTimeout(() => processImage(img, imageNumber), 100);
             }, { once: true });
 
-            const realSrc = img.dataset.src || img.src;
-            // Check cache right away
-            if (PersistentCache.has(realSrc)) {
-                logDebug(`[${imageNumber}/${imageQueue.length}] Found image in persistent cache. Loading OCR...`);
-                const cachedData = PersistentCache.get(realSrc);
-                ocrCache.set(img, cachedData);
-                attemptToDisplayOcr(img);
-            } else if (realSrc && !realSrc.includes('data:image')) { // Don't process placeholders
-                // If not in cache, start the API process
-                processImage(img, imageNumber);
+            if (img.complete) {
+                 logDebug(`Image #${imageNumber} was already complete. It's not in cache, processing.`);
+                 setTimeout(() => processImage(img, imageNumber), 100);
             }
         }
 
         const processImage = (img, imageNumber) => {
-            if (ocrCache.has(img) && ocrCache.get(img) !== 'pending') return;
+            if (ocrCache.has(img)) return; // Don't re-process if already in session.
             const realSrc = img.dataset.src || img.src;
             if (realSrc && realSrc.startsWith('http')) {
                 logDebug(`[${imageNumber}/${imageQueue.length}] Starting background fetch for ...${realSrc.slice(-40)}`);
@@ -147,14 +140,11 @@
         const fetchOcrData = (base64Data, mimeType, targetImg, sourceUrl, imageNumber, attempt) => { const validApiKeys = settings.apiKeys.filter(k => k); if (attempt >= validApiKeys.length) { showStatus(`All ${validApiKeys.length} API keys failed.`, 'error', 10000); logDebug(`All API keys failed for image #${imageNumber}. Aborting.`); ocrCache.delete(targetImg); imagesScheduledForOcr--; updateStatus(); return; } const apiKey = validApiKeys[currentApiKeyIndex]; logDebug(`Sending image #${imageNumber} to Gemini (Key #${currentApiKeyIndex + 1}, Attempt #${attempt + 1}) ...${sourceUrl.slice(-40)}`); const prompt = `Analyze this manga page with extreme precision. For each text element (speech bubbles, captions, sound effects):\n1. Extract ALL text including main text and furigana (ruby text).\n2. Provide a TIGHT-FITTING bounding box that minimizes empty space around the text. Coordinates MUST be decimal percentages (0.0-1.0). (x,y) is the TOP-LEFT corner.\n3. Determine text orientation: HORIZONTAL or VERTICAL.\n4. Measure the font size relative to the image's total height (e.g., a value of 0.04 means the font is 4% of the image height).\n5. Identify furigana relationships.\nOutput ONLY a valid JSON array.\nJSON structure:\n[{"text": "main text", "furigana": [{"base": "漢字", "ruby": "かんじ", "position": 0}], "orientation": "VERTICAL", "tightBoundingBox": {"x": 0.123, "y": 0.456, "width": 0.078, "height": 0.234}, "fontSize": 0.045, "confidence": 0.95}]`; GM_xmlhttpRequest({ method: 'POST', url: `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${apiKey}`, headers: { 'Content-Type': 'application/json' }, data: JSON.stringify({ contents: [{ parts: [{ inline_data: { mime_type: mimeType, data: base64Data } }, { text: prompt }] }] }), onload: (response) => { try { if (response.status === 429 || response.status >= 500) { throw new Error(`API returned status ${response.status}. Trying next key.`); } if (response.status !== 200) { throw new Error(`API returned status ${response.status}: ${response.statusText}`); } const result = JSON.parse(response.responseText); const ocrDataText = result.candidates?.[0]?.content?.parts?.[0]?.text; if (!ocrDataText) { if (result.promptFeedback?.blockReason) { throw new Error(`API blocked request: ${result.promptFeedback.blockReason}. ${JSON.stringify(result.promptFeedback.safetyRatings)}`); } throw new Error(JSON.stringify(result.error || 'No content returned from API')); } const jsonMatch = ocrDataText.match(/\[.*\]/s); if (!jsonMatch) throw new Error("API did not return a valid JSON array."); const parsedData = JSON.parse(jsonMatch[0]); PersistentCache.set(sourceUrl, parsedData); ocrCache.set(targetImg, parsedData); imagesProcessedCount++; updateStatus(); logDebug(`[${imagesProcessedCount}/${imagesScheduledForOcr}] OCR success for image #${imageNumber} with Key #${currentApiKeyIndex + 1}. Result saved to cache.`); attemptToDisplayOcr(targetImg); } catch (e) { logDebug(`OCR Error on image #${imageNumber} with key #${currentApiKeyIndex + 1}: ${e.message}`); currentApiKeyIndex = (currentApiKeyIndex + 1) % validApiKeys.length; showStatus(`Key #${(currentApiKeyIndex - 1 + validApiKeys.length) % validApiKeys.length + 1} failed. Switching to Key #${currentApiKeyIndex + 1}...`, 'warning', 5000); fetchOcrData(base64Data, mimeType, targetImg, sourceUrl, imageNumber, attempt + 1); } }, onerror: (error) => { logDebug(`Gemini API network error for image #${imageNumber} with key #${currentApiKeyIndex + 1}: ${JSON.stringify(error)}`); currentApiKeyIndex = (currentApiKeyIndex + 1) % validApiKeys.length; showStatus(`Network error with Key #${(currentApiKeyIndex - 1 + validApiKeys.length) % validApiKeys.length + 1}. Switching to Key #${currentApiKeyIndex + 1}...`, 'warning', 5000); fetchOcrData(base64Data, mimeType, targetImg, sourceUrl, imageNumber, attempt + 1); } }); };
         const updateStatus = () => { if (imagesProcessedCount < imagesScheduledForOcr) { showStatus(`Processing ${imagesProcessedCount} / ${imagesScheduledForOcr} images...`, 'info', 0); } else if (imagesScheduledForOcr > 0 && imageQueue.length > imagesScheduledForOcr) { showStatus(`Processed ${imagesProcessedCount}/${imageQueue.length} total. Scroll to load more.`, 'success'); } else if (imagesScheduledForOcr > 0 && imagesProcessedCount === imageQueue.length) { showStatus(`All ${imageQueue.length} images processed!`, 'success'); } };
 
-        // --- 5. DISPLAY LOGIC (Unchanged from v3.2) ---
+        // --- 5. DISPLAY LOGIC (Unchanged) ---
         const attemptToDisplayOcr = (targetImg) => {
             const data = ocrCache.get(targetImg);
-            // Wait for data AND for the image to be physically rendered.
             if (data && data !== 'pending' && targetImg.offsetWidth > 50 && targetImg.offsetHeight > 50) {
                 displayOcrResults(targetImg);
-            } else if (data && data !== 'pending') {
-                logDebug(`Skipping OCR display for now, image dimensions are not ready (${targetImg.offsetWidth}x${targetImg.offsetHeight}). Will retry on change/load.`);
             }
         };
         const displayOcrResults = (targetImg) => { const data = ocrCache.get(targetImg); if (!data || data === 'pending') return; const dimensions = { w: targetImg.offsetWidth, h: targetImg.offsetHeight }; if (!targetImg.parentElement || !targetImg.parentElement.classList.contains('gemini-ocr-wrapper')) { const wrapper = document.createElement('div'); wrapper.classList.add('gemini-ocr-wrapper'); if (targetImg.parentElement) targetImg.parentElement.insertBefore(wrapper, targetImg); wrapper.appendChild(targetImg); } let container = targetImg.parentElement.querySelector('.gemini-ocr-overlay-container'); if (!container) { container = document.createElement('div'); container.className = 'gemini-ocr-overlay-container'; targetImg.parentElement.appendChild(container); container.addEventListener('mouseover', (e) => { if (e.target.classList.contains('gemini-ocr-text-box')) { container.querySelectorAll('.gemini-ocr-text-box.focused').forEach(el => el.classList.remove('focused')); e.target.classList.add('focused'); } }); container.addEventListener('mouseleave', () => { container.querySelectorAll('.gemini-ocr-text-box.focused').forEach(el => el.classList.remove('focused')); }); } if (container.dataset.width && container.dataset.width == dimensions.w) { return; } container.innerHTML = ''; container.dataset.width = dimensions.w; const { w: displayWidth, h: displayHeight } = dimensions; if (displayWidth === 0) { return; } data.forEach((item) => { if (!item?.tightBoundingBox?.width || !item.text || typeof item.fontSize !== 'number') return; const ocrBox = document.createElement('div'); ocrBox.className = 'gemini-ocr-text-box'; if (item.orientation === 'VERTICAL') ocrBox.classList.add('gemini-ocr-text-vertical'); if (item.furigana?.length > 0) { let processedText = item.text; item.furigana.sort((a, b) => (b.position || 0) - (a.position || 0)).forEach(furi => { const base = furi.base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); try { processedText = processedText.replace(new RegExp(base), `<ruby>${furi.base}<rt>${furi.ruby}</rt></ruby>`); } catch(e) { logDebug(`Regex error with furigana base: ${furi.base}`); } }); ocrBox.innerHTML = processedText; } else { ocrBox.textContent = item.text; } const { x, y, width, height } = item.tightBoundingBox; ocrBox.style.left = `${x * displayWidth}px`; ocrBox.style.top = `${y * displayHeight}px`; ocrBox.style.width = `${width * displayWidth}px`; ocrBox.style.height = `${height * displayHeight}px`; ocrBox.title = `Confidence: ${((item.confidence || 0.8) * 100).toFixed(1)}%`; const reductionFactor = 0.85; let initialFontSize = Math.max(item.fontSize * displayHeight * reductionFactor, 10); ocrBox.style.fontSize = `${initialFontSize}px`; container.appendChild(ocrBox); const minFontSize = 8; let iterations = 0; const maxIterations = 25; while ((ocrBox.scrollHeight > ocrBox.clientHeight + 1 || ocrBox.scrollWidth > ocrBox.clientWidth + 1) && initialFontSize > minFontSize && iterations < maxIterations) { initialFontSize -= 1; ocrBox.style.fontSize = `${initialFontSize}px`; iterations++; } if (iterations > 0 && settings.debugMode) { logDebug(`Resized font for "${item.text.substring(0,10)}..." to ${initialFontSize.toFixed(1)}px in ${iterations} steps.`); } }); };
