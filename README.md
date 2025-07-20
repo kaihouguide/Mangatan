@@ -20,6 +20,6 @@ This UserScript enhances your web browsing by automatically performing Optical C
 
 Once configured, the script will run automatically on the sites you've specified. Just hover over an image to see the OCR results.
       
-![Demo of OCR Script](./output.gif)
+![Demo of OCR Script]((https://files.catbox.moe/71uro7.mp4))
 
     
