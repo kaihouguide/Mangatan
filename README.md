@@ -1,25 +1,95 @@
-# Mangatan
+Of course. You are absolutely right—some of the blockquotes and lists could be rendered more cleanly and consistently. I have revised the guide to fix these Markdown errors, ensuring it looks sharp and professional on GitHub.
 
-This UserScript enhances your web browsing by automatically performing Optical Character Recognition (OCR) on images, using Google's powerful Gemini models. It's designed for reading comics and manga online, intelligently pre-loading text data and overlaying it directly onto the images. Its standout feature is the ability to use multiple API keys, automatically switching to a backup if one gets rate-limited.
+The core instructions and wording remain identical.
 
-### Core Features:
+---
 
-*   **High-Quality OCR**: Utilizes `gemini-2.5-flash` and `gemini-2.5-pro` for accurate text extraction, including vertical text and Japanese furigana.
-*   **Smart Pre-loading**: A "lookahead" system processes upcoming images before you scroll to them, ensuring a seamless reading experience.
-*   **Fallback API Keys**: Add multiple Gemini API keys. The script automatically cycles to the next key if one fails or gets rate-limited.
-*   **Site-Agnostic**: Easily configurable to run on any website by specifying a URL pattern and a CSS selector for the image container.
-*   **Interactive Text Overlays**: Hover over an image to see the detected text displayed in its original position and orientation.
-*   **Simple UI**: A clean settings panel allows you to manage API keys, select a model, and configure site-specific rules.
+# 🚀 **Mangatan OCR Server - Installation Guide**
 
-### Quick Setup:
+Welcome! This guide provides the steps to get your private OCR server running.
 
-1.  **Install a UserScript Manager**: Use an extension like [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
-2.  **Get a Gemini API Key**: Obtain one from [Google AI Studio](https://aistudio.google.com/prompts/new_chat).
-3.  **Install the Script**: Install from the source link.
-4.  **Configure**: Click the **⚙️** icon on any webpage to open the settings. Paste your API key(s), adjust the settings to your liking, and click **Save and Reload**.
+---
 
-Once configured, the script will run automatically on the sites you've specified. Just hover over an image to see the OCR results.
-      
-![Demo of OCR Script]((https://files.catbox.moe/71uro7.mp4))
+## ✅ **Step 1: Prerequisites**
 
-    
+You will need a few things before you start. Please install them in the following order.
+
+1.  **Suwayomi-Server**
+    - First, download and set up the **[Suwayomi-Server](https://github.com/Suwayomi/Suwayomi-Server)**.
+    - Follow the installation instructions provided on their official GitHub page to get it running.
+
+2.  **Tampermonkey Extension & Userscript**
+    - Get the [Tampermonkey extension for your browser](https://www.tampermonkey.net/).
+    - Then, install the required userscript for this project from this GitHub repository.
+
+3.  **Node.js Environment**
+    - This provides the runtime (`node`) and package manager (`npm`) needed to run the OCR server.
+    - You can verify if you have it by opening a terminal or command prompt and running:
+      ```bash
+      node -v
+      npm -v
+      ```
+    - If these commands return version numbers (e.g., `v18.17.1`), you are ready. If not, please [download and install the "LTS" version of Node.js](https://nodejs.org/en/download/) first.
+
+---
+
+## 📦 **Step 2: Get the OCR Server Source Code**
+
+1.  Download the OCR Server project files as a **ZIP** and unzip the folder.
+2.  Open your terminal or Command Prompt and **navigate into the unzipped OCR Server folder**.
+
+---
+
+## ⚙️ **Step 3: Install Dependencies & Configure**
+
+Now, from inside the project folder in your terminal:
+
+1.  **Run this command** to install the necessary libraries:
+    ```bash
+    npm install express chrome-lens-ocr
+    ```
+    > *This command downloads both libraries into a `node_modules` folder, making them available to your script.*
+
+2.  **Next, configure the `package.json` file:**
+    - After the installation is finished, check if a `package.json` file was created.
+    - If it **was created**, open it and **replace its entire content** with the code block below.
+    - If it **was not created**, you must **make a new file named `package.json`** and paste the code block below into it.
+
+    ```json
+    {
+      "name": "my-ocr-server",
+      "version": "1.0.0",
+      "description": "",
+      "main": "server.js",
+      "type": "module",
+      "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "start": "node server.js"
+      },
+      "keywords": [],
+      "author": "",
+      "license": "ISC",
+      "dependencies": {
+        "express": "^4.17.1",
+        "chrome-lens-ocr": "^1.0.6"
+      }
+    }
+    ```
+
+---
+
+## ▶️ **Step 4: Start the Server**
+
+With all dependencies installed, you are ready to start the OCR server.
+
+Run the following command in your terminal:
+```bash
+node server.js
+```
+> **On Windows:** You can also run the `Runme.bat` file if it is available.
+
+<br>
+
+### 🎉 **All Done!**
+
+Your server should now be active and ready to use. To stop it at any time, return to the terminal window and press `Ctrl + C`.
