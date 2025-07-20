@@ -24,7 +24,7 @@ You will need a few things before you start. Please install them in the followin
       node -v
       npm -v
       ```
-    - If these commands return version numbers (e.g., `v18.17.1`), you are ready. If not, please [download and install the "LTS" version of Node.js](https://nodejs.org/en/download/) first.
+    - please [download and install  Node.js](https://nodejs.org/en/download/) first.
 
 ---
 
