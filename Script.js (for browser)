@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - Final)
+// @name         Automatic Content OCR (Local Overlay Manager - v6.2 Scrollbar Fix)
 // @namespace    http://tampermonkey.net/
-// @version      6.0
-// @description  The definitive, feature-complete version. Implements direct font size control, allowing user-defined overflow, and includes all stability fixes.
-// @author       1Selxo 
+// @version      6.2
+// @description  The definitive, feature-complete version. Fixes double scrollbar issue while ensuring overlays are visible. Includes configurable server URL and improved UI.
+// @author       1Selxo
 // @match        *://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -13,14 +13,15 @@
 // @connect      localhost
 // @connect      fonts.googleapis.com
 // @connect      fonts.gstatic.com
+// @connect      *
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     // --- Global State and Settings ---
-    const LOCAL_OCR_ENDPOINT = 'http://127.0.0.1:3000';
     let settings = {
+        ocrServerUrl: 'http://127.0.0.1:3000',
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelector: 'div.muiltr-masn8',
@@ -57,7 +58,7 @@
 
     // --- CORE LOGIC (Passive Observer) ---
     function activateScanner() {
-        logDebug("Activating passive scanner v6.0...");
+        logDebug("Activating passive scanner v6.2...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig) return logDebug(`No matching site config for URL: ${window.location.href}`);
 
@@ -124,7 +125,7 @@
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-40)}`);
         ocrCache.set(img, 'pending');
         GM_xmlhttpRequest({
-            method: 'GET', url: `${LOCAL_OCR_ENDPOINT}/ocr?url=${encodeURIComponent(sourceUrl)}`, timeout: 30000,
+            method: 'GET', url: `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`, timeout: 30000,
             onload: (response) => {
                 try {
                     if (response.status !== 200) throw new Error(`Server status ${response.status}`);
@@ -192,6 +193,7 @@
             const problematicElement = document.querySelector(activeSiteConfig.overflowFixSelector);
             if (problematicElement && problematicElement.style.overflow !== 'visible') {
                 problematicElement.style.overflow = 'visible';
+                logDebug(`Applied overflow:visible to ${activeSiteConfig.overflowFixSelector}`);
             }
         }
 
@@ -211,8 +213,6 @@
             const ocrData = ocrCache.get(img);
             if (ocrData) {
                 data.overlay.childNodes.forEach((ocrBox) => {
-                    // --- FINAL FONT LOGIC ---
-                    // Directly use the user's setting without shrinking.
                     const userDefinedSize = rect.height * (settings.fontSizePercent / 100);
                     ocrBox.style.fontSize = `${Math.max(userDefinedSize, 8)}px`;
                 });
@@ -224,13 +224,24 @@
     // --- UI SETUP ---
     async function createUI() {
         GM_addStyle(`
-            #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483646; background: #1F1F23; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 40px; height: 40px; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+            /* --- FIX: PREVENT DOUBLE SCROLLBAR --- */
+            html {
+                overflow: hidden !important; /* Prevents the root element from showing a scrollbar */
+            }
+            body {
+                 /* Let the body handle its own scrolling, which is the desired primary scrollbar */
+                overflow-y: auto !important;
+                overflow-x: hidden !important;
+            }
+            /* --- END FIX --- */
+
+            #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483646; background: #1F1F23; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 45px; height: 45px; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.4); user-select: none; }
             .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1F1F23; border: 1px solid #00BFFF; border-radius: 15px; padding: 25px; z-index: 2147483647; color: #EAEAEA; font-family: 'Noto Sans JP', sans-serif; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5); width: 600px; max-width: 90vw; }
             #gemini-ocr-debug-modal { width: 80vw; height: 80vh; flex-direction: column; }
             .gemini-ocr-modal.is-hidden { display: none !important; }
             .gemini-ocr-modal.is-visible { display: flex !important; flex-direction: column; }
             .gemini-ocr-modal h2, .gemini-ocr-modal h3 { margin-top: 0; color: #00BFFF; }
-            .gemini-ocr-modal h3 { font-size: 1.1em; margin-bottom: -5px; margin-top: 15px; border-bottom: 1px solid #444; padding-bottom: 5px; }
+            .gemini-ocr-modal h3 { font-size: 1.1em; margin-bottom: -5px; margin-top: 20px; border-bottom: 1px solid #444; padding-bottom: 5px; }
             .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 12px; align-items: center; }
             .gemini-ocr-settings-grid .full-width { grid-column: 1 / -1; }
             .gemini-ocr-modal-buttons { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 15px; }
@@ -248,30 +259,43 @@
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; color: white; border-color: #2ecc71; }
             #gemini-ocr-server-status.status-error { background-color: #c0392b; color: white; border-color: #e74c3c; }
             #gemini-ocr-server-status.status-checking { background-color: #3498db; color: white; border-color: #5dade2; }
+            @media (max-width: 600px) {
+                .gemini-ocr-modal { padding: 15px; width: 95vw; max-height: 90vh; overflow-y: auto; }
+                .gemini-ocr-settings-grid { display: block; }
+                .gemini-ocr-settings-grid > label { display: block; margin-top: 15px; font-weight: bold; }
+                .gemini-ocr-modal-buttons { justify-content: space-between; }
+            }
         `);
 
         const settingsButton = document.createElement('button'); settingsButton.id = 'gemini-ocr-settings-button'; settingsButton.innerHTML = '⚙️'; document.body.appendChild(settingsButton);
         const modal = document.createElement('div'); modal.id = 'gemini-ocr-settings-modal'; modal.classList.add('gemini-ocr-modal', 'is-hidden');
         modal.innerHTML = `
-            <h2 class="full-width">Local OCR Settings</h2>
+            <h2 class="full-width">Local OCR Settings (v6.2)</h2>
             <div class="gemini-ocr-settings-grid">
-                <div id="gemini-ocr-server-status" title="Click to check status">Click to check...</div>
+                <h3 class="full-width">Connection</h3>
+                <label class="full-width" for="gemini-ocr-server-url">OCR Server URL:</label>
+                <input type="text" id="gemini-ocr-server-url" class="full-width">
+                <div id="gemini-ocr-server-status" title="Click to check status">Click to check server status</div>
+
                 <h3 class="full-width">Text Display</h3>
                 <label for="ocr-text-orientation">Text Orientation:</label> <select id="ocr-text-orientation"> <option value="smart">Smart Detection</option> <option value="forceHorizontal">Force Horizontal</option> <option value="forceVertical">Force Vertical</option> </select>
                 <label for="ocr-font-size">Font Size (% of image height):</label> <input type="number" id="ocr-font-size" min="1" max="50" step="0.5">
+
                 <h3 class="full-width">Advanced</h3>
                 <div class="full-width"> <label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label> </div>
                 <div class="full-width"> <label for="gemini-ocr-sites-config">Site Configurations (URL_Pattern, Image_Container, Overflow_Fix):</label> <textarea id="gemini-ocr-sites-config" rows="4"></textarea> </div>
                 <div class="gemini-ocr-modal-buttons full-width"> <button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug Logs</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn">Save and Reload</button> </div>
             </div>`;
         document.body.appendChild(modal);
+
         const debugModal = document.createElement('div'); debugModal.id = 'gemini-ocr-debug-modal'; debugModal.classList.add('gemini-ocr-modal', 'is-hidden');
         debugModal.innerHTML = `<h2>Debug Log</h2><textarea id="gemini-ocr-debug-log" readonly></textarea><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button>`;
         document.body.appendChild(debugModal);
 
-        const loadedSettings = await GM_getValue('gemini_ocr_observer_settings_v5');
+        const loadedSettings = await GM_getValue('gemini_ocr_observer_settings_v6.2');
         if (loadedSettings) { settings = { ...settings, ...JSON.parse(loadedSettings) }; }
 
+        document.getElementById('gemini-ocr-server-url').value = settings.ocrServerUrl;
         document.getElementById('gemini-ocr-debug-mode').checked = settings.debugMode;
         document.getElementById('ocr-text-orientation').value = settings.textOrientation;
         document.getElementById('ocr-font-size').value = settings.fontSizePercent;
@@ -286,6 +310,7 @@
         document.addEventListener('ocr-log-update', () => { if (!debugModal.classList.contains('is-hidden')) { debugTextarea.value = debugLog.join('\n'); debugTextarea.scrollTop = debugTextarea.scrollHeight; } });
         document.getElementById('gemini-ocr-save-btn').addEventListener('click', async () => {
             const newSettings = {
+                ocrServerUrl: document.getElementById('gemini-ocr-server-url').value.trim(),
                 debugMode: document.getElementById('gemini-ocr-debug-mode').checked,
                 textOrientation: document.getElementById('ocr-text-orientation').value,
                 fontSizePercent: parseFloat(document.getElementById('ocr-font-size').value) || 4,
@@ -294,22 +319,30 @@
                     return { urlPattern: parts[0], imageContainerSelector: parts[1], overflowFixSelector: parts[2] };
                 })
             };
-            await GM_setValue('gemini_ocr_observer_settings_v5', JSON.stringify(newSettings));
+            await GM_setValue('gemini_ocr_observer_settings_v6.2', JSON.stringify(newSettings));
             alert('Settings Saved. The page will now reload.'); window.location.reload();
         });
     }
 
     function checkServerStatus() {
         const statusDiv = document.getElementById('gemini-ocr-server-status');
-        if (!statusDiv) return;
+        const serverUrl = document.getElementById('gemini-ocr-server-url').value.trim();
+        if (!statusDiv || !serverUrl) return;
+
         statusDiv.className = 'status-checking'; statusDiv.textContent = 'Checking...';
         GM_xmlhttpRequest({
-            method: 'GET', url: LOCAL_OCR_ENDPOINT, timeout: 3000,
+            method: 'GET', url: serverUrl, timeout: 5000,
             onload: (res) => {
-                try { const data = JSON.parse(res.responseText); if (data.status === 'running') { statusDiv.className = 'status-ok'; statusDiv.textContent = `Connected (${data.items_in_cache} cached)`; } else { throw new Error('Invalid response'); } } catch (e) { statusDiv.className = 'status-error'; statusDiv.textContent = 'Unresponsive'; }
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data.status === 'running') {
+                        statusDiv.className = 'status-ok';
+                        statusDiv.textContent = `Connected (${data.items_in_cache} cached)`;
+                    } else { throw new Error('Invalid response'); }
+                } catch (e) { statusDiv.className = 'status-error'; statusDiv.textContent = 'Unresponsive Server'; }
             },
             onerror: () => { statusDiv.className = 'status-error'; statusDiv.textContent = 'Connection Failed'; },
-            ontimeout: () => { statusDiv.className = 'status-error'; statusDiv.textContent = 'Timed Out'; }
+            ontimeout: () => { statusDiv.className = 'status-error'; statusDiv.textContent = 'Connection Timed Out'; }
         });
     }
 
