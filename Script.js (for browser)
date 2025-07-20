@@ -4,7 +4,7 @@
 // @version      6.0
 // @description  The definitive, feature-complete version. Implements direct font size control, allowing user-defined overflow, and includes all stability fixes.
 // @author       1Selxo 
-// @match        *://*/*
+// @match        *://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
