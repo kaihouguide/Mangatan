@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v6.2 Scrollbar Fix)
+// @name         Automatic Content OCR (Local Overlay Manager - v6.5 Robust Scanner)
 // @namespace    http://tampermonkey.net/
-// @version      6.2
-// @description  The definitive, feature-complete version. Fixes double scrollbar issue while ensuring overlays are visible. Includes configurable server URL and improved UI.
-// @author       1Selxo
+// @version      6.5
+// @description  Complete scanner rewrite. Uses a new hybrid observer strategy to robustly and efficiently support all modes, including Webtoon and Continuous Vertical.
+// @author       1Selxo (modified by Gemini)
 // @match        *://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -24,7 +24,12 @@
         ocrServerUrl: 'http://127.0.0.1:3000',
         sites: [{
             urlPattern: '127.0.0.1',
-            imageContainerSelector: 'div.muiltr-masn8',
+            imageContainerSelectors: [
+                'div.muiltr-masn8', // Continuous Vertical
+                'div.muiltr-79elbk', // Webtoon
+                'div.muiltr-u43rde', // Single Page
+                'div.muiltr-1r1or1s', // Double Page
+            ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
         debugMode: true,
@@ -34,6 +39,7 @@
     let debugLog = [];
     const ocrCache = new WeakMap();
     const managedElements = new Map();
+    const managedContainers = new Map(); // Tracks containers and their dedicated observers
     let activeSiteConfig = null;
 
     // --- Logging Utility ---
@@ -56,33 +62,71 @@
         async set(key, value) { this.data?.set(key, value); await this.save(); },
     };
 
-    // --- CORE LOGIC (Passive Observer) ---
-    function activateScanner() {
-        logDebug("Activating passive scanner v6.2...");
-        activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
-        if (!activeSiteConfig) return logDebug(`No matching site config for URL: ${window.location.href}`);
+    // --- NEW CORE LOGIC (Hybrid Observer Strategy) ---
 
-        const pageObserver = new MutationObserver((mutations, observer) => {
-            const container = document.querySelector(activeSiteConfig.imageContainerSelector);
-            if (container) {
-                logDebug(`Target container found: "${activeSiteConfig.imageContainerSelector}". Monitoring for images.`);
-                observer.disconnect();
-                monitorContainerForImages(container);
+    // This observer only looks for images added inside a container we're already managing.
+    const imageObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.tagName === 'IMG') {
+                    observeImageForSrcChange(node);
+                } else if (node.querySelectorAll) {
+                    node.querySelectorAll('img').forEach(observeImageForSrcChange);
+                }
             }
-        });
-        pageObserver.observe(document.body, { childList: true, subtree: true });
-    }
+        }
+    });
 
-    function monitorContainerForImages(container) {
-        const newImageObserver = new MutationObserver((mutations) => {
-            for (const mutation of mutations) for (const node of mutation.addedNodes) {
-                if (node.tagName === 'IMG') observeImageForSrcChange(node);
-                else if (node.querySelectorAll) node.querySelectorAll('img').forEach(observeImageForSrcChange);
-            }
-        });
-        newImageObserver.observe(container, { childList: true, subtree: true });
+    // Manages a new container: scans it for existing images and attaches the dedicated imageObserver.
+    function manageContainer(container) {
+        if (managedContainers.has(container)) return; // Already managing this one.
+
+        logDebug(`New container found matching selector. Now managing: ${container.className}`);
+        // 1. Scan for any images already present
         container.querySelectorAll('img').forEach(observeImageForSrcChange);
+
+        // 2. Attach the efficient, dedicated observer to watch for new images
+        imageObserver.observe(container, { childList: true, subtree: true });
+        managedContainers.set(container, true); // Mark as managed
     }
+
+    // This is the main observer. It only looks for the containers themselves.
+    const containerObserver = new MutationObserver((mutations) => {
+        if (!activeSiteConfig) return;
+        const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
+
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== 1) continue; // Not an element
+
+                // Check if the added node itself is a container
+                if (node.matches(selectorQuery)) {
+                    manageContainer(node);
+                }
+                // Check if any of its new children are containers
+                node.querySelectorAll(selectorQuery).forEach(manageContainer);
+            }
+        }
+    });
+
+    function activateScanner() {
+        logDebug("Activating robust hybrid scanner v6.5...");
+        activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
+        if (!activeSiteConfig || !activeSiteConfig.imageContainerSelectors?.length) {
+            return logDebug(`No matching site config for URL: ${window.location.href}`);
+        }
+
+        // Initial scan for any containers that are already on the page at load time.
+        logDebug("Performing initial scan for reader containers...");
+        const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
+        document.querySelectorAll(selectorQuery).forEach(manageContainer);
+
+        // Start the master observer to find containers that appear later (e.g., after changing modes).
+        containerObserver.observe(document.body, { childList: true, subtree: true });
+        logDebug("Main container observer is active.");
+    }
+
+    // --- Image Processing (Largely Unchanged) ---
 
     function observeImageForSrcChange(img) {
         if (img.dataset.ocrListenerAttached) return;
@@ -98,7 +142,6 @@
         const attributeObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations) if (mutation.attributeName === 'src') {
                 if (processTheImage(img.src)) {
-                    logDebug(`SRC changed, valid URL found. Disconnecting listener.`);
                     attributeObserver.disconnect();
                     break;
                 }
@@ -141,7 +184,7 @@
         });
     }
 
-    // --- DISPLAY LOGIC (Managed Phantom Overlay) ---
+    // --- DISPLAY LOGIC (Unchanged) ---
     function displayOcrResults(targetImg) {
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
@@ -154,12 +197,10 @@
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.textContent = item.text;
-
             const isVertical = item.tightBoundingBox.height > item.tightBoundingBox.width;
             if (settings.textOrientation === 'forceVertical' || (settings.textOrientation === 'smart' && isVertical)) {
                 ocrBox.classList.add('gemini-ocr-text-vertical');
             }
-
             ocrBox.style.left = `${item.tightBoundingBox.x * 100}%`;
             ocrBox.style.top = `${item.tightBoundingBox.y * 100}%`;
             ocrBox.style.width = `${item.tightBoundingBox.width * 100}%`;
@@ -170,20 +211,13 @@
         managedElements.set(targetImg, { overlay: overlayContainer });
         logDebug(`Created and now managing overlay for image: ...${targetImg.src.slice(-20)}`);
 
-        targetImg.addEventListener('mouseenter', () => { overlayContainer.style.visibility = 'visible'; overlayContainer.style.opacity = '1'; });
-        overlayContainer.addEventListener('mouseleave', () => { overlayContainer.style.visibility = 'hidden'; overlayContainer.style.opacity = '0'; });
-
-        overlayContainer.addEventListener('mouseover', (e) => {
-            if (e.target.classList.contains('gemini-ocr-text-box')) {
-                overlayContainer.classList.add('is-focused');
-                e.target.classList.add('focused');
-            }
+        targetImg.addEventListener('mouseenter', () => {
+            overlayContainer.style.visibility = 'visible';
+            overlayContainer.style.opacity = '1';
         });
-        overlayContainer.addEventListener('mouseout', (e) => {
-            if (e.target.classList.contains('gemini-ocr-text-box')) {
-                overlayContainer.classList.remove('is-focused');
-                e.target.classList.remove('focused');
-            }
+        targetImg.addEventListener('mouseleave', () => {
+            overlayContainer.style.visibility = 'hidden';
+            overlayContainer.style.opacity = '0';
         });
     }
 
@@ -193,7 +227,6 @@
             const problematicElement = document.querySelector(activeSiteConfig.overflowFixSelector);
             if (problematicElement && problematicElement.style.overflow !== 'visible') {
                 problematicElement.style.overflow = 'visible';
-                logDebug(`Applied overflow:visible to ${activeSiteConfig.overflowFixSelector}`);
             }
         }
 
@@ -224,17 +257,8 @@
     // --- UI SETUP ---
     async function createUI() {
         GM_addStyle(`
-            /* --- FIX: PREVENT DOUBLE SCROLLBAR --- */
-            html {
-                overflow: hidden !important; /* Prevents the root element from showing a scrollbar */
-            }
-            body {
-                 /* Let the body handle its own scrolling, which is the desired primary scrollbar */
-                overflow-y: auto !important;
-                overflow-x: hidden !important;
-            }
-            /* --- END FIX --- */
-
+            html { overflow: hidden !important; }
+            body { overflow-y: auto !important; overflow-x: hidden !important; }
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483646; background: #1F1F23; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 45px; height: 45px; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.4); user-select: none; }
             .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1F1F23; border: 1px solid #00BFFF; border-radius: 15px; padding: 25px; z-index: 2147483647; color: #EAEAEA; font-family: 'Noto Sans JP', sans-serif; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5); width: 600px; max-width: 90vw; }
             #gemini-ocr-debug-modal { width: 80vw; height: 80vh; flex-direction: column; }
@@ -250,11 +274,9 @@
             #gemini-ocr-debug-log { flex-grow: 1; resize: none; }
             .gemini-ocr-modal textarea { height: 120px; }
             .gemini-ocr-modal button { padding: 10px 18px; background-color: #00BFFF; border: none; border-radius: 5px; color: #1A1A1D; cursor: pointer; font-weight: bold; }
-            .gemini-ocr-phantom-overlay { position: absolute; z-index: 9999; visibility: hidden; opacity: 0; pointer-events: auto; transition: opacity 0.2s ease-in-out; }
-            .gemini-ocr-text-box { font-family: 'Noto Sans JP', sans-serif; position: absolute; background: rgba(10, 25, 40, 0.6); border: 2px solid rgba(0, 191, 255, 0.7); color: white; text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000; backdrop-filter: blur(1.5px); line-height: 1.25; display: flex; align-items: center; justify-content: center; text-align: center; border-radius: 3px; box-sizing: border-box; user-select: text; cursor: text; pointer-events: auto; transition: opacity 0.2s, transform 0.2s, z-index 0s 0.2s; overflow: visible; }
+            .gemini-ocr-phantom-overlay { position: absolute; z-index: 9999; visibility: hidden; opacity: 0; transition: opacity 0.2s ease-in-out; pointer-events: none; }
+            .gemini-ocr-text-box { font-family: 'Noto Sans JP', sans-serif; position: absolute; background: rgba(10, 25, 40, 0.6); border: 2px solid rgba(0, 191, 255, 0.7); color: white; text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000; backdrop-filter: blur(1.5px); line-height: 1.25; display: flex; align-items: center; justify-content: center; text-align: center; border-radius: 3px; box-sizing: border-box; user-select: text; cursor: text; overflow: visible; pointer-events: auto; }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; letter-spacing: 0.1em; }
-            .gemini-ocr-phantom-overlay.is-focused .gemini-ocr-text-box { opacity: 0.5; }
-            .gemini-ocr-phantom-overlay.is-focused .gemini-ocr-text-box.focused { opacity: 1; z-index: 10; transform: scale(1.05); }
             #gemini-ocr-server-status { grid-column: 1 / -1; padding: 10px; border: 1px solid #555; border-radius: 5px; text-align: center; font-weight: bold; transition: all 0.3s ease; cursor: pointer; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; color: white; border-color: #2ecc71; }
             #gemini-ocr-server-status.status-error { background-color: #c0392b; color: white; border-color: #e74c3c; }
@@ -270,7 +292,7 @@
         const settingsButton = document.createElement('button'); settingsButton.id = 'gemini-ocr-settings-button'; settingsButton.innerHTML = '⚙️'; document.body.appendChild(settingsButton);
         const modal = document.createElement('div'); modal.id = 'gemini-ocr-settings-modal'; modal.classList.add('gemini-ocr-modal', 'is-hidden');
         modal.innerHTML = `
-            <h2 class="full-width">Local OCR Settings (v6.2)</h2>
+            <h2 class="full-width">Local OCR Settings (v6.5)</h2>
             <div class="gemini-ocr-settings-grid">
                 <h3 class="full-width">Connection</h3>
                 <label class="full-width" for="gemini-ocr-server-url">OCR Server URL:</label>
@@ -283,7 +305,10 @@
 
                 <h3 class="full-width">Advanced</h3>
                 <div class="full-width"> <label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label> </div>
-                <div class="full-width"> <label for="gemini-ocr-sites-config">Site Configurations (URL_Pattern, Image_Container, Overflow_Fix):</label> <textarea id="gemini-ocr-sites-config" rows="4"></textarea> </div>
+                <div class="full-width">
+                    <label for="gemini-ocr-sites-config">Site Configurations (Format: URL; OverflowFix; Container1; Container2...)</label>
+                    <textarea id="gemini-ocr-sites-config" rows="4" placeholder="Example: 127.0.0.1; .body-wrapper; .vertical-reader; .webtoon-reader"></textarea>
+                </div>
                 <div class="gemini-ocr-modal-buttons full-width"> <button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug Logs</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn">Save and Reload</button> </div>
             </div>`;
         document.body.appendChild(modal);
@@ -292,14 +317,16 @@
         debugModal.innerHTML = `<h2>Debug Log</h2><textarea id="gemini-ocr-debug-log" readonly></textarea><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button>`;
         document.body.appendChild(debugModal);
 
-        const loadedSettings = await GM_getValue('gemini_ocr_observer_settings_v6.2');
+        const loadedSettings = await GM_getValue('gemini_ocr_observer_settings_v6.5');
         if (loadedSettings) { settings = { ...settings, ...JSON.parse(loadedSettings) }; }
 
         document.getElementById('gemini-ocr-server-url').value = settings.ocrServerUrl;
         document.getElementById('gemini-ocr-debug-mode').checked = settings.debugMode;
         document.getElementById('ocr-text-orientation').value = settings.textOrientation;
         document.getElementById('ocr-font-size').value = settings.fontSizePercent;
-        document.getElementById('gemini-ocr-sites-config').value = settings.sites.map(s => `${s.urlPattern}, ${s.imageContainerSelector}, ${s.overflowFixSelector}`).join('\n');
+        document.getElementById('gemini-ocr-sites-config').value = settings.sites.map(s =>
+            [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')
+        ).join('\n');
 
         settingsButton.addEventListener('click', () => modal.classList.toggle('is-hidden'));
         document.getElementById('gemini-ocr-close-btn').addEventListener('click', () => modal.classList.add('is-hidden'));
@@ -314,12 +341,16 @@
                 debugMode: document.getElementById('gemini-ocr-debug-mode').checked,
                 textOrientation: document.getElementById('ocr-text-orientation').value,
                 fontSizePercent: parseFloat(document.getElementById('ocr-font-size').value) || 4,
-                sites: document.getElementById('gemini-ocr-sites-config').value.split('\n').filter(line => line.includes(',')).map(line => {
-                    const parts = line.split(',').map(s => s.trim());
-                    return { urlPattern: parts[0], imageContainerSelector: parts[1], overflowFixSelector: parts[2] };
+                sites: document.getElementById('gemini-ocr-sites-config').value.split('\n').filter(line => line.trim()).map(line => {
+                    const parts = line.split(';').map(s => s.trim());
+                    return {
+                        urlPattern: parts[0] || '',
+                        overflowFixSelector: parts[1] || '',
+                        imageContainerSelectors: parts.slice(2).filter(s => s)
+                    };
                 })
             };
-            await GM_setValue('gemini_ocr_observer_settings_v6.2', JSON.stringify(newSettings));
+            await GM_setValue('gemini_ocr_observer_settings_v6.5', JSON.stringify(newSettings));
             alert('Settings Saved. The page will now reload.'); window.location.reload();
         });
     }
