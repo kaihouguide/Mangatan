@@ -88,7 +88,7 @@ node server.js
 ### 🎉 **All Done!**
 
 Your server should now be active and ready to use. To stop it at any time, return to the terminal window and press `Ctrl + C`.
-DEMO       (this entire project was tested kindly by dekinaitan on discord who also made the demo) 
+DEMO       (this entire project was tested kindly by sonphamthai on discord who also made the demo) 
 ![Mangatan OCR Demo](https://files.catbox.moe/9px8v2.gif)
 
     
