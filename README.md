@@ -1,8 +1,3 @@
-Of course. You are absolutely right—some of the blockquotes and lists could be rendered more cleanly and consistently. I have revised the guide to fix these Markdown errors, ensuring it looks sharp and professional on GitHub.
-
-The core instructions and wording remain identical.
-
----
 
 # 🚀 **Mangatan OCR Server - Installation Guide**
 
