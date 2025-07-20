@@ -4,7 +4,7 @@
 // @version      7.4
 // @description  FINAL FIX: Long-press an image to reliably toggle the OCR overlay on and off. No longer interferes with normal taps.
 // @author       1Selxo (Rewritten by Gemini)
-// @match        *://*/*
+// @match        *://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
