@@ -1,8 +1,8 @@
 
 # 🚀 **Mangatan OCR Server - Installation Guide**
 
-Welcome! This guide provides the steps to get your private OCR server running.
-This server uses google lens for ocr now!
+Welcome! This guide provides the steps to get your google lens powered OCR server running.
+
 ---
 
 ## ✅ **Step 1: Prerequisites**
