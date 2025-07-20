@@ -1,5 +1,3 @@
-
-
 # 🚀 Mangatan OCR Server - Installation Guide
 
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
@@ -91,6 +89,12 @@ With all dependencies installed, you're ready to start the OCR server.
     > ```
     > **On Windows:** You can also run the `Runme.bat` file if it's available.
 
+### 💡 Usage
+
+*   **View Translations**: Simply move your mouse cursor over any image or manga panel. The OCR overlay with the translated text will appear automatically.
+*   **Focus on Text**: To make a specific text box clearer, just hover your mouse over it. The focused box will become fully opaque while others dim.
+*   **Configuration**: Click the **`⚙️`** (gear) icon at the bottom-right of the page to open the settings panel. Here you can change the server URL, text orientation, and other options.
+
 <br>
 
 ---
@@ -120,6 +124,12 @@ For Android users, you'll need **Termux**.
     > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/Ocr-Server && npm install express chrome-lens-ocr --ignore-scripts && npm install --cpu=wasm32 sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/sharp && npm uninstall sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/chrome-lens-ocr/node_modules/sharp && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/Ocr-Server && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
     > ```
     > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
+
+### 💡 Usage
+
+*   **Toggle Overlay**: **Long-press** (press and hold for about half a second) on an image or manga panel to show or hide the OCR text overlay.
+*   **Tap-to-Focus**: Once the overlay is visible, **tap** on any specific text box. It will become highlighted and easier to read. Tap it again (or tap the background) to remove the highlight.
+*   **Configuration**: Tap the **`⚙️`** (gear) icon at the bottom-right of the page to open the settings panel, where you can configure the server URL and other display options.
 
 <br>
 
