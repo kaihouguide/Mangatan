@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      22.2
 // @description  Fixes the long-press toggle. A second long-press on the image now correctly hides the overlay by allowing pointer events to pass through the overlay background.
-// @author       1Selxo (Ported & Merged by Gemini)
+// @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
