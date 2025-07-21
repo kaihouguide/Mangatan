@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.5.8
 // @description  Clarifies interaction modes. Overlays now always appear on hover. A setting controls whether individual text boxes are highlighted on hover or on click.
-// @author       1Selxo & Gemini
+// @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
