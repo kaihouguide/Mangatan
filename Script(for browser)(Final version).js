@@ -3,8 +3,8 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.5.4
 // @description  A definitive version with a flicker-free, smart focus-highlighting mode that only fades other boxes when one is selected.
-// @author       1Selxo (modified by Claude, Gemini & Community)
-// @match        *://*/*
+// @author       1Selxo 
+// @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
