@@ -6,8 +6,8 @@ Welcome! This guide provides the steps to get your Google Lens-powered OCR serve
 
 ## Choose Your Platform:
 
-*   [**💻 For PC/Desktop**](#-for-pcdesktop)
-*   [**📱 For Android**](#-for-android)
+*   [**💻 For PC/Desktop**](#for-pcdesktop)
+*   [**📱 For Android**](#for-android)
 
 <br>
 
@@ -45,14 +45,14 @@ Now, from inside the project folder in your terminal:
 
 1.  Run this command to install the necessary libraries:
     > ```sh
-    > npm install express chrome-lens-ocr
+    > npm install express chrome-lens-ocr multer
     > ```
-    > This command downloads both libraries into a `node_modules` folder, making them available to your script.
+    > This command downloads all required libraries into a `node_modules` folder.
 
 2.  Next, configure the `package.json` file:
     *   After the installation is finished, check if a `package.json` file was created.
     *   If it **was created**, open it and **replace its entire content** with the code block below.
-    *   If it **was not created**, you must **make a new file** named `package.json` and paste the code block below into it.
+    *   If it **was not created**, you must **make a new file** named `package.json` and paste the code block below into it. This version includes the new `multer` dependency and the `"type": "module"` fix to prevent warnings.
 
     <details>
     <summary>Click to view package.json content</summary>
@@ -73,7 +73,8 @@ Now, from inside the project folder in your terminal:
       "license": "ISC",
       "dependencies": {
         "express": "^4.17.1",
-        "chrome-lens-ocr": "^1.0.6"
+        "chrome-lens-ocr": "^1.0.6",
+        "multer": "^1.4.5-lts.1"
       }
     }
     ```
@@ -89,11 +90,15 @@ With all dependencies installed, you're ready to start the OCR server.
     > ```
     > **On Windows:** You can also run the `Runme.bat` file if it's available.
 
-### 💡 Usage
+### 💡 Usage & New Features
 
-*   **View Translations**: Simply move your mouse cursor over any image or manga panel. The OCR overlay with the translated text will appear automatically.
-*   **Focus on Text**: To make a specific text box clearer, just hover your mouse over it. The focused box will become fully opaque while others dim.
-*   **Configuration**: Click the **`⚙️`** (gear) icon at the bottom-right of the page to open the settings panel. Here you can change the server URL, text orientation, and other options.
+*   **View Translations**: Simply move your mouse cursor over any image or manga panel. The OCR overlay will appear automatically.
+*   **Focus on Text**: To make a specific text box clearer, just hover your mouse over it.
+*   **Configuration**: Click the **`⚙️`** (gear) icon at the bottom-right to open the settings panel.
+*   **NEW: Persistent Caching**: The server now automatically saves all OCR results to a file named `ocr-cache.json`. Your cache will be reloaded the next time you start the server.
+*   **NEW: Cache Management**:
+    *   **To Export**: Open a new browser tab to `http://127.0.0.1:3000/export-cache` to download your cache file.
+    *   **To Import**: Use the settings panel in the userscript to upload a previously saved `ocr-cache.json` file.
 
 <br>
 
@@ -104,32 +109,32 @@ With all dependencies installed, you're ready to start the OCR server.
 For Android users, you'll need **Termux**.
 
 > **Recommended Browser for Android:**
-> For the best experience, it's recommended to use **Edge Canary**. After installing it, get the **Tampermonkey** extension.
+> For the best experience, it's recommended to use **Edge Canary** or another browser that supports extensions. After installing it, get the **Tampermonkey** extension.
 >
-> To install the userscript, go to Tampermonkey's Dashboard -> Utilities -> "Install from File after you download from this repository. or simply copy paste the code into tampermonkey 
+> To install the userscript, go to Tampermonkey's Dashboard -> Utilities -> "Install from File" after you download from this repository, or simply copy-paste the code.
 
 1.  **Install Termux:**
-    *   Download and install Termux from **[GitHub](https://github.com/termux/termux-app/releases)**.
+    *   Download and install Termux from **[F-Droid](https://f-droid.org/en/packages/com.termux/)** or **[GitHub](https://github.com/termux/termux-app/releases)**.
 
 2.  **Set up Suwayomi-Server in Termux:**
     *   Open a Termux session and run the following command to install and configure Suwayomi-Server. This sets up a simple `suwayomi` command for you to use.
     > ```sh
-    > pkg update -y && pkg install -y openjdk-21 wget && mkdir -p ~/suwayomi/bin && wget -O ~/suwayomi/SuwayomiServer.jar https://github.com/Suwayomi/Suwayomi-Server/releases/download/v2.0.1727/Suwayomi-Server-v2.0.1727.jar && echo -e '#!/data/data/com.termux/files/usr/bin/bash\njava -jar ~/suwayomi/SuwayomiServer.jar' > ~/suwayomi/bin/suwayomi && chmod +x ~/suwayomi/bin/suwayomi && echo 'export PATH="$HOME/suwayomi/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
-    > ```
-    > From now on, you can always run Suwayomi by just typing `suwayomi` in Termux.
+    > pkg update -y && pkg install -y openjdk-21 wget && mkdir -p ~/suwayomi/bin && wget -O ~/suwayomi/SuwayomiServer.jar https://github.com/Suwayomi/Suwayomi-Server/releases/latest/download/Suwayomi-Server-windows-x64.jar && echo -e '#!/data/data/com.termux/files/usr/bin/bash\njava -jar ~/suwayomi/SuwayomiServer.jar' > ~/suwayomi/bin/suwayomi && chmod +x ~/suwayomi/bin/suwayomi && echo 'export PATH="$HOME/suwayomi/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+    > ```    > From now on, you can always run Suwayomi by just typing `suwayomi` in Termux.
 
 3.  **Set up Mangatan OCR Server in Termux:**
-    *   In **another Termux session**, run the following command to download the server, install dependencies, and create a handy `mangatan` startup command.
+    *   In **another Termux session**, run the following command to download the server, install all dependencies (including the required ones for Termux), and create a handy `mangatan` startup command.
     > ```sh
-    > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/Ocr-Server && npm install express chrome-lens-ocr --ignore-scripts && npm install --cpu=wasm32 sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/sharp && npm uninstall sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/chrome-lens-ocr/node_modules/sharp && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/Ocr-Server && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
+    > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/Ocr-Server && npm install express chrome-lens-ocr multer --ignore-scripts && npm install --cpu=wasm32 sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/sharp && npm uninstall sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/chrome-lens-ocr/node_modules/sharp && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/Ocr-Server && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
     > ```
     > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
 
 ### 💡 Usage
-*    open termux and write suwayomi , swipe right open a new session and write mangatan then go to 127.0.0.1:4567 and start reading 
-*   **Toggle Overlay**: **Long-press** (press and hold for about half a second) on an image or manga panel to show or hide the OCR text overlay.
-*   **Tap-to-Focus**: Once the overlay is visible, **tap** on any specific text box. It will become highlighted and easier to read. Tap it again (or tap the background) to remove the highlight.
-*   **Configuration**: Tap the **`⚙️`** (gear) icon at the bottom-right of the page to open the settings panel, where you can configure the server URL and other display options.
+*   Open Termux and write `suwayomi`, swipe right to open a new session, and write `mangatan`. Then go to `127.0.0.1:4567` and start reading.
+*   **Toggle Overlay**: **Long-press** (press and hold for about half a second) on an image to show or hide the OCR text overlay.
+*   **Tap-to-Focus**: Once the overlay is visible, **tap** on any specific text box to highlight it.
+*   **Configuration**: Tap the **`⚙️`** (gear) icon to open the settings panel.
+*   **Note**: The persistent cache file (`ocr-cache.json`) will be stored in the `~/Mangatan/Ocr-Server` directory.
 
 <br>
 
