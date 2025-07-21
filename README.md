@@ -1,3 +1,4 @@
+
 # 🚀 Mangatan OCR Server - Installation Guide
 
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
@@ -6,7 +7,7 @@ Welcome! This guide provides the steps to get your Google Lens-powered OCR serve
 
 ## Choose Your Platform:
 
-*   [**💻 For PC/Desktop**](#for-pcdesktop)
+*   [**💻 For PC/Desktop**](#for-pc-desktop)
 *   [**📱 For Android**](#for-android)
 
 <br>
@@ -120,13 +121,17 @@ For Android users, you'll need **Termux**.
     *   Open a Termux session and run the following command to install and configure Suwayomi-Server. This sets up a simple `suwayomi` command for you to use.
     > ```sh
     > pkg update -y && pkg install -y openjdk-21 wget && mkdir -p ~/suwayomi/bin && wget -O ~/suwayomi/SuwayomiServer.jar https://github.com/Suwayomi/Suwayomi-Server/releases/latest/download/Suwayomi-Server-windows-x64.jar && echo -e '#!/data/data/com.termux/files/usr/bin/bash\njava -jar ~/suwayomi/SuwayomiServer.jar' > ~/suwayomi/bin/suwayomi && chmod +x ~/suwayomi/bin/suwayomi && echo 'export PATH="$HOME/suwayomi/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
-    > ```    > From now on, you can always run Suwayomi by just typing `suwayomi` in Termux.
+    > ```
+    > From now on, you can always run Suwayomi by just typing `suwayomi` in Termux.
 
 3.  **Set up Mangatan OCR Server in Termux:**
-    *   In **another Termux session**, run the following command to download the server, install all dependencies (including the required ones for Termux), and create a handy `mangatan` startup command.
+    *   In **another Termux session**, run the single command below. It has been revised to be more stable and will download the server, install all dependencies by correctly forcing the platform compatibility for Termux, and create a handy `mangatan` startup command.
+    *   Copy the entire command block and paste it into your Termux terminal, then press Enter.
     > ```sh
-    > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/Ocr-Server && npm install express chrome-lens-ocr multer --ignore-scripts && npm install --cpu=wasm32 sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/sharp && npm uninstall sharp && npm install --force @img/sharp-wasm32 && rm -rf node_modules/chrome-lens-ocr/node_modules/sharp && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/Ocr-Server && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
+    > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/Ocr-Server && npm install express chrome-lens-ocr multer --force && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/Ocr-Server && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
     > ```
+    > **Note**: The `--force` flag is the key part of this fix. It instructs the package manager to install `chrome-lens-ocr` even though it reports an unsupported platform, allowing it to run correctly within Termux's environment.
+    >
     > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
 
 ### 💡 Usage
