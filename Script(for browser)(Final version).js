@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v21.5.4 Smart Hover Fix)
+// @name         Automatic Content OCR (Local Overlay Manager - v21.5.8 Highlight Mode Fix)
 // @namespace    http://tampermonkey.net/
-// @version      21.5.4
-// @description  A definitive version with a flicker-free, smart focus-highlighting mode that only fades other boxes when one is selected.
-// @author       1Selxo 
+// @version      21.5.8
+// @description  Clarifies interaction modes. Overlays now always appear on hover. A setting controls whether individual text boxes are highlighted on hover or on click.
+// @author       1Selxo & Gemini
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -27,12 +27,15 @@
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
-        debugMode: true, textOrientation: 'smart', fontSizePercent: 4.5,
+        debugMode: true,
+        textOrientation: 'smart',
+        fontSizePercent: 4.5,
+        interactionMode: 'hover' // 'hover' or 'click' for HIGHLIGHTING
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_5'; // Using the same settings key for compatibility
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_5';
     const ocrCache = new WeakMap();
-    const managedElements = new Map(); // Tracks images and their decoupled overlays
+    const managedElements = new Map(); // Tracks images and their state object {overlay, hideTimeout}
     const managedContainers = new Map();
     const attachedAttributeObservers = new WeakMap();
     let activeSiteConfig = null;
@@ -44,7 +47,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.5.4] ${logEntry}`);
+        console.log(`[OCR v21.5.8] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -81,7 +84,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner v21.5.4...");
+        logDebug("Activating scanner v21.5.8...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -127,13 +130,13 @@
         });
     }
 
-    // --- REFINED DECOUPLED OVERLAY ENGINE with SMART FOCUS LOGIC ---
+    // --- DECOUPLED OVERLAY ENGINE with HIGHLIGHT MODES (v21.5.8) ---
     function displayOcrResults(targetImg) {
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
 
         const overlay = document.createElement('div');
-        overlay.className = 'gemini-ocr-decoupled-overlay is-hidden';
+        overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
 
         data.forEach((item) => {
             const ocrBox = document.createElement('div');
@@ -143,43 +146,51 @@
                 ocrBox.classList.add('gemini-ocr-text-vertical');
             }
             Object.assign(ocrBox.style, {
-                left: `${item.tightBoundingBox.x*100}%`,
-                top: `${item.tightBoundingBox.y*100}%`,
-                width: `${item.tightBoundingBox.width*100}%`,
-                height: `${item.tightBoundingBox.height*100}%`
+                left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`,
+                width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%`
             });
             overlay.appendChild(ocrBox);
         });
 
         document.body.appendChild(overlay);
-        managedElements.set(targetImg, overlay);
+        const state = { overlay: overlay, hideTimeout: null };
+        managedElements.set(targetImg, state);
         logDebug(`Created decoupled overlay for image: ...${targetImg.src.slice(-30)}`);
 
-        // --- NEW Hover Logic ---
-        targetImg.addEventListener('mouseenter', () => {
-            overlay.classList.remove('is-hidden');
-        });
+        // --- UNIVERSAL VISIBILITY LOGIC (Hover-based) ---
+        const show = () => {
+            if (state.hideTimeout) { clearTimeout(state.hideTimeout); state.hideTimeout = null; }
+            state.overlay.classList.remove('is-hidden');
+            state.overlay.classList.add('is-focused'); // is-focused activates the highlight CSS
+        };
+        const hide = () => {
+            state.hideTimeout = setTimeout(() => {
+                state.overlay.classList.add('is-hidden');
+                state.overlay.classList.remove('is-focused');
+            }, 50);
+        };
 
-        targetImg.addEventListener('mouseleave', (e) => {
-            // If the mouse is leaving the image and NOT entering the overlay, hide it.
-            if (!overlay.contains(e.relatedTarget)) {
-                overlay.classList.add('is-hidden');
-                overlay.classList.remove('is-focused'); // Clean up focus state
-            }
-        });
+        const interactiveElements = [targetImg, ...overlay.querySelectorAll('.gemini-ocr-text-box')];
+        interactiveElements.forEach(el => el.addEventListener('mouseenter', show));
+        interactiveElements.forEach(el => el.addEventListener('mouseleave', hide));
 
-        overlay.addEventListener('mouseenter', () => {
-            overlay.classList.remove('is-hidden'); // Ensure it's visible
-            overlay.classList.add('is-focused');
-        });
+        // --- CONDITIONAL HIGHLIGHT LOGIC ---
+        if (settings.interactionMode === 'click') {
+            overlay.addEventListener('click', (e) => {
+                const clickedBox = e.target.closest('.gemini-ocr-text-box');
 
-        overlay.addEventListener('mouseleave', (e) => {
-            // If the mouse is leaving the overlay and NOT going back to the image, hide it.
-            if (e.relatedTarget !== targetImg) {
-                overlay.classList.add('is-hidden');
-                overlay.classList.remove('is-focused'); // Clean up focus state
-            }
-        });
+                // Clear previous highlights
+                overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
+
+                if (clickedBox) { // Clicked on a text box
+                    clickedBox.classList.add('manual-highlight');
+                    overlay.classList.add('has-manual-highlight');
+                } else { // Clicked on the overlay background
+                    overlay.classList.remove('has-manual-highlight');
+                }
+                e.stopPropagation();
+            });
+        }
 
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
@@ -193,30 +204,27 @@
             }
 
             const elementsToDelete = [];
-            for (const [img, overlay] of managedElements.entries()) {
-                if (!document.body.contains(img) || !document.body.contains(overlay)) { elementsToDelete.push(img); continue; }
+            for (const [img, state] of managedElements.entries()) {
+                if (!document.body.contains(img) || !document.body.contains(state.overlay)) { elementsToDelete.push(img); continue; }
                 const rect = img.getBoundingClientRect();
-                if (rect.width === 0 || rect.height === 0) { if (!overlay.classList.contains('is-hidden')) overlay.classList.add('is-hidden'); continue; }
-                Object.assign(overlay.style, {
-                    top: `${rect.top + window.scrollY}px`,
-                    left: `${rect.left + window.scrollX}px`,
-                    width: `${rect.width}px`,
-                    height: `${rect.height}px`
+                if (rect.width === 0 || rect.height === 0) { if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden'); continue; }
+
+                Object.assign(state.overlay.style, {
+                    top: `${rect.top + window.scrollY}px`, left: `${rect.left + window.scrollX}px`,
+                    width: `${rect.width}px`, height: `${rect.height}px`
                 });
                 const fontSize = Math.max(rect.height * (settings.fontSizePercent / 100), 12);
-                overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
+                state.overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
                     box.style.fontSize = `${fontSize}px`;
                 });
             }
             elementsToDelete.forEach(img => {
-                const overlay = managedElements.get(img);
-                if (overlay) overlay.remove();
+                const state = managedElements.get(img);
+                if (state?.overlay) state.overlay.remove();
                 managedElements.delete(img);
                 logDebug(`Garbage collected overlay.`);
             });
-        } catch (error) {
-            logDebug(`Critical error in updateAllOverlays: ${error.message}`);
-        }
+        } catch (error) { logDebug(`Critical error in updateAllOverlays: ${error.message}`); }
         finally {
             overlayUpdateRunning = false;
             if (managedElements.size > 0) requestAnimationFrame(updateAllOverlays);
@@ -225,56 +233,68 @@
 
     // --- UI & EVENT HANDLING ---
     function createUI() {
+        let conditionalStyles = '';
+        if (window.location.href.includes('/chapter/')) {
+            logDebug("URL contains '/chapter/', applying scrollbar fix.");
+            conditionalStyles = `html { overflow: hidden !important; } body { overflow-y: auto !important; overflow-x: hidden !important; }`;
+        }
         GM_addStyle(`
-            /* --- Double Scrollbar Fix --- */
-            html { overflow: hidden !important; }
-            body { overflow-y: auto !important; overflow-x: hidden !important; }
-
-            /* --- Decoupled Overlay & Base Box --- */
+            ${conditionalStyles}
             .gemini-ocr-decoupled-overlay {
-                position: absolute; z-index: 9999; pointer-events: auto;
-                opacity: 1; visibility: visible;
+                position: absolute; z-index: 9999;
+                pointer-events: none !important;
                 transition: opacity 0.15s ease-in-out, visibility 0.15s ease-in-out;
             }
-            .gemini-ocr-decoupled-overlay.is-hidden {
-                opacity: 0; visibility: hidden; pointer-events: none;
-            }
+            .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box {
                 position: absolute; background: rgba(10,25,40,0.85);
                 border: 2px solid rgba(0,191,255,0.6); color: white;
                 text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px);
                 display: flex; align-items: center; justify-content: center; text-align: center;
                 border-radius: 4px; box-sizing: border-box;
-                transition: all 0.2s ease-in-out; user-select: text; cursor: text;
+                transition: all 0.2s ease-in-out; user-select: text; cursor: pointer;
                 opacity: 1; transform: scale(1);
+                pointer-events: auto !important;
             }
-            .gemini-ocr-text-vertical {
-                writing-mode: vertical-rl; text-orientation: upright;
+            .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
+
+            /* --- Highlighted Box Style (shared) --- */
+            .highlighted-box {
+                opacity: 1 !important; transform: scale(1.05); background: rgba(0,191,255,0.9) !important;
+                border-color: rgba(255,255,255,0.9) !important; color: #000 !important; text-shadow: none !important;
+                box-shadow: 0 0 10px rgba(0,191,255,0.5); z-index: 10000;
             }
-
-            /* --- FINAL SMART FOCUS HIGHLIGHTING CSS (v21.5.4) --- */
-            /* This version uses a precise combination of :has() and :not() to avoid CSS conflicts. */
-
-            /* WHEN an overlay contains a hovered box, fade out all child boxes that are NOT the one being hovered. */
-            .gemini-ocr-decoupled-overlay.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover) {
-                opacity: 0.3;
-                background: rgba(10,25,40,0.5);
-                border-color: rgba(0,191,255,0.3);
-            }
-
-            /* This rule highlights the specific box being hovered, and now has no conflicting rules. */
-            .gemini-ocr-decoupled-overlay.is-focused .gemini-ocr-text-box:hover {
-                opacity: 1;
-                transform: scale(1.05);
-                background: rgba(0,191,255,0.9);
-                border-color: rgba(255,255,255,0.9);
-                color: #000;
-                text-shadow: none;
-                box-shadow: 0 0 10px rgba(0,191,255,0.5);
-                z-index: 10000;
+            /* --- Faded Box Style (shared) --- */
+            .faded-box {
+                opacity: 0.3 !important; background: rgba(10,25,40,0.5) !important;
+                border-color: rgba(0,191,255,0.3) !important;
             }
 
-            /* --- Standard UI Elements --- */
+            /* --- "Highlight on Hover" Mode --- */
+            .interaction-mode-hover.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover) {
+                opacity: 0.3; background: rgba(10,25,40,0.5); border-color: rgba(0,191,255,0.3);
+            }
+            .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover {
+                opacity: 1; transform: scale(1.05); background: rgba(0,191,255,0.9);
+                border-color: rgba(255,255,255,0.9); color: #000; text-shadow: none;
+                box-shadow: 0 0 10px rgba(0,191,255,0.5); z-index: 10000;
+            }
+
+            /* --- "Highlight on Click" Mode --- */
+            .interaction-mode-click.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) {
+                opacity: 0.3; background: rgba(10,25,40,0.5); border-color: rgba(0,191,255,0.3);
+            }
+            .interaction-mode-click.is-focused .manual-highlight {
+                opacity: 1; transform: scale(1.05); background: rgba(0,191,255,0.9);
+                border-color: rgba(255,255,255,0.9); color: #000; text-shadow: none;
+                box-shadow: 0 0 10px rgba(0,191,255,0.5), inset 0 0 0 2px white; z-index: 10000;
+            }
+            /* Hint that other boxes are clickable */
+            .interaction-mode-click.is-focused .gemini-ocr-text-box:not(.manual-highlight):hover {
+                border-color: rgba(0,191,255,0.8);
+            }
+
+            /* --- Standard UI --- */
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
             .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1A1D21; border: 1px solid #00BFFF; border-radius: 15px; z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); width: 600px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
             .gemini-ocr-modal.is-hidden { display: none; }
@@ -291,11 +311,15 @@
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-settings-button">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
-                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.4)</h2></div>
+                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.8)</h2></div>
                 <div class="gemini-ocr-modal-content">
                     <h3>Connection</h3><div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
                     <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div>
-                    <h3>Text Display</h3><div class="gemini-ocr-settings-grid"><label for="ocr-text-orientation">Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select><label for="ocr-font-size">Font Size (%):</label><input type="number" id="ocr-font-size" min="1" max="50" step="0.5" style="width: 80px;"></div>
+                    <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid">
+                        <label for="ocr-interaction-mode">Highlight Mode:</label><select id="ocr-interaction-mode"><option value="hover">On Hover</option><option value="click">On Click</option></select>
+                        <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select>
+                        <label for="ocr-font-size">Font Size (%):</label><input type="number" id="ocr-font-size" min="1" max="50" step="0.5" style="width: 80px;">
+                    </div>
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
                     <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="4" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
                 </div>
@@ -308,7 +332,9 @@
         Object.assign(UI, {
             settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'),
             debugModal: document.getElementById('gemini-ocr-debug-modal'), serverUrlInput: document.getElementById('gemini-ocr-server-url'),
-            debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'), textOrientationSelect: document.getElementById('ocr-text-orientation'),
+            debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'),
+            interactionModeSelect: document.getElementById('ocr-interaction-mode'),
+            textOrientationSelect: document.getElementById('ocr-text-orientation'),
             fontSizeInput: document.getElementById('ocr-font-size'), sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'),
             statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
             saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'),
@@ -323,14 +349,12 @@
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
                 ocrServerUrl: UI.serverUrlInput.value.trim(), debugMode: UI.debugModeCheckbox.checked,
-                textOrientation: UI.textOrientationSelect.value, fontSizePercent: parseFloat(UI.fontSizeInput.value) || 4.5,
+                interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value,
+                fontSizePercent: parseFloat(UI.fontSizeInput.value) || 4.5,
                 sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s) }; })
             };
-            try {
-                await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings));
-                alert('Settings Saved. The page will now reload.');
-                window.location.reload();
-            } catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings. Check browser console for details.`); }
+            try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
+            catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
         });
         document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
     }
@@ -347,17 +371,18 @@
 
     // --- SCRIPT INITIALIZATION ---
     async function init() {
-        createUI();
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) { try { settings = { ...settings, ...JSON.parse(loadedSettings) }; } catch(e) { logDebug("Could not parse saved settings."); } }
+        createUI();
         await PersistentCache.load();
         bindUIEvents();
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.debugModeCheckbox.checked = settings.debugMode;
+        UI.interactionModeSelect.value = settings.interactionMode;
         UI.textOrientationSelect.value = settings.textOrientation;
         UI.fontSizeInput.value = settings.fontSizePercent;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         activateScanner();
     }
-    init().catch(e => console.error(`[OCR v21.5.4] Fatal Initialization Error: ${e.message}`));
+    init().catch(e => console.error(`[OCR v21.5.8] Fatal Initialization Error: ${e.message}`));
 })();
