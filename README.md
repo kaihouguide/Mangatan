@@ -126,7 +126,7 @@ For Android users, you'll need **Termux**.
     > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
 
 ### 💡 Usage
-
+*    open termux and write suwayomi , swipe left open a new session and write mangatan then go to 127.0.0.1:4567 and start reading 
 *   **Toggle Overlay**: **Long-press** (press and hold for about half a second) on an image or manga panel to show or hide the OCR text overlay.
 *   **Tap-to-Focus**: Once the overlay is visible, **tap** on any specific text box. It will become highlighted and easier to read. Tap it again (or tap the background) to remove the highlight.
 *   **Configuration**: Tap the **`⚙️`** (gear) icon at the bottom-right of the page to open the settings panel, where you can configure the server URL and other display options.
