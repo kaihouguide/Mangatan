@@ -106,7 +106,7 @@ For Android users, you'll need **Termux**.
 > **Recommended Browser for Android:**
 > For the best experience, it's recommended to use **Edge Canary**. After installing it, get the **Tampermonkey** extension.
 >
-> To install the userscript, go to Tampermonkey's Dashboard -> Utilities -> "Install from URL" and paste the link to the `.user.js` file from this repository.
+> To install the userscript, go to Tampermonkey's Dashboard -> Utilities -> "Install from File after you download from this repository. or simply copy paste the code into tampermonkey 
 
 1.  **Install Termux:**
     *   Download and install Termux from **[GitHub](https://github.com/termux/termux-app/releases)**.
