@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v21.5.8 Highlight Mode Fix)
+// @name         Automatic Content OCR (Local Overlay Manager - v21.5.9 Default Fix)
 // @namespace    http://tampermonkey.net/
 // @version      21.5.9
-// @description  Clarifies interaction modes. Overlays now always appear on hover. A setting controls whether individual text boxes are highlighted on hover or on click.
-// @author       1Selxo
+// @description  Clarifies interaction modes. Overlays now always appear on hover. A setting controls whether individual text boxes are highlighted on hover or on click. Includes updated default selectors for Suwayomi.
+// @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -17,15 +17,14 @@
     // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
-        // MODIFICATION: The default site configuration has been updated with your provided selectors.
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                'div.muiltr-u43rde',
-                'div.muiltr-1r1or1s',
-                'div.muiltr-masn8',
-                'div.muiltr-79elbk',
-                'div.muiltr-18sieki'
+                'div.muiltr-masn8', // Old Continuous Vertical
+                'div.muiltr-79elbk', // Webtoon
+                'div.muiltr-u43rde', // Single Page
+                'div.muiltr-1r1or1s', // Double Page
+                'div.muiltr-18sieki'  // New Continuous Vertical (from your HTML)
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
@@ -35,7 +34,7 @@
         interactionMode: 'hover' // 'hover' or 'click' for HIGHLIGHTING
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_5';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_5'; // Keeping old key to not lose user settings
     const ocrCache = new WeakMap();
     const managedElements = new Map(); // Tracks images and their state object {overlay, hideTimeout}
     const managedContainers = new Map();
@@ -132,7 +131,7 @@
         });
     }
 
-    // --- DECOUPLED OVERLAY ENGINE with HIGHLIGHT MODES (v21.5.8) ---
+    // --- DECOUPLED OVERLAY ENGINE with HIGHLIGHT MODES (v21.5.9) ---
     function displayOcrResults(targetImg) {
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
@@ -342,7 +341,7 @@
                         <label for="ocr-font-size">Font Size (%):</label><input type="number" id="ocr-font-size" min="1" max="50" step="0.5" style="width: 80px;">
                     </div>
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
-                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="4" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
+                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug Logs</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
             </div>
@@ -393,10 +392,32 @@
     // --- SCRIPT INITIALIZATION ---
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
-        if (loadedSettings) { try { settings = { ...settings, ...JSON.parse(loadedSettings) }; } catch(e) { logDebug("Could not parse saved settings."); } }
+        // Load default settings first, then overwrite with saved settings if they exist.
+        // This ensures new default selectors are present if the user hasn't saved over them.
+        if (loadedSettings) {
+            try {
+                const parsedSettings = JSON.parse(loadedSettings);
+                // Smartly merge site configurations
+                const defaultSite = settings.sites[0];
+                const loadedSite = parsedSettings.sites?.find(s => s.urlPattern === defaultSite.urlPattern);
+
+                settings = { ...settings, ...parsedSettings };
+
+                if (loadedSite) {
+                    // Combine default and saved selectors, removing duplicates
+                    const combinedSelectors = [...defaultSite.imageContainerSelectors, ...loadedSite.imageContainerSelectors];
+                    loadedSite.imageContainerSelectors = [...new Set(combinedSelectors)];
+                    settings.sites = parsedSettings.sites;
+                }
+
+            } catch(e) {
+                logDebug("Could not parse saved settings. Using defaults.");
+            }
+        }
         createUI();
         await PersistentCache.load();
         bindUIEvents();
+        // Populate the UI with the final, potentially merged, settings
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.debugModeCheckbox.checked = settings.debugMode;
         UI.interactionModeSelect.value = settings.interactionMode;
