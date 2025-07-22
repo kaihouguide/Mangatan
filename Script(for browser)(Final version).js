@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v21.5.9 Default Fix)
+// @name         Automatic Content OCR (Local Overlay Manager - v21.5.8 Highlight Mode Fix)
 // @namespace    http://tampermonkey.net/
-// @version      21.5.9
-// @description  Clarifies interaction modes. Overlays now always appear on hover. A setting controls whether individual text boxes are highlighted on hover or on click. Includes updated default selectors for Suwayomi.
-// @author       1Selxo 
+// @version      21.5.8
+// @description  Clarifies interaction modes. Overlays now always appear on hover. A setting controls whether individual text boxes are highlighted on hover or on click.
+// @author       1Selxo
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -20,12 +20,10 @@
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                // Add all potential container selectors here. The script will find the correct one.
-                'div.muiltr-u43rde',  // Single Page
+                'div.muiltr-masn8', // Continuous Vertical
+                'div.muiltr-79elbk', // Webtoon
+                'div.muiltr-u43rde', // Single Page
                 'div.muiltr-1r1or1s', // Double Page
-                'div.muiltr-masn8',  // Old Continuous Vertical
-                'div.muiltr-79elbk',  // Webtoon
-                'div.muiltr-18sieki'  // New Continuous Vertical (from your HTML)
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
@@ -35,7 +33,7 @@
         interactionMode: 'hover' // 'hover' or 'click' for HIGHLIGHTING
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_5'; // Keeping old key to not lose user settings
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_5';
     const ocrCache = new WeakMap();
     const managedElements = new Map(); // Tracks images and their state object {overlay, hideTimeout}
     const managedContainers = new Map();
@@ -49,7 +47,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.5.9] ${logEntry}`);
+        console.log(`[OCR v21.5.8] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -86,7 +84,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner v21.5.9...");
+        logDebug("Activating scanner v21.5.8...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -147,9 +145,28 @@
             if (settings.textOrientation === 'forceVertical' || (settings.textOrientation === 'smart' && item.tightBoundingBox.height > item.tightBoundingBox.width)) {
                 ocrBox.classList.add('gemini-ocr-text-vertical');
             }
+
+            let boxWidth = `${item.tightBoundingBox.width*100}%`
+            let boxHeight = `${item.tightBoundingBox.height*100}%`
+
+            let span = document.createElement('span');
+            span.style.height = "auto";
+            span.style.width = "auto";
+            span.style.whiteSpace = "preserve nowrap";
+            span.textContent = item.text
+            let spanStyle = window.getComputedStyle(span);
+
+            if (ocrBox.classList.contains('gemini-ocr-text-vertical')){
+                boxHeight = spanStyle.getPropertyValue('height');
+            }
+            else {
+                boxWidth = spanStyle.getPropertyValue('width');
+            }
+            span.remove();
+
             Object.assign(ocrBox.style, {
                 left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`,
-                width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%`
+                width: boxWidth, height: boxHeight
             });
             overlay.appendChild(ocrBox);
         });
@@ -255,7 +272,7 @@
                 display: flex; align-items: center; justify-content: center; text-align: center;
                 border-radius: 4px; box-sizing: border-box;
                 transition: all 0.2s ease-in-out; user-select: text; cursor: pointer;
-                opacity: 1; transform: scale(1);
+                opacity: 1; transform: scale(1); white-space: preserve nowrap;
                 pointer-events: auto !important;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
@@ -313,7 +330,7 @@
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-settings-button">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
-                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.9)</h2></div>
+                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.8)</h2></div>
                 <div class="gemini-ocr-modal-content">
                     <h3>Connection</h3><div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
                     <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div>
@@ -323,7 +340,7 @@
                         <label for="ocr-font-size">Font Size (%):</label><input type="number" id="ocr-font-size" min="1" max="50" step="0.5" style="width: 80px;">
                     </div>
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
-                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
+                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="4" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug Logs</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
             </div>
@@ -374,32 +391,10 @@
     // --- SCRIPT INITIALIZATION ---
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
-        // Load default settings first, then overwrite with saved settings if they exist.
-        // This ensures new default selectors are present if the user hasn't saved over them.
-        if (loadedSettings) {
-            try {
-                const parsedSettings = JSON.parse(loadedSettings);
-                // Smartly merge site configurations
-                const defaultSite = settings.sites[0];
-                const loadedSite = parsedSettings.sites?.find(s => s.urlPattern === defaultSite.urlPattern);
-                
-                settings = { ...settings, ...parsedSettings };
-
-                if (loadedSite) {
-                    // Combine default and saved selectors, removing duplicates
-                    const combinedSelectors = [...defaultSite.imageContainerSelectors, ...loadedSite.imageContainerSelectors];
-                    loadedSite.imageContainerSelectors = [...new Set(combinedSelectors)];
-                    settings.sites = parsedSettings.sites;
-                }
-                
-            } catch(e) {
-                logDebug("Could not parse saved settings. Using defaults.");
-            }
-        }
+        if (loadedSettings) { try { settings = { ...settings, ...JSON.parse(loadedSettings) }; } catch(e) { logDebug("Could not parse saved settings."); } }
         createUI();
         await PersistentCache.load();
         bindUIEvents();
-        // Populate the UI with the final, potentially merged, settings
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.debugModeCheckbox.checked = settings.debugMode;
         UI.interactionModeSelect.value = settings.interactionMode;
@@ -408,5 +403,5 @@
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         activateScanner();
     }
-    init().catch(e => console.error(`[OCR v21.5.9] Fatal Initialization Error: ${e.message}`));
+    init().catch(e => console.error(`[OCR v21.5.8] Fatal Initialization Error: ${e.message}`));
 })();
