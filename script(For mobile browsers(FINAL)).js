@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Mobile Port v22.5.8 Synced)
+// @name         Automatic Content OCR (Mobile Port v23.5.9)
 // @namespace    http://tampermonkey.net/
-// @version      22.5.8
-// @description  Synced with PC v21.5.8 core logic. A long-press toggles the overlay; a second long-press hides it. Tap text boxes to focus.
+// @version      23.5.9
+// @description  Fully synced with PC v21.5.9. Long-press toggles overlay visibility. Tap a text box to highlight it. Includes smart setting merges and dynamic vertical text sizing.
 // @author       1Selxo
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
@@ -20,10 +20,11 @@
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                'div.muiltr-masn8', // Continuous Vertical
+                'div.muiltr-masn8', // Old Continuous Vertical
                 'div.muiltr-79elbk', // Webtoon
                 'div.muiltr-u43rde', // Single Page
                 'div.muiltr-1r1or1s', // Double Page
+                'div.muiltr-18sieki'  // New Continuous Vertical
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
@@ -32,9 +33,9 @@
         fontSizePercent: 4.5,
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_mobile'; // Consistent mobile settings key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v23_mobile';
     const ocrCache = new WeakMap();
-    const managedElements = new Map(); // Tracks images and their state object {overlay, hideTimeout}
+    const managedElements = new Map();
     const managedContainers = new Map();
     const attachedAttributeObservers = new WeakMap();
     let activeSiteConfig = null;
@@ -47,12 +48,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.5.8 Mobile] ${logEntry}`);
+        console.log(`[OCR v23.5.9 Mobile] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
     const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v22_5', // Updated cache key for synced version
+        CACHE_KEY: 'gemini_ocr_cache_v23_5',
         data: null,
         async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
         async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
@@ -61,7 +62,7 @@
         async set(key, value) { if(this.data) { this.data.set(key, value); await this.save(); } },
     };
 
-    // --- CORE LOGIC (Synced with v21.5.8) ---
+    // --- CORE LOGIC (v21 Engine) ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -84,7 +85,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner v22.5.8 (Mobile Port)...");
+        logDebug("Activating scanner v23.5.9 (Mobile Port)...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -130,7 +131,7 @@
         });
     }
 
-    // --- DECOUPLED OVERLAY ENGINE with MOBILE INTERACTION LOGIC ---
+    // --- DECOUPLED OVERLAY ENGINE with MOBILE INTERACTION (v23) ---
     function displayOcrResults(targetImg) {
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
@@ -145,17 +146,30 @@
             if (settings.textOrientation === 'forceVertical' || (settings.textOrientation === 'smart' && item.tightBoundingBox.height > item.tightBoundingBox.width)) {
                 ocrBox.classList.add('gemini-ocr-text-vertical');
             }
+
+            // Dynamic sizing from PC v21.5.9
+            let boxWidth = `${item.tightBoundingBox.width*100}%`;
+            let boxHeight = `${item.tightBoundingBox.height*100}%`;
+            let span = document.createElement('span');
+            span.style.cssText = "position:absolute; visibility:hidden; font:inherit; font-size:1em; white-space:nowrap;";
+            span.textContent = item.text;
+            overlay.appendChild(span); // Add to DOM to calculate size
+            let spanStyle = window.getComputedStyle(span);
+            if (ocrBox.classList.contains('gemini-ocr-text-vertical')){
+                boxHeight = spanStyle.getPropertyValue('height');
+            } else {
+                boxWidth = spanStyle.getPropertyValue('width');
+            }
+            span.remove();
+
             Object.assign(ocrBox.style, {
-                left: `${item.tightBoundingBox.x*100}%`,
-                top: `${item.tightBoundingBox.y*100}%`,
-                width: `${item.tightBoundingBox.width*100}%`,
-                height: `${item.tightBoundingBox.height*100}%`
+                left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`,
+                width: boxWidth, height: boxHeight
             });
             overlay.appendChild(ocrBox);
         });
 
         document.body.appendChild(overlay);
-        // Use the same state object structure as PC for consistency
         const state = { overlay: overlay, hideTimeout: null };
         managedElements.set(targetImg, state);
         logDebug(`Created decoupled overlay for image: ...${targetImg.src.slice(-30)}`);
@@ -165,59 +179,43 @@
         let longPressTriggered = false;
 
         const onHold = () => {
-            longPressTriggered = true; // Mark that a long press happened
+            longPressTriggered = true;
             const isNowVisible = overlay.classList.toggle('is-visible-on-mobile');
             logDebug(`OCR overlay toggled ${isNowVisible ? 'ON' : 'OFF'} via long-press.`);
-
-            // If we just hid the overlay, remove any focused states
             if (!isNowVisible) {
-                const focusedBox = overlay.querySelector('.gemini-ocr-text-box.focused');
-                if (focusedBox) {
-                    focusedBox.classList.remove('focused');
-                    overlay.classList.remove('is-focused');
-                }
+                overlay.classList.remove('has-manual-highlight');
+                overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
             }
         };
 
-        const pressDown = () => {
-            longPressTriggered = false; // Reset on new touch
+        const pressDown = (e) => {
+            longPressTriggered = false;
             pressTimer = setTimeout(onHold, LONG_PRESS_DURATION);
         };
         const pressUp = () => clearTimeout(pressTimer);
-        const handleClick = (e) => {
-            // Prevent click events from firing immediately after a long press
-            if (longPressTriggered) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-        };
+        const handleClick = (e) => { if (longPressTriggered) { e.preventDefault(); e.stopPropagation(); } };
 
         targetImg.addEventListener("touchstart", pressDown, { passive: true });
         targetImg.addEventListener("touchend", pressUp);
         targetImg.addEventListener("touchcancel", pressUp);
-        targetImg.addEventListener("touchmove", pressUp); // Cancel long press if finger moves
-        targetImg.addEventListener("contextmenu", e => e.preventDefault()); // Block context menu
+        targetImg.addEventListener("touchmove", pressUp);
+        targetImg.addEventListener("contextmenu", e => e.preventDefault());
         targetImg.addEventListener("click", handleClick, { capture: true });
 
-        // --- TAP-TO-FOCUS LOGIC on the OVERLAY ---
+        // --- TAP-TO-FOCUS LOGIC (from PC "click" mode) ---
         overlay.addEventListener('click', (e) => {
             const tappedBox = e.target.closest('.gemini-ocr-text-box');
-            if (!tappedBox) return; // Ignore clicks on the overlay background
+            if (!tappedBox) return;
+            e.stopPropagation();
 
-            e.stopPropagation(); // Stop the event from bubbling further
-            const currentlyFocused = overlay.querySelector('.gemini-ocr-text-box.focused');
+            const isAlreadyHighlighted = tappedBox.classList.contains('manual-highlight');
+            overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
 
-            if (tappedBox === currentlyFocused) {
-                // If tapping the already focused box, unfocus it
-                tappedBox.classList.remove('focused');
-                overlay.classList.remove('is-focused');
-                logDebug('Unfocused text box.');
+            if (isAlreadyHighlighted) {
+                overlay.classList.remove('has-manual-highlight');
             } else {
-                // If tapping a new box, switch focus
-                if (currentlyFocused) currentlyFocused.classList.remove('focused');
-                tappedBox.classList.add('focused');
-                overlay.classList.add('is-focused');
-                logDebug('Focused new text box.');
+                tappedBox.classList.add('manual-highlight');
+                overlay.classList.add('has-manual-highlight');
             }
         });
 
@@ -234,41 +232,31 @@
 
             const elementsToDelete = [];
             for (const [img, state] of managedElements.entries()) {
-                // Garbage collection logic from PC v21.5.8
-                if (!document.body.contains(img) || !document.body.contains(state.overlay)) {
-                    elementsToDelete.push(img);
-                    continue;
-                }
+                if (!document.body.contains(img) || !document.body.contains(state.overlay)) { elementsToDelete.push(img); continue; }
                 const rect = img.getBoundingClientRect();
-                // Hide overlay if image is not visible, but respect the mobile toggle
                 if (rect.width === 0 || rect.height === 0) {
-                    if (state.overlay.classList.contains('is-visible-on-mobile')) {
+                     if (state.overlay.classList.contains('is-visible-on-mobile')) {
                          state.overlay.classList.remove('is-visible-on-mobile');
-                    }
+                     }
                     continue;
                 }
 
                 Object.assign(state.overlay.style, {
-                    top: `${rect.top + window.scrollY}px`,
-                    left: `${rect.left + window.scrollX}px`,
-                    width: `${rect.width}px`,
-                    height: `${rect.height}px`
+                    top: `${rect.top + window.scrollY}px`, left: `${rect.left + window.scrollX}px`,
+                    width: `${rect.width}px`, height: `${rect.height}px`
                 });
                 const fontSize = Math.max(rect.height * (settings.fontSizePercent / 100), 12);
                 state.overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
                     box.style.fontSize = `${fontSize}px`;
                 });
             }
-            // Perform deletions after iterating
             elementsToDelete.forEach(img => {
                 const state = managedElements.get(img);
-                if (state?.overlay) state.overlay.remove(); // Safely remove overlay
+                if (state?.overlay) state.overlay.remove();
                 managedElements.delete(img);
                 logDebug(`Garbage collected overlay.`);
             });
-        } catch (error) {
-            logDebug(`Critical error in updateAllOverlays: ${error.message}`);
-        }
+        } catch (error) { logDebug(`Critical error in updateAllOverlays: ${error.message}`); }
         finally {
             overlayUpdateRunning = false;
             if (managedElements.size > 0) requestAnimationFrame(updateAllOverlays);
@@ -284,16 +272,14 @@
         }
         GM_addStyle(`
             ${conditionalStyles}
-            /* --- Decoupled Overlay & Base Box --- */
+            /* --- Base Overlay State --- */
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9999;
-                opacity: 0; visibility: hidden; pointer-events: none; /* Hidden and non-interactive by default */
-                transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+                opacity: 0; visibility: hidden; pointer-events: none;
+                transition: opacity 0.2s ease, visibility 0.2s ease;
             }
-            /* Class toggled by long-press to show the overlay */
             .gemini-ocr-decoupled-overlay.is-visible-on-mobile {
                 opacity: 1; visibility: visible;
-                /* pointer-events remains 'none' so the underlying image can be long-pressed again to hide */
             }
             .gemini-ocr-text-box {
                 position: absolute; background: rgba(10,25,40,0.85);
@@ -302,21 +288,21 @@
                 display: flex; align-items: center; justify-content: center; text-align: center;
                 border-radius: 4px; box-sizing: border-box;
                 transition: all 0.2s ease-in-out; user-select: text;
-                opacity: 1; transform: scale(1);
-                pointer-events: auto; /* IMPORTANT: Children MUST be interactive for tap-to-focus */
+                transform: scale(1); white-space: preserve nowrap;
+                pointer-events: auto;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
 
-            /* --- MOBILE TAP-TO-FOCUS HIGHLIGHTING --- */
-            /* When any box is focused, fade out the others */
-            .gemini-ocr-decoupled-overlay.is-focused .gemini-ocr-text-box {
+            /* --- MOBILE TAP-TO-HIGHLIGHT LOGIC --- */
+            /* When an item is tapped, fade out the others */
+            .gemini-ocr-decoupled-overlay.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) {
                 opacity: 0.3; background: rgba(10,25,40,0.5); border-color: rgba(0,191,255,0.3);
             }
-            /* Style for the single focused box */
-            .gemini-ocr-decoupled-overlay.is-focused .gemini-ocr-text-box.focused {
+            /* Style for the single highlighted box */
+            .gemini-ocr-decoupled-overlay .manual-highlight {
                 opacity: 1; transform: scale(1.05); background: rgba(0,191,255,0.9);
                 border-color: rgba(255,255,255,0.9); color: #000; text-shadow: none;
-                box-shadow: 0 0 10px rgba(0,191,255,0.5); z-index: 10000;
+                box-shadow: 0 0 10px rgba(0,191,255,0.5), inset 0 0 0 2px white; z-index: 10000;
             }
 
             /* --- Standard UI Elements --- */
@@ -332,42 +318,32 @@
             .gemini-ocr-modal button { padding: 10px 18px; background-color: #00BFFF; border: none; border-radius: 5px; color: #1A1D21; cursor: pointer; font-weight: bold; }
             #gemini-ocr-server-status { padding: 10px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
-
-            /* Mobile Responsiveness */
-            @media (max-width: 700px) {
-                .gemini-ocr-modal { padding: 0; }
-                .gemini-ocr-modal-content { padding: 15px; }
-                .gemini-ocr-settings-grid { display: block; }
-                .gemini-ocr-settings-grid > label { display: block; margin-top: 15px; margin-bottom: 5px; font-weight: bold; }
-                .gemini-ocr-modal-footer { flex-wrap: wrap; justify-content: space-between; }
-                #gemini-ocr-debug-btn { margin-right: 0; }
-            }
         `);
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-settings-button">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
-                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v22.5.8 Mobile)</h2></div>
+                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v23.5.9 Mobile)</h2></div>
                 <div class="gemini-ocr-modal-content">
                     <h3>Connection</h3><div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
                     <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div>
-                    <h3>Text Display</h3><div class="gemini-ocr-settings-grid">
-                        <label for="ocr-text-orientation">Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select>
+                    <h3>Display</h3><div class="gemini-ocr-settings-grid">
+                        <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select>
                         <label for="ocr-font-size">Font Size (%):</label><input type="number" id="ocr-font-size" min="1" max="50" step="0.5" style="width: 80px;">
                     </div>
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
-                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="4" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
+                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug Logs</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
             </div>
             <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div>
         `);
     }
-
     function bindUIEvents() {
         Object.assign(UI, {
             settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'),
             debugModal: document.getElementById('gemini-ocr-debug-modal'), serverUrlInput: document.getElementById('gemini-ocr-server-url'),
-            debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'), textOrientationSelect: document.getElementById('ocr-text-orientation'),
+            debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'),
+            textOrientationSelect: document.getElementById('ocr-text-orientation'),
             fontSizeInput: document.getElementById('ocr-font-size'), sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'),
             statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
             saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'),
@@ -385,15 +361,11 @@
                 textOrientation: UI.textOrientationSelect.value, fontSizePercent: parseFloat(UI.fontSizeInput.value) || 4.5,
                 sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s) }; })
             };
-            try {
-                await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings));
-                alert('Settings Saved. The page will now reload.');
-                window.location.reload();
-            } catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
+            try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
+            catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
         });
         document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
     }
-
     function checkServerStatus() {
         const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return;
         UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
@@ -408,10 +380,26 @@
     // --- SCRIPT INITIALIZATION ---
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
-        if (loadedSettings) { try { settings = { ...settings, ...JSON.parse(loadedSettings) }; } catch(e) { logDebug("Could not parse saved settings."); } }
+        // Smartly merge settings to ensure new defaults are included
+        if (loadedSettings) {
+            try {
+                const parsedSettings = JSON.parse(loadedSettings);
+                const defaultSite = settings.sites[0];
+                const loadedSite = parsedSettings.sites?.find(s => s.urlPattern === defaultSite.urlPattern);
+                settings = { ...settings, ...parsedSettings };
+                if (loadedSite) {
+                    const combinedSelectors = [...defaultSite.imageContainerSelectors, ...loadedSite.imageContainerSelectors];
+                    loadedSite.imageContainerSelectors = [...new Set(combinedSelectors)];
+                    settings.sites = parsedSettings.sites;
+                }
+            } catch(e) {
+                logDebug("Could not parse saved settings. Using defaults.");
+            }
+        }
         createUI();
         await PersistentCache.load();
         bindUIEvents();
+        // Populate the UI with the final, potentially merged, settings
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.debugModeCheckbox.checked = settings.debugMode;
         UI.textOrientationSelect.value = settings.textOrientation;
@@ -419,5 +407,5 @@
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         activateScanner();
     }
-    init().catch(e => console.error(`[OCR v22.5.8 Mobile] Fatal Initialization Error: ${e.message}`));
+    init().catch(e => console.error(`[OCR v23.5.9 Mobile] Fatal Initialization Error: ${e.message}`));
 })();
