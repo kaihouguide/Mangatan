@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Local Overlay Manager - v21.5.8 Highlight Mode Fix)
 // @namespace    http://tampermonkey.net/
-// @version      21.5.8
+// @version      21.5.9
 // @description  Clarifies interaction modes. Overlays now always appear on hover. A setting controls whether individual text boxes are highlighted on hover or on click.
 // @author       1Selxo
 // @match        http://127.0.0.1/*
@@ -17,13 +17,15 @@
     // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
+        // MODIFICATION: The default site configuration has been updated with your provided selectors.
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                'div.muiltr-masn8', // Continuous Vertical
-                'div.muiltr-79elbk', // Webtoon
-                'div.muiltr-u43rde', // Single Page
-                'div.muiltr-1r1or1s', // Double Page
+                'div.muiltr-u43rde',
+                'div.muiltr-1r1or1s',
+                'div.muiltr-masn8',
+                'div.muiltr-79elbk',
+                'div.muiltr-18sieki'
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
@@ -47,7 +49,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.5.8] ${logEntry}`);
+        console.log(`[OCR v21.5.9] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -84,7 +86,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner v21.5.8...");
+        logDebug("Activating scanner v21.5.9...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -330,7 +332,7 @@
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-settings-button">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
-                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.8)</h2></div>
+                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.9)</h2></div>
                 <div class="gemini-ocr-modal-content">
                     <h3>Connection</h3><div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
                     <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div>
@@ -403,5 +405,5 @@
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         activateScanner();
     }
-    init().catch(e => console.error(`[OCR v21.5.8] Fatal Initialization Error: ${e.message}`));
+    init().catch(e => console.error(`[OCR v21.5.9] Fatal Initialization Error: ${e.message}`));
 })();
