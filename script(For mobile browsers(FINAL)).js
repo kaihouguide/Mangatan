@@ -24,7 +24,8 @@
                 'div.muiltr-79elbk', // Webtoon
                 'div.muiltr-u43rde', // Single Page
                 'div.muiltr-1r1or1s', // Double Page
-                'div.muiltr-18sieki'  // New Continuous Vertical
+                'div.muiltr-18sieki', // New Continuous Vertical
+                'div.muiltr-cns6dc'  // Added Selector
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
