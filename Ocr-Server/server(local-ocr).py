@@ -1,9 +1,8 @@
-
 import json
 import os
 import asyncio
 import io
-import math # Import the math library for angle calculations
+import math
 
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
@@ -52,120 +51,56 @@ def save_cache():
     with open(CACHE_FILE_PATH, 'w', encoding='utf-8') as f:
         json.dump(ocr_cache, f, indent=2, ensure_ascii=False)
 
-# --- Final, Advanced Grouping and Orientation Logic ---
+# --- NEW: Simplified Transformation without Grouping ---
 
 def transform_ocr_data(oneocr_result, image_size):
     """
-    Transforms OCR data using a multi-stage process with statistical gap analysis
-    to handle complex manga layouts with high accuracy.
+    Transforms OCR data by treating every detected line as a separate text block.
+    All grouping logic has been removed for maximum reliability.
     """
-    if not oneocr_result or 'lines' not in oneocr_result:
+    if not oneocr_result or not oneocr_result.get('lines'):
         return []
 
     image_width, image_height = image_size
-    if image_width == 0 or image_height == 0: return []
+    if image_width == 0 or image_height == 0:
+        return []
 
-    # Helper function to get the center of a 4-point bounding box.
-    def get_center(rect):
-        return ((rect['x1'] + rect['x3']) / 2, (rect['y1'] + rect['y3']) / 2)
-
-    # 1. Pre-process all lines into a standard format.
-    lines = []
+    output_json = []
+    
+    # Process each line from the OCR result independently.
     for line in oneocr_result.get('lines', []):
         text = line.get('text', '').strip()
         rect = line.get('bounding_rect')
-        if not rect or not text or not line.get('words'): continue
         
+        if not rect or not text or not line.get('words'):
+            continue
+
         x_coords = [rect['x1'], rect['x2'], rect['x3'], rect['x4']]
         y_coords = [rect['y1'], rect['y2'], rect['y3'], rect['y4']]
-        box = {'x_min': min(x_coords), 'y_min': min(y_coords), 'x_max': max(x_coords), 'y_max': max(y_coords)}
         
-        lines.append({
-            'text': text, 'box': box, 'words': line['words'],
-            'width': box['x_max'] - box['x_min'], 'height': box['y_max'] - box['y_min'],
-        })
+        x_min = min(x_coords)
+        y_min = min(y_coords)
+        x_max = max(x_coords)
+        y_max = max(y_coords)
 
-    if not lines: return []
+        width = x_max - x_min
+        height = y_max - y_min
 
-    # 2. Stage 1: Group lines into distinct vertical columns.
-    columns = []
-    lines.sort(key=lambda l: l['box']['x_min'])
-    for line in lines:
-        if not columns or abs(line['box']['x_min'] - (sum(l['box']['x_min'] for l in columns[-1]) / len(columns[-1]))) > line['width'] * 1.5:
-            columns.append([line])
-        else:
-            columns[-1].append(line)
+        # Determine orientation based on the line's aspect ratio.
+        snapped_angle = 90.0 if height > width else 0.0
 
-    # 3. Stage 2: Within each column, perform statistical analysis to group into bubbles.
-    final_bubbles = []
-    for column in columns:
-        column.sort(key=lambda l: l['box']['y_min'])
-        if not column: continue
-
-        gaps = [column[i]['box']['y_min'] - column[i-1]['box']['y_max'] for i in range(1, len(column))]
-        
-        break_threshold = float('inf')
-        if len(gaps) > 1:
-            avg_gap = sum(gaps) / len(gaps)
-            std_dev = (sum([(g - avg_gap) ** 2 for g in gaps]) / len(gaps)) ** 0.5
-            break_threshold = avg_gap + (std_dev * 1.2)
-        elif gaps:
-            break_threshold = gaps[0] * 2.0
-
-        current_bubble = [column[0]]
-        for i in range(1, len(column)):
-            vertical_gap = column[i]['box']['y_min'] - column[i-1]['box']['y_max']
-            if vertical_gap < break_threshold and vertical_gap < column[i-1]['height'] * 2.0:
-                current_bubble.append(column[i])
-            else:
-                final_bubbles.append(current_bubble)
-                current_bubble = [column[i]]
-        final_bubbles.append(current_bubble)
-
-    # 4. Final Formatting with True Angle Calculation and Snapping.
-    output_json = []
-    snap_angles = [0, 30, 45, 60, 90, 120, 135, 150, 180, -30, -45, -60, -90, -120, -135, -150, -180]
-
-    for bubble in final_bubbles:
-        if not bubble: continue
-        
-        all_words = [word for line in bubble for word in line['words']]
-        if not all_words: continue
-
-        all_words.sort(key=lambda w: (get_center(w['bounding_rect'])[1], get_center(w['bounding_rect'])[0]))
-        
-        angle = 0.0
-        if len(all_words) > 1:
-            start_center = get_center(all_words[0]['bounding_rect'])
-            end_center = get_center(all_words[-1]['bounding_rect'])
-            dx, dy = end_center[0] - start_center[0], end_center[1] - start_center[1]
-            if dx != 0 or dy != 0: angle = math.degrees(math.atan2(dy, dx))
-        else:
-            if bubble[0]['height'] > bubble[0]['width']: angle = 90.0
-        
-        snapped_angle = min(snap_angles, key=lambda x: abs(x - angle))
-        
-        if abs(snapped_angle) > 45 and abs(snapped_angle) < 135:
-            bubble.sort(key=lambda l: l['box']['y_min'])
-        else:
-            bubble.sort(key=lambda l: l['box']['x_min'])
-
-        full_text = " ".join([l['text'] for l in bubble])
-        
-        x_min = min(l['box']['x_min'] for l in bubble)
-        y_min = min(l['box']['y_min'] for l in bubble)
-        x_max = max(l['box']['x_max'] for l in bubble)
-        y_max = max(l['box']['y_max'] for l in bubble)
-        avg_confidence = sum(line['words'][0].get('confidence', 0.98) for line in bubble) / len(bubble)
+        # Calculate average confidence for the line.
+        word_count = len(line.get('words', []))
+        avg_confidence = sum(word.get('confidence', 0.95) for word in line.get('words', [])) / word_count if word_count > 0 else 0.95
 
         output_json.append({
-            'text': full_text,
+            'text': text,
             'tightBoundingBox': {
                 'x': x_min / image_width, 'y': y_min / image_height,
-                'width': (x_max - x_min) / image_width, 'height': (y_max - y_min) / image_height,
+                'width': width / image_width, 'height': height / image_height,
             },
             'orientation': snapped_angle,
-            'fontSize': 0.04,
+            'fontSize': 0.04,  # Placeholder value
             'confidence': avg_confidence
         })
 
@@ -185,10 +120,13 @@ async def ocr_endpoint():
     global ocr_requests_processed
     image_url = request.args.get('url')
     if not image_url: return jsonify({'error': 'Image URL is required'}), 400
+    
+    # Always re-process to ensure no old, grouped results are served.
     if image_url in ocr_cache:
-        print(f"[Cache HIT] for: ...{image_url[-40:]}")
-        return jsonify(ocr_cache[image_url])
-    print(f"[Cache MISS] for: ...{image_url[-40:]}")
+        del ocr_cache[image_url]
+        print(f"[Cache PURGED] for: ...{image_url[-40:]}")
+        
+    print(f"[Processing] for: ...{image_url[-40:]}")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url) as response:
@@ -197,9 +135,9 @@ async def ocr_endpoint():
         pil_image = Image.open(io.BytesIO(image_bytes))
         result = await asyncio.to_thread(ocr_engine.recognize_pil, pil_image)
         
-        # Raw JSON saving has been removed.
-        
+        # Use the new, simplified transformation logic.
         transformed_result = transform_ocr_data(result, pil_image.size)
+        
         ocr_cache[image_url] = transformed_result
         save_cache()
         ocr_requests_processed += 1
