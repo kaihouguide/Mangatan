@@ -21,13 +21,14 @@
         ankiImageField: 'Image',
         sites: [{
             urlPattern: '127.0.0.1',
-            imageContainerSelectors: [
-                'div.muiltr-masn8', // Old Continuous Vertical
-                'div.muiltr-79elbk', // Webtoon
-                'div.muiltr-u43rde', // Single Page
-                'div.muiltr-1r1or1s', // Double Page
-                'div.muiltr-18sieki', // New Continuous Vertical
-                'div.muiltr-cns6dc'  // Added per request
+                imageContainerSelectors: [
+                'div.muiltr-masn8',      // Old Continuous Vertical
+                'div.muiltr-79elbk',      // Webtoon
+                'div.muiltr-u43rde',      // Single Page
+                'div.muiltr-1r1or1s',      // Double Page
+                'div.muiltr-18sieki',     // New Continuous Vertical
+                'div.muiltr-cns6dc',      // Added per request (COMMA WAS MISSING HERE)
+                '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
