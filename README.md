@@ -1,4 +1,3 @@
-
 # 🚀 Mangatan OCR Server - Installation Guide
 
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
@@ -7,12 +6,13 @@ Welcome! This guide provides the steps to get your Google Lens-powered OCR serve
 
 ## Choose Your Platform:
 
-*   [**💻 For PC/Desktop**](#for-pc-desktop)
+*   [**💻 For PC/Desktop (Node.js)**](#for-pc-desktop)
+*   [**🐍 For PC - Local OCR (Alternative Python Server)**](#for-pc-local-ocr)
 *   [**📱 For Android**](#for-android)
 
 <br>
 
-## <a id="for-pc-desktop"></a>💻 For PC/Desktop
+## <a id="for-pc-desktop"></a>💻 For PC/Desktop (Node.js)
 
 ### ✅ Step 1: Prerequisites
 
@@ -105,6 +105,44 @@ With all dependencies installed, you're ready to start the OCR server.
 
 ---
 
+## <a id="for-pc-local-ocr"></a>🐍 For PC - Local OCR (Alternative Python Server)
+
+This is a high-performance, alternative local OCR server written in Python. It does not require Node.js and processes images directly on your machine.
+
+### ✅ Step 1: Prerequisites
+
+*   You must have **Python** installed. You can download it from the official **[Python website](https://www.python.org/downloads/)**.
+*   Ensure you have the Tampermonkey extension and the project's userscript installed in your browser, as described in the PC/Desktop section.
+* #install [oneocr](https://github.com/AuroraWright/oneocr)
+### 📦 Step 2: Get the Server Code
+
+* in the downloaded github project in Ocr-Server (server.py)
+### ⚙️ Step 3: Install Dependencies
+
+1.  Open your terminal or Command Prompt.
+2.  Navigate into the folder where you saved `server.py`.
+3.  Run the following command to install the required Python libraries:
+    > ```sh
+    > pip install oneocr waitress flask aiohttp Pillow
+    > ```
+
+### ▶️ Step 4: Start the Server
+
+*   From the same terminal window, run the following command:
+    > ```sh
+    > python local_server.py
+    > ```
+*   The server will start on `http://127.0.0.1:3000`.
+* or run the runme(local-server).bat 
+### 💡 Usage
+
+*   Once the server is running, make sure the **OCR Server URL** in the userscript settings (`⚙️` icon) is set to `http://127.0.0.1:3000`.
+*   The server will automatically create and manage an `ocr-cache.json` file in its folder.
+
+<br>
+
+---
+
 ## <a id="for-android"></a>📱 For Android
 
 For Android users, you'll need **Termux**.
@@ -130,15 +168,27 @@ For Android users, you'll need **Termux**.
     > ```sh
     > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/Ocr-Server && npm install express chrome-lens-ocr multer --force && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/Ocr-Server && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
     > ```
-    > **Note**: The `--force` flag is the key part of this fix. It instructs the package manager to install `chrome-lens-ocr` even though it reports an unsupported platform, allowing it to run correctly within Termux's environment.
-    >
+    *   After the command above finishes, run these next commands **one-by-one** to finalize the installation.
+        > ```sh
+        > npm install --cpu=wasm32 sharp
+        > ```
+        > ```sh
+        > npm install @img/sharp-wasm32 --force
+        > ```
+        > ```sh
+        > rm -rf node_modules package-lock.json
+        > ```
+        > ```sh
+        > npm install --force
+        > ```
     > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
 
 ### 💡 Usage
 *   Open Termux and write `suwayomi`, swipe right to open a new session, and write `mangatan`. Then go to `127.0.0.1:4567` and start reading.
 *   **Toggle Overlay**: **Long-press** (press and hold for about half a second) on an image to show or hide the OCR text overlay.
 *   **Tap-to-Focus**: Once the overlay is visible, **tap** on any specific text box to highlight it.
-*   **Configuration**: Tap the **`⚙️`** (gear) icon to open the settings panel.
+*   **Configuration**: Tap the **`⚙️`** (gear) icon to open the settings panel. From here you can change the color theme, text orientation, Anki settings, and more.
+*   **Anki Export**: After long-pressing an image to make the overlay visible, a **`✚`** button will appear. Tapping this button will export a screenshot of the image to the last created card in Anki.
 *   **Note**: The persistent cache file (`ocr-cache.json`) will be stored in the `~/Mangatan/Ocr-Server` directory.
 
 <br>
