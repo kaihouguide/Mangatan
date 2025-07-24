@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v21.5.21.5)
+// @name         Automatic Content OCR (Local Overlay Manager - v21.5.21.6-manga-fix)
 // @namespace    http://tampermonkey.net/
-// @version      21.5.21.5
-// @description  Correctly decouples overlay and button hide timers. The overlay hides quickly while the button persists for a longer duration.
-// @author       1Selxo 
+// @version      21.5.21.6-manga-fix
+// @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left). Decouples overlay and button hide timers.
+// @author       1Selxo (with fix by Gemini)
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -224,6 +224,29 @@
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
 
+        // --- FIX STARTS HERE ---
+        // Sort blocks to follow manga reading order (top-to-bottom, then right-to-left).
+        data.sort((a, b) => {
+            const a_y = a.tightBoundingBox.y;
+            const b_y = b.tightBoundingBox.y;
+            const a_x = a.tightBoundingBox.x;
+            const b_x = b.tightBoundingBox.x;
+
+            // Tolerance to determine if two bubbles are on the same "row".
+            // 5% of the image height is a reasonable guess for a line of text.
+            const ROW_TOLERANCE = 0.05;
+
+            // Check if they are vertically close enough to be considered on the same row.
+            if (Math.abs(a_y - b_y) < ROW_TOLERANCE) {
+                // If on the same row, sort from right to left (higher x-value first).
+                return b_x - a_x;
+            } else {
+                // Otherwise, sort from top to bottom (lower y-value first).
+                return a_y - b_y;
+            }
+        });
+        // --- FIX ENDS HERE ---
+
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
 
@@ -247,7 +270,7 @@
         managedElements.set(targetImg, state);
         logDebug(`Created decoupled overlay for image: ...${targetImg.src.slice(-30)}`);
 
-        // MODIFIED: Decoupled hover logic for overlay and button
+        // Decoupled hover logic for overlay and button
         const show = () => {
             clearTimeout(hideButtonTimer);
             clearTimeout(state.hideTimeout);
@@ -530,7 +553,6 @@
             }, 2000);
         });
 
-        // MODIFIED: Logic for button hover to cancel its own hide timer
         UI.globalAnkiButton.addEventListener('mouseenter', () => {
             clearTimeout(hideButtonTimer);
         });
