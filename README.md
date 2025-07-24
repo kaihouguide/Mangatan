@@ -100,7 +100,7 @@ With all dependencies installed, you're ready to start the OCR server.
 *   **NEW: Cache Management**:
     *   **To Export**: Open a new browser tab to `http://127.0.0.1:3000/export-cache` to download your cache file.
     *   **To Import**: Use the settings panel in the userscript to upload a previously saved `ocr-cache.json` file.
-
+*   **Anki Export**: After hovering on an image to make the overlay visible, a **`✚`** button will appear. Tapping this button will export a screenshot of the image to the last created card in Anki.
 <br>
 
 ---
