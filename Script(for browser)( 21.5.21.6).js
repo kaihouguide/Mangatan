@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.5.21.6-manga-fix
 // @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left). Decouples overlay and button hide timers.
-// @author       1Selxo (with fix by Gemini)
+// @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
