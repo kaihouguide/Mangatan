@@ -44,7 +44,8 @@ You'll need a few things before you start. Please install them in the following 
 
 Now, from inside the project folder in your terminal:
 
-1.  Run this command to install the necessary libraries:
+1.  Copy this command then paste (Ctrl+V) then press Enter inside the ocr-server folder in terminal 
+:
     > ```sh
     > npm install express chrome-lens-ocr multer
     > ```
