@@ -114,7 +114,7 @@ This is a high-performance, alternative local OCR server written in Python. It d
 
 *   You must have **Python** installed. You can download it from the official **[Python website](https://www.python.org/downloads/)**.
 *   Ensure you have the Tampermonkey extension and the project's userscript installed in your browser, as described in the PC/Desktop section.
-#   install [oneocr](https://github.com/AuroraWright/oneocr)
+#   install [oneocr](https://github.com/AuroraWright/oneocr) (get the dlls after running the following pip command)
 ### ⚙️ Step 2: Install Dependencies
 
 1.  Open your terminal or Command Prompt.
