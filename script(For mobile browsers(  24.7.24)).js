@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Mobile Port v24.7.24-final-fix)
+// @name         Automatic Content OCR (Mobile Port v24.7.24-final-fix-2)
 // @namespace    http://tampermonkey.net/
-// @version      24.7.24-final-fix
-// @description  Restores the old, reliable scroll-fix logic that is URL-aware, fixing the "no exit" bug and allowing normal scrolling on non-reader pages.
+// @version      24.7.24-final-fix-2
+// @description  Restores the old, reliable scroll-fix logic that is URL-aware, fixing the "no exit" bug and allowing normal scrolling on non-reader pages. Fixes a syntax error in image selectors.
 // @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
@@ -21,15 +21,19 @@
         ankiImageField: 'Image',
         sites: [{
             urlPattern: '127.0.0.1',
+                // --- FIX STARTS HERE ---
+                // Added a comma after the 'div.muiltr-cns6dc' selector
+                // to correctly include the RTL selector that follows.
                 imageContainerSelectors: [
                 'div.muiltr-masn8',      // Old Continuous Vertical
                 'div.muiltr-79elbk',      // Webtoon
                 'div.muiltr-u43rde',      // Single Page
                 'div.muiltr-1r1or1s',      // Double Page
                 'div.muiltr-18sieki',     // New Continuous Vertical
-                'div.muiltr-cns6dc',      // Added per request (COMMA WAS MISSING HERE)
+                'div.muiltr-cns6dc',      // Added per request
                 '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical
             ],
+            // --- FIX ENDS HERE ---
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
         debugMode: true,
