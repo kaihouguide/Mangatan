@@ -1,4 +1,4 @@
-# 🚀 Mangatan OCR Server - Installation Guide
+<img width="1224" height="217" alt="image" src="https://github.com/user-attachments/assets/bffcdc5d-81e9-4964-93cb-277b4d894fcf" /># 🚀 Mangatan OCR Server - Installation Guide
 
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
@@ -121,7 +121,7 @@ This is a high-performance, alternative local OCR server written in Python. It d
 2.  Navigate into the folder where you saved `server.py`.
 3.  Run the following command to install the required Python libraries:
     > ```sh
-    > pip install oneocr waitress flask aiohttp Pillow
+    > pip install oneocr waitress flask aiohttp Pillow "Flask[async]"
     > ```
 
 ### ▶️ Step 3: Start the Server
