@@ -63,19 +63,19 @@ Now, from inside the project folder in your terminal:
       "name": "my-ocr-server",
       "version": "1.0.0",
       "description": "",
-      "main": "server.js",
+      "main": "server(googlelens).js",
       "type": "module",
       "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1",
-        "start": "node server.js"
+        "start": "node server(googlens).js"
       },
       "keywords": [],
       "author": "",
       "license": "ISC",
       "dependencies": {
-        "express": "^4.17.1",
-        "chrome-lens-ocr": "^1.0.6",
-        "multer": "^1.4.5-lts.1"
+        "express": "^5.1.0",
+        "chrome-lens-ocr": "^4.1.0",
+        "multer": "^2.0.2"
       }
     }
     ```
