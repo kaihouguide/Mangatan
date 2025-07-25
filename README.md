@@ -1,4 +1,3 @@
-<img width="1224" height="217" alt="image" src="https://github.com/user-attachments/assets/bffcdc5d-81e9-4964-93cb-277b4d894fcf" /># 🚀 Mangatan OCR Server - Installation Guide
 
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
