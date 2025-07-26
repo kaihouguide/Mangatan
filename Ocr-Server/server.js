@@ -1,23 +1,20 @@
-// server.js - V2.1 with Persistent Caching and Import/Export
+// server.js - V2.5 with Conditional Authentication
 import express from 'express';
 import Lens from 'chrome-lens-ocr';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
+import fetch from 'node-fetch'; // Required for the auth path
 
 const app = express();
 const port = 3000;
 const lens = new Lens();
 
-// ---- NEW: Persistent Cache and File Upload Setup ----
 const CACHE_FILE_PATH = path.join(process.cwd(), 'ocr-cache.json');
-const upload = multer({ dest: 'uploads/' }); // Temporary folder for uploads
+const upload = multer({ dest: 'uploads/' });
 let ocrCache = new Map();
 let ocrRequestsProcessed = 0;
 
-/**
- * NEW: Loads the cache from the JSON file on disk.
- */
 function loadCacheFromFile() {
     try {
         if (fs.existsSync(CACHE_FILE_PATH)) {
@@ -26,35 +23,28 @@ function loadCacheFromFile() {
             ocrCache = new Map(Object.entries(data));
             console.log(`[Cache] Loaded ${ocrCache.size} items from ${CACHE_FILE_PATH}`);
         } else {
-            console.log(`[Cache] No cache file found at ${CACHE_FILE_PATH}. Starting with an empty cache.`);
+            console.log(`[Cache] No cache file found. Starting fresh.`);
         }
     } catch (error) {
         console.error('[Cache] Error loading cache from file:', error);
     }
 }
 
-/**
- * NEW: Saves the in-memory cache to the JSON file on disk.
- */
 function saveCacheToFile() {
     try {
         const data = Object.fromEntries(ocrCache);
-        // Using null, 2 for pretty-printing the JSON file
         fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(data, null, 2));
     } catch (error) {
         console.error('[Cache] Error saving cache to file:', error);
     }
 }
 
-
-// Middleware to allow requests from any webpage (CORS)
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
     next();
 });
 
-// Status Endpoint
 app.get('/', (req, res) => {
     res.json({
         status: 'running',
@@ -67,96 +57,112 @@ app.get('/', (req, res) => {
 // The main OCR endpoint
 app.get('/ocr', async (req, res) => {
     const imageUrl = req.query.url;
+    const authUser = req.query.user;
+    const authPass = req.query.pass;
 
     if (!imageUrl) {
         return res.status(400).json({ error: 'Image URL is required' });
     }
 
     if (ocrCache.has(imageUrl)) {
-        console.log(`[Cache HIT] Returning cached result for: ${imageUrl}`);
+        console.log(`[Cache HIT] Returning cached result for: ...${imageUrl.slice(-40)}`);
         return res.json(ocrCache.get(imageUrl));
     }
 
-    console.log(`[Cache MISS] Processing new image: ${imageUrl}`);
+    console.log(`[Cache MISS] Processing new image: ...${imageUrl.slice(-40)}`);
 
     try {
-        const result = await lens.scanByURL(imageUrl);
-        console.log("OCR successful. Transforming and caching result.");
+        let ocrResult; // This will hold the result from either path
 
+        // --- NEW: Conditional Logic ---
+        if (authUser) {
+            // --- AUTHENTICATION PATH ---
+            console.log(`[Auth] Credentials detected for user '${authUser}'. Using manual fetch method.`);
+            
+            const fetchOptions = {
+                headers: {
+                    'Authorization': 'Basic ' + Buffer.from(authUser + ":" + authPass).toString('base64')
+                }
+            };
+
+            const response = await fetch(imageUrl, fetchOptions);
+            if (!response.ok) {
+                throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
+            }
+
+            const imageArrayBuffer = await response.arrayBuffer();
+            const imageBuffer = Buffer.from(imageArrayBuffer);
+            const mimeType = response.headers.get('content-type');
+            
+            if (!mimeType || !mimeType.startsWith('image/')) {
+                throw new Error(`Invalid content type received: ${mimeType || 'None'}`);
+            }
+            
+            const base64String = imageBuffer.toString('base64');
+            const dataUrl = `data:${mimeType};base64,${base64String}`;
+            
+            console.log(`Image downloaded (${(imageBuffer.length / 1024).toFixed(2)} KB). Performing OCR via Data URL.`);
+            ocrResult = await lens.scanByURL(dataUrl);
+
+        } else {
+            // --- ORIGINAL NON-AUTHENTICATION PATH ---
+            console.log("[Auth] No credentials detected. Using direct URL method.");
+            ocrResult = await lens.scanByURL(imageUrl);
+        }
+
+        // --- Common processing for both paths ---
+        console.log(`OCR successful for ...${imageUrl.slice(-40)}. Transforming and caching result.`);
         ocrRequestsProcessed++;
-        const transformedResult = transformOcrData(result);
-
+        const transformedResult = transformOcrData(ocrResult);
+        
         ocrCache.set(imageUrl, transformedResult);
-        saveCacheToFile(); // ---- MODIFIED: Persist the cache after adding a new item ----
-
+        saveCacheToFile();
         res.json(transformedResult);
 
     } catch (error) {
-        console.error('OCR failed:', error);
-        res.status(500).json({ error: 'Failed to perform OCR on the server.' });
+        console.error(`OCR process failed for ${imageUrl}:`, error.message);
+        res.status(500).json({ error: `OCR process failed: ${error.message}` });
     }
 });
 
-// ---- NEW: Export Cache Endpoint ----
+
 app.get('/export-cache', (req, res) => {
     if (fs.existsSync(CACHE_FILE_PATH)) {
-        res.download(CACHE_FILE_PATH, 'ocr-cache.json', (err) => {
-            if (err) {
-                console.error('Error sending cache file:', err);
-                res.status(500).json({ error: 'Failed to export cache.' });
-            }
-        });
+        res.download(CACHE_FILE_PATH, 'ocr-cache.json');
     } else {
         res.status(404).json({ error: 'No cache file to export.' });
     }
 });
 
-// ---- NEW: Import Cache Endpoint ----
 app.post('/import-cache', upload.single('cacheFile'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded.' });
     }
-
     try {
         const uploadedFilePath = req.file.path;
         const fileContent = fs.readFileSync(uploadedFilePath, 'utf-8');
         const importedData = JSON.parse(fileContent);
-
         let newItemsCount = 0;
-        let mergedItemsCount = 0;
         const importedMap = new Map(Object.entries(importedData));
-
         for (const [key, value] of importedMap.entries()) {
-            if (!ocrCache.has(key)) { // Only add if the key doesn't already exist
+            if (!ocrCache.has(key)) {
                 ocrCache.set(key, value);
                 newItemsCount++;
             }
-            mergedItemsCount++;
         }
-
         if (newItemsCount > 0) {
-            saveCacheToFile(); // Save the newly merged cache
+            saveCacheToFile();
         }
-
-        // Clean up the temporary uploaded file
         fs.unlinkSync(uploadedFilePath);
-
         res.json({
-            message: `Import successful. Scanned ${mergedItemsCount} items from the file and added ${newItemsCount} new items to the persistent cache.`,
+            message: `Import successful. Added ${newItemsCount} new items.`,
             total_items_in_cache: ocrCache.size
         });
-
     } catch (error) {
-        console.error('Import failed:', error);
-        res.status(500).json({ error: 'Failed to import cache. Make sure the file is a valid JSON.' });
+        res.status(500).json({ error: 'Failed to import cache.' });
     }
 });
 
-
-/**
- * Transforms chrome-lens-ocr result into the format expected by the userscript.
- * (This function is unchanged)
- */
 function transformOcrData(lensResult) {
     if (!lensResult || !lensResult.segments) {
         return [];
@@ -179,8 +185,7 @@ function transformOcrData(lensResult) {
 }
 
 app.listen(port, () => {
-    // ---- MODIFIED: Load the cache on server startup ----
     loadCacheFromFile();
-    console.log(`Local OCR Server V2.1 listening at http://127.0.0.1:${port}`);
-    console.log('Features: Persistent Caching, Import/Export, Status Endpoint');
+    console.log(`Local OCR Server V2.5 listening at http://127.0.0.1:${port}`);
+    console.log('Features: Persistent Caching, Import/Export, Conditional Auth Forwarding');
 });
