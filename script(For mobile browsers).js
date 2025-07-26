@@ -107,7 +107,7 @@
     // --- Image Processing ---
     function observeImageForSrcChange(img) {
         const processTheImage = (src) => {
-            if (src?.includes('/api/v1/manga/')) {
+            if (src?.includes('/api/v1/manga/') && src?.includes('/chapter/')) {
                 img.crossOrigin = "anonymous";
                 if (img.complete && img.naturalHeight > 0) { processImage(img); }
                 else { img.addEventListener('load', () => processImage(img), { once: true }); }
