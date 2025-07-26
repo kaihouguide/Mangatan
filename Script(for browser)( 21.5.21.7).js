@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.5.21.7-manga-fix-final-no-cache
 // @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left) and correctly finds pages in RTL mode. Always fetches OCR from the server.
-// @author       1Selxo (fix by Gemini)
+// @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
