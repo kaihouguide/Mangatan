@@ -4,7 +4,7 @@
 // @version      21.5.21.7-manga-fix-2-no-cache
 // @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left). Decouples overlay and button hide timers. Fixes a syntax error in image selectors. Caching is disabled to always fetch from server.
 // @author       1Selxo 
-// @match        http://127.0.0.1/*
+// @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
