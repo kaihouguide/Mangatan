@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.6.49 - Long Press & Final Polish)
+// @name         Automatic Content OCR (v21.6.51 - Universal Toggle Interaction)
 // @namespace    http://tampermonkey.net/
-// @version      21.6.49
-// @description  Restores the original long-press interaction to show the overlay, providing the definitive mobile experience with all features.
-// @author       1Selxo (Ported and Polished by Gemini)
+// @version      21.6.51
+// @description  Restores and perfects the long-press interaction to toggle the overlay, allowing access to underlying elements. Provides a consistent click-toggle on PC.
+// @author       1Selxo (Fixes by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -31,7 +31,7 @@
         }],
         debugMode: true,
         textOrientation: 'smart',
-        interactionMode: 'click', // Mobile-first default
+        interactionMode: 'click', // Default interaction for within the overlay
         proximityRadius: 150,
         dimmedOpacity: 0.3,
         colorTheme: 'deepblue',
@@ -40,7 +40,7 @@
         longPressDuration: 500 // Duration in ms for long press
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_mobile_final'; // Final key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_universal_toggle'; // New key for the updated version
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -69,7 +69,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.6.49 Mobile] ${logEntry}`);
+        console.log(`[OCR v21.6.51 Toggle] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -176,8 +176,7 @@
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
-        // --- FINAL: Long Press Interaction Logic ---
-        let longPressTimer = null;
+        // --- UNIVERSAL TOGGLE INTERACTION LOGIC ---
         const show = (e) => {
             if (e) e.preventDefault();
             clearTimeout(hideButtonTimer); clearTimeout(state.hideTimeout);
@@ -185,44 +184,64 @@
             overlay.classList.add('is-focused');
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
+            logDebug("Overlay shown.");
         };
         const hide = () => {
             state.hideTimeout = setTimeout(() => {
                 overlay.classList.add('is-hidden');
                 overlay.classList.remove('is-focused', 'has-manual-highlight');
                 overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
-            }, 500);
+            }, 250); // Shorter hide delay
             hideButtonTimer = setTimeout(() => {
                 UI.globalAnkiButton?.classList.add('is-hidden');
                 if (activeImageForExport === targetImg) activeImageForExport = null;
             }, 3000);
+            logDebug("Overlay hidden.");
         };
-
-        const startLongPress = (e) => {
-            e.preventDefault();
-            longPressTimer = setTimeout(() => {
+        const toggleOverlay = (e) => {
+            if (overlay.classList.contains('is-hidden')) {
                 show(e);
-                longPressTimer = null;
-            }, settings.longPressDuration);
-        };
-        const cancelLongPress = () => {
-            if (longPressTimer) {
-                clearTimeout(longPressTimer);
-                longPressTimer = null;
+            } else {
+                hide();
             }
         };
 
-        targetImg.addEventListener('touchstart', startLongPress, { passive: false });
-        targetImg.addEventListener('touchend', cancelLongPress);
-        targetImg.addEventListener('touchmove', cancelLongPress);
+        // Device-specific listeners for the toggle action
+        const isTouchDevice = 'ontouchstart' in window;
+        if (isTouchDevice) {
+            let longPressTimer = null;
+            const startLongPress = (e) => {
+                e.preventDefault();
+                longPressTimer = setTimeout(() => {
+                    toggleOverlay(e);
+                    longPressTimer = null;
+                }, settings.longPressDuration);
+            };
+            const cancelLongPress = () => {
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+            };
+            targetImg.addEventListener('touchstart', startLongPress, { passive: false });
+            targetImg.addEventListener('touchend', cancelLongPress);
+            targetImg.addEventListener('touchmove', cancelLongPress);
+        } else {
+            // For PC, a simple click is more intuitive than a long press
+            targetImg.addEventListener('click', toggleOverlay);
+        }
 
-        // Allow keeping the overlay active with a simple tap on its background
-        overlay.addEventListener('touchstart', (e) => {
-            if (e.target === overlay) show(e);
-        }, { passive: false });
+        // Hide overlay when interacting outside of it
+        const hideOnOutsideInteraction = (e) => {
+            if (!overlay.classList.contains('is-hidden') && !overlay.contains(e.target) && !targetImg.contains(e.target)) {
+                hide();
+            }
+        };
+        document.body.addEventListener('touchstart', hideOnOutsideInteraction, true);
+        document.body.addEventListener('click', hideOnOutsideInteraction, true);
 
-        document.body.addEventListener('touchstart', (e) => { if (!overlay.contains(e.target) && !targetImg.contains(e.target)) { hide(); } });
 
+        // --- In-Overlay Interaction Modes ---
         if (settings.interactionMode === 'click') {
             overlay.addEventListener('click', (e) => {
                 const clickedBox = e.target.closest('.gemini-ocr-text-box');
@@ -253,6 +272,7 @@
         }
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
+
 
     // --- FONT CALCULATION ---
     function calculateAndApplyFontSizes(overlay, imgRect) {
