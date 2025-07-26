@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Mobile Port v25.7.25)
+// @name         Automatic Content OCR (Mobile Port v25.7.26-auth-font-fix)
 // @namespace    http://tampermonkey.net/
-// @version      25.7.25
-// @description  Integrates PC v21.5.21.6's manga sorting and UI into the mobile long-press framework for a feature-rich, touch-friendly experience.
-// @author       1Selxo (Ported by Gemini)
+// @version      25.7.26-auth-font-fix
+// @description  Adds crucial mobile features: authentication for the OCR server and font size/highlight multipliers for improved readability on any device.
+// @author       1Selxo (Ported & Enhanced by Gemini)
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -17,27 +17,27 @@
     // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
+        authHeader: 'X-API-KEY',
+        authKey: '',
         ankiConnectUrl: 'http://127.0.0.1:8765',
         ankiImageField: 'Image',
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                'div.muiltr-masn8',      // Old Continuous Vertical
-                'div.muiltr-79elbk',      // Webtoon
-                'div.muiltr-u43rde',      // Single Page
-                'div.muiltr-1r1or1s',      // Double Page
-                'div.muiltr-18sieki',     // New Continuous Vertical
-                'div.muiltr-cns6dc',
-                '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical
+                'div.muiltr-masn8', 'div.muiltr-79elbk', 'div.muiltr-u43rde',
+                'div.muiltr-1r1or1s', 'div.muiltr-18sieki', 'div.muiltr-cns6dc',
+                '.MuiBox-root.muiltr-1noqzsz'
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
         debugMode: true,
-        textOrientation: 'smart', // smart, serverAngle, forceHorizontal, forceVertical
-        colorTheme: 'deepblue'    // deepblue, red, green, orange, purple, turquoise, pink, grey
+        textOrientation: 'smart',
+        colorTheme: 'deepblue',
+        fontSizeMultiplier: 1.0,
+        highlightedScaleMultiplier: 1.05
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v25_mobile';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v25_mobile_auth';
     const ocrCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -66,7 +66,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v25.7.25 Mobile] ${logEntry}`);
+        console.log(`[OCR v25.7.26 Mobile] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -103,7 +103,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner v25.7.25 (Mobile Port)...");
+        logDebug("Activating scanner v25.7.26 (Mobile Port)...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -139,13 +139,21 @@
         if (ocrCache.has(img)) return;
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
         ocrCache.set(img, 'pending');
+
+        const headers = {};
+        if (settings.authKey && settings.authHeader) {
+            headers[settings.authHeader] = settings.authKey;
+            logDebug('Using authentication header.');
+        }
+
         GM_xmlhttpRequest({
-            method: 'GET', url: `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`, timeout: 30000,
+            method: 'GET', url: `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`,
+            headers: headers, timeout: 30000,
             onload: (res) => {
                 try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); PersistentCache.set(sourceUrl, data); ocrCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); }
                 catch (e) { logDebug(`OCR Error: ${e.message}`); ocrCache.delete(img); }
             },
-            onerror: () => { logDebug(`Connection error.`); ocrCache.delete(img); },
+            onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrCache.delete(img); },
             ontimeout: () => { logDebug(`Request timed out.`); ocrCache.delete(img); }
         });
     }
@@ -202,17 +210,12 @@
     function displayOcrResults(targetImg) {
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
-        // PC v21.5.21.6 Manga Sorting Logic
         data.sort((a, b) => {
-            const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x;
-            const ROW_TOLERANCE = 0.05; // 5% of image height
-            if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x; // Right-to-left
-            else return a_y - b_y; // Top-to-bottom
+            const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x, ROW_TOLERANCE = 0.05;
+            if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x; else return a_y - b_y;
         });
-
         const overlay = document.createElement('div');
         overlay.className = 'gemini-ocr-decoupled-overlay';
-
         data.forEach((item) => {
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
@@ -222,63 +225,41 @@
             Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
             overlay.appendChild(ocrBox);
         });
-
         document.body.appendChild(overlay);
         const state = { overlay: overlay, lastWidth: 0, lastHeight: 0 };
         managedElements.set(targetImg, state);
         logDebug(`Created decoupled overlay for image: ...${targetImg.src.slice(-30)}`);
-
-        // --- Mobile Long-Press Interaction Logic ---
         let pressTimer = null, longPressTriggered = false;
-
         const onHold = () => {
             longPressTriggered = true;
             const isNowVisible = overlay.classList.toggle('is-visible-on-mobile');
             logDebug(`OCR overlay toggled ${isNowVisible ? 'ON' : 'OFF'} via long-press.`);
-            if (isNowVisible) {
-                activeImageForExport = targetImg;
-                UI.globalAnkiButton?.classList.remove('is-hidden');
-            } else {
+            if (isNowVisible) { activeImageForExport = targetImg; UI.globalAnkiButton?.classList.remove('is-hidden'); }
+            else {
                 overlay.classList.remove('has-manual-highlight');
                 overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
-                if (activeImageForExport === targetImg) {
-                    activeImageForExport = null;
-                    UI.globalAnkiButton?.classList.add('is-hidden');
-                }
+                if (activeImageForExport === targetImg) { activeImageForExport = null; UI.globalAnkiButton?.classList.add('is-hidden'); }
             }
         };
-
-        const pressDown = () => { longPressTriggered = false; pressTimer = setTimeout(onHold, LONG_PRESS_DURATION); };
+        const pressDown = (e) => { longPressTriggered = false; pressTimer = setTimeout(onHold, LONG_PRESS_DURATION); };
         const pressUp = () => clearTimeout(pressTimer);
         const handleClick = (e) => { if (longPressTriggered) { e.preventDefault(); e.stopPropagation(); } };
-
         targetImg.addEventListener("touchstart", pressDown, { passive: true });
         targetImg.addEventListener("touchend", pressUp);
         targetImg.addEventListener("touchcancel", pressUp);
-        targetImg.addEventListener("contextmenu", e => e.preventDefault()); // Prevent context menu on long press
-        targetImg.addEventListener("click", handleClick, { capture: true }); // Prevent click after long press
-
-        // --- Mobile Tap-to-Highlight Logic ---
+        targetImg.addEventListener("contextmenu", e => e.preventDefault());
+        targetImg.addEventListener("click", handleClick, { capture: true });
         overlay.addEventListener('click', (e) => {
             if (!overlay.classList.contains('is-visible-on-mobile')) return;
-            const tappedBox = e.target.closest('.gemini-ocr-text-box');
-            if (!tappedBox) return;
+            const tappedBox = e.target.closest('.gemini-ocr-text-box'); if (!tappedBox) return;
             e.stopPropagation();
-
             const isAlreadyHighlighted = tappedBox.classList.contains('manual-highlight');
-            // Deselect all first
             overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
-            // Then highlight the new one, or leave all deselected if it was a re-tap
-            if (isAlreadyHighlighted) {
-                overlay.classList.remove('has-manual-highlight');
-            } else {
-                tappedBox.classList.add('manual-highlight');
-                overlay.classList.add('has-manual-highlight');
-            }
+            if (isAlreadyHighlighted) { overlay.classList.remove('has-manual-highlight'); }
+            else { tappedBox.classList.add('manual-highlight'); overlay.classList.add('has-manual-highlight'); }
         });
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
-
 
     function calculateAndApplyFontSizes(overlay) {
         if (!measurementSpan) return;
@@ -298,7 +279,8 @@
                 let textFits = isVertical ? (mid * text.length * 0.9 <= availableHeight) && (mid <= availableWidth) : (measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight);
                 if (textFits) { bestSize = mid; low = mid + 1; } else { high = mid - 1; }
             }
-            box.style.fontSize = `${bestSize}px`;
+            // Apply user-defined font size multiplier
+            box.style.fontSize = `${bestSize * settings.fontSizeMultiplier}px`;
             if (isVertical) box.style.lineHeight = '1';
         });
     }
@@ -331,17 +313,31 @@
     }
 
     // --- UI & EVENT HANDLING ---
-    function applyColorTheme() {
+    function applyDynamicStyles() {
         const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.deepblue;
-        const cssVars = `:root { --ocr-bg-color: rgba(10,25,40,0.85); --ocr-border-color: ${theme.main}0.6); --ocr-border-color-dim: ${theme.main}0.3); --ocr-border-color-hover: ${theme.main}0.8); --ocr-text-color: ${theme.text}; --ocr-highlight-bg-color: ${theme.main}0.9); --ocr-highlight-border-color: rgba(255,255,255,0.9); --ocr-highlight-text-color: ${theme.highlightText}; --ocr-highlight-shadow: 0 0 10px ${theme.main}0.5); --ocr-highlight-inset-shadow: inset 0 0 0 2px white; --modal-header-color: ${theme.main}1); }`;
-        let styleTag = document.getElementById('gemini-ocr-color-theme-style');
-        if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-color-theme-style'; document.head.appendChild(styleTag); }
-        styleTag.textContent = cssVars;
-        logDebug(`Applied color theme: ${settings.colorTheme}`);
+        const dynamicCSS = `
+            :root {
+                --ocr-bg-color: rgba(10,25,40,0.85);
+                --ocr-border-color: ${theme.main}0.6);
+                --ocr-border-color-dim: ${theme.main}0.3);
+                --ocr-border-color-hover: ${theme.main}0.8);
+                --ocr-text-color: ${theme.text};
+                --ocr-highlight-bg-color: ${theme.main}0.9);
+                --ocr-highlight-border-color: rgba(255,255,255,0.9);
+                --ocr-highlight-text-color: ${theme.highlightText};
+                --ocr-highlight-shadow: 0 0 10px ${theme.main}0.5);
+                --ocr-highlight-inset-shadow: inset 0 0 0 2px white;
+                --modal-header-color: ${theme.main}1);
+                --ocr-highlight-scale: ${settings.highlightedScaleMultiplier};
+            }
+        `;
+        let styleTag = document.getElementById('gemini-ocr-dynamic-style');
+        if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-style'; document.head.appendChild(styleTag); }
+        styleTag.textContent = dynamicCSS;
+        logDebug(`Applied color theme: ${settings.colorTheme} and highlight scale: ${settings.highlightedScaleMultiplier}`);
     }
 
     function createUI() {
-        // Conditional scroll-locking styles for reader pages
         let conditionalStyles = '';
         const href = window.location.href;
         if (href.includes('/manga/') || href.includes('/chapter/')) {
@@ -354,11 +350,10 @@
             .gemini-ocr-decoupled-overlay.is-visible-on-mobile { opacity: 1; visibility: visible; }
             .gemini-ocr-text-box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; border-radius: 4px; user-select: text; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px); transition: all 0.2s ease-in-out; pointer-events: auto; overflow: hidden; padding: 4px; }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; line-height: 1; }
-            .gemini-ocr-decoupled-overlay.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: 0.3; background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
-            .gemini-ocr-decoupled-overlay .manual-highlight { overflow: visible; opacity: 1; transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 10000; }
+            .gemini-ocr-decoupled-overlay.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: 0.3; background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); transform: scale(1.0); }
+            .gemini-ocr-decoupled-overlay .manual-highlight { overflow: visible; opacity: 1; transform: scale(var(--ocr-highlight-scale)); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 10000; }
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
             #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-            #gemini-ocr-global-anki-export-btn:hover { background-color: #27ae60; transform: scale(1.1); }
             #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; }
             #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
             .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 15px; z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); width: 600px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
@@ -366,7 +361,7 @@
             .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); }
             .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; }
             .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
-            .gemini-ocr-modal h3 { font-size: 1.1em; margin: 15px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; color: var(--modal-header-color); }
+            .gemini-ocr-modal h3 { font-size: 1.1em; margin: 20px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; color: var(--modal-header-color); }
             .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 10px 15px; align-items: center; } .full-width { grid-column: 1 / -1; }
             .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 8px; box-sizing: border-box; font-family: monospace; background-color: #2a2a2e; border: 1px solid #555; border-radius: 5px; color: #EAEAEA; font-size: 14px; }
             .gemini-ocr-modal button { padding: 10px 18px; background-color: var(--modal-header-color); border: none; border-radius: 5px; color: #1A1D21; cursor: pointer; font-weight: bold; }
@@ -377,10 +372,15 @@
             <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button>
             <button id="gemini-ocr-settings-button">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
-                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v25.7.25)</h2></div>
+                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v25.7.26)</h2></div>
                 <div class="gemini-ocr-modal-content">
-                    <h3>Connection</h3><div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
+                    <h3>Connection</h3>
+                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
                     <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div>
+                    <h3>Authentication</h3><div class="gemini-ocr-settings-grid">
+                        <label for="gemini-ocr-auth-header">Auth Header:</label><input type="text" id="gemini-ocr-auth-header" placeholder="e.g., X-API-KEY">
+                        <label for="gemini-ocr-auth-key">Auth Key:</label><input type="password" id="gemini-ocr-auth-key">
+                    </div>
                     <h3>Anki Integration</h3><div class="gemini-ocr-settings-grid">
                         <label for="gemini-ocr-anki-url">Anki-Connect URL:</label><input type="text" id="gemini-ocr-anki-url">
                         <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field" placeholder="e.g., Image, SentenceImage">
@@ -388,9 +388,11 @@
                     <h3>Display</h3><div class="gemini-ocr-settings-grid">
                         <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme"><option value="deepblue">Deep Blue</option><option value="red">Red</option><option value="green">Green</option><option value="orange">Orange</option><option value="purple">Purple</option><option value="turquoise">Turquoise</option><option value="pink">Pink</option><option value="grey">Grey</option></select>
                         <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="serverAngle">Server Angle</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select>
+                        <label for="ocr-font-size-multiplier">Font Size Multiplier:</label><input type="number" id="ocr-font-size-multiplier" step="0.1" min="0.5" placeholder="1.0">
+                        <label for="ocr-highlight-scale-multiplier">Highlight Scale Multiplier:</label><input type="number" id="ocr-highlight-scale-multiplier" step="0.05" min="1" placeholder="1.05">
                     </div>
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
-                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
+                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="4" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug Logs</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
             </div>
@@ -403,9 +405,11 @@
             settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'),
             globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'),
             debugModal: document.getElementById('gemini-ocr-debug-modal'), serverUrlInput: document.getElementById('gemini-ocr-server-url'),
+            authHeaderInput: document.getElementById('gemini-ocr-auth-header'), authKeyInput: document.getElementById('gemini-ocr-auth-key'),
             ankiUrlInput: document.getElementById('gemini-ocr-anki-url'), ankiFieldInput: document.getElementById('gemini-ocr-anki-field'),
             debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'), textOrientationSelect: document.getElementById('ocr-text-orientation'),
             colorThemeSelect: document.getElementById('ocr-color-theme'), sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'),
+            fontSizeMultiplierInput: document.getElementById('ocr-font-size-multiplier'), highlightedScaleMultiplierInput: document.getElementById('ocr-highlight-scale-multiplier'),
             statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
             saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'),
             debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
@@ -426,8 +430,16 @@
         UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', (COLOR_THEMES[UI.colorThemeSelect.value] || COLOR_THEMES.deepblue).main + '1)'); });
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
-                ocrServerUrl: UI.serverUrlInput.value.trim(), ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(),
-                debugMode: UI.debugModeCheckbox.checked, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value,
+                ocrServerUrl: UI.serverUrlInput.value.trim(),
+                authHeader: UI.authHeaderInput.value.trim(),
+                authKey: UI.authKeyInput.value, // Don't trim password
+                ankiConnectUrl: UI.ankiUrlInput.value.trim(),
+                ankiImageField: UI.ankiFieldInput.value.trim(),
+                debugMode: UI.debugModeCheckbox.checked,
+                textOrientation: UI.textOrientationSelect.value,
+                colorTheme: UI.colorThemeSelect.value,
+                fontSizeMultiplier: parseFloat(UI.fontSizeMultiplierInput.value) || 1.0,
+                highlightedScaleMultiplier: parseFloat(UI.highlightedScaleMultiplierInput.value) || 1.05,
                 sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s) }; })
             };
             try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
@@ -439,10 +451,14 @@
     function checkServerStatus() {
         const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return;
         UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
+        const headers = {};
+        const authKey = UI.authKeyInput.value;
+        const authHeader = UI.authHeaderInput.value.trim();
+        if (authKey && authHeader) { headers[authHeader] = authKey; }
         GM_xmlhttpRequest({
-            method: 'GET', url: serverUrl, timeout: 5000,
+            method: 'GET', url: serverUrl, headers: headers, timeout: 5000,
             onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (${data.items_in_cache} cached)` : 'Unresponsive Server'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } },
-            onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; },
+            onerror: (res) => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = `Connection Failed (Status: ${res.status})`; },
             ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Timed Out'; }
         });
     }
@@ -461,8 +477,7 @@
         if (loadedSettings) {
             try {
                 const parsedSettings = JSON.parse(loadedSettings);
-                // Migrate old settings safely
-                delete parsedSettings.interactionMode; // Remove PC-only setting
+                delete parsedSettings.interactionMode;
                 settings = { ...settings, ...parsedSettings };
             }
             catch(e) { logDebug("Could not parse saved settings. Using defaults."); }
@@ -471,16 +486,21 @@
         createMeasurementSpan();
         await PersistentCache.load();
         bindUIEvents();
-        applyColorTheme();
-        // Populate UI from settings
+        applyDynamicStyles();
+
         UI.serverUrlInput.value = settings.ocrServerUrl;
+        UI.authHeaderInput.value = settings.authHeader;
+        UI.authKeyInput.value = settings.authKey;
         UI.ankiUrlInput.value = settings.ankiConnectUrl;
         UI.ankiFieldInput.value = settings.ankiImageField;
         UI.debugModeCheckbox.checked = settings.debugMode;
         UI.textOrientationSelect.value = settings.textOrientation;
         UI.colorThemeSelect.value = settings.colorTheme;
+        UI.fontSizeMultiplierInput.value = settings.fontSizeMultiplier;
+        UI.highlightedScaleMultiplierInput.value = settings.highlightedScaleMultiplier;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
+
         activateScanner();
     }
-    init().catch(e => console.error(`[OCR v25.7.25 Mobile] Fatal Initialization Error: ${e.message}`));
+    init().catch(e => console.error(`[OCR v25.7.26 Mobile] Fatal Initialization Error: ${e.message}`));
 })();
