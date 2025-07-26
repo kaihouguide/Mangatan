@@ -1,1 +1,1 @@
-node server(googlelens).js
+node server.js
