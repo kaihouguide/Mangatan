@@ -47,7 +47,7 @@ Now, from inside the project folder in your terminal:
 1.  Copy this command then paste (Ctrl+V) then press Enter inside the ocr-server folder in terminal 
 :
     > ```sh
-    > npm install express chrome-lens-ocr multer
+    > npm install express chrome-lens-ocr multer node-fetch
     > ```
     > This command downloads all required libraries into a `node_modules` folder.
 
