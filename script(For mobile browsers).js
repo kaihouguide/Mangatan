@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.6.42 - Mobile Port)
+// @name         Automatic Content OCR (v21.6.42 - Mobile Credential Forwarding)
 // @namespace    http://tampermonkey.net/
-// @version      21.6.42
-// @description  Passes image source credentials through the OCR server to handle authentication with sources like a secured Suwayomi server. Optimized for mobile.
+// @version      21.6.42.2
+// @description  Passes image source credentials through the OCR server to handle authentication with sources like a secured Suwayomi server. (Mobile Port)
 // @author       1Selxo 
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -36,13 +36,13 @@
         }],
         debugMode: true,
         textOrientation: 'smart',
-        interactionMode: 'click', // Changed default for mobile
+        interactionMode: 'hover', // Retaining original mobile script's setting
         colorTheme: 'deepblue',
         fontMultiplierHorizontal: 1.0,
         fontMultiplierVertical: 1.0
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_mobile_credential_forward';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_final_credential_forward'; // Using same key for settings compatibility
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -52,7 +52,7 @@
     let measurementSpan = null;
     const UI = {};
     let activeImageForExport = null;
-    let hideButtonTimer = null;
+    let hideButtonTimer = null; // Retaining from original script for consistency
 
     // --- Color Themes ---
     const COLOR_THEMES = {
@@ -71,7 +71,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.6.42 Mobile] ${logEntry}`);
+        console.log(`[OCR v21.6.42] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -137,6 +137,7 @@
         attachedAttributeObservers.set(img, attributeObserver);
     }
 
+    // UPDATED FUNCTION
     function processImage(img) {
         if (ocrDataCache.get(img) === 'pending') return;
         if (managedElements.has(img)) {
@@ -149,7 +150,7 @@
 
         let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`;
 
-        // *** MODIFICATION: Pass image source credentials to the OCR server via query parameters.
+        // *** THIS IS THE UPDATE: Pass image source credentials to the OCR server ***
         if (settings.imageServerUser) {
             logDebug("Forwarding image server credentials to OCR server.");
             ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}`;
@@ -174,7 +175,9 @@
         });
     }
 
+
     // --- OVERLAY & UPDATE ENGINE ---
+    // This section is kept from the original mobile script to preserve its intended interaction model.
     function displayOcrResults(targetImg) {
         const data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
@@ -221,29 +224,17 @@
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
-        // Mobile: Use touch events for interaction
-        const show = (e) => {
-            e.preventDefault();
+        const show = () => {
             clearTimeout(hideButtonTimer); clearTimeout(state.hideTimeout);
             overlay.classList.remove('is-hidden', 'is-focused'); overlay.classList.add('is-focused');
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
         };
         const hide = () => {
-            state.hideTimeout = setTimeout(() => { overlay.classList.add('is-hidden'); overlay.classList.remove('is-focused'); }, 500); // Longer delay for touch
-            hideButtonTimer = setTimeout(() => { UI.globalAnkiButton?.classList.add('is-hidden'); if (activeImageForExport === targetImg) activeImageForExport = null; }, 3000);
+            state.hideTimeout = setTimeout(() => { overlay.classList.add('is-hidden'); overlay.classList.remove('is-focused'); }, 300);
+            hideButtonTimer = setTimeout(() => { UI.globalAnkiButton?.classList.add('is-hidden'); if (activeImageForExport === targetImg) activeImageForExport = null; }, 2350);
         };
-        
-        targetImg.addEventListener('touchstart', show, { passive: false });
-        overlay.addEventListener('touchstart', show, { passive: false });
-        
-        // Hide when touching outside
-        document.body.addEventListener('touchstart', (e) => {
-            if (!overlay.contains(e.target) && !targetImg.contains(e.target)) {
-               hide();
-            }
-        });
-
+        [targetImg, overlay].forEach(el => { el.addEventListener('mouseenter', show); el.addEventListener('mouseleave', hide); });
 
         if (settings.interactionMode === 'click') {
             overlay.addEventListener('click', (e) => {
@@ -428,6 +419,7 @@
         logDebug(`Applied color theme: ${settings.colorTheme}`);
     }
 
+    // UI functions are kept from the original mobile script.
     function createUI() {
         GM_addStyle(`
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
@@ -438,18 +430,18 @@
             .interaction-mode-hover.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover) { opacity: 0.3; background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
             .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover, .interaction-mode-click.is-focused .manual-highlight { overflow: visible; transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; }
             .interaction-mode-click.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: 0.3; background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
-            #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 55px; height: 55px; font-size: 30px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
-            #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 85px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 55px; height: 55px; font-size: 36px; line-height: 55px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+            #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
+            #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
             #gemini-ocr-global-anki-export-btn:hover { background-color: #27ae60; transform: scale(1.1); } #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; }
             #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
-            .gemini-ocr-modal { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #1A1D21; border: 1px solid var(--modal-header-color); z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); display: flex; flex-direction: column; transform: none; max-width: 100vw; max-height: 100vh; border-radius: 0; }
-            .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: 1.2em; }
-            .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; -webkit-overflow-scrolling: touch; } .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; flex-wrap: wrap;}
-            .gemini-ocr-modal h3 { font-size: 1.1em; margin: 20px 0 15px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); }
-            .gemini-ocr-settings-grid { display: grid; grid-template-columns: 1fr; gap: 15px; } .full-width { grid-column: 1 / -1; }
-            .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 12px; box-sizing: border-box; font-size: 16px; background-color: #2a2a2e; border: 1px solid #555; border-radius: 5px; color: #EAEAEA; }
-            .gemini-ocr-modal button { padding: 12px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 16px; }
-            #gemini-ocr-server-status { padding: 12px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
+            .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 15px; z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); width: 600px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
+            .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); }
+            .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
+            .gemini-ocr-modal h3 { font-size: 1.1em; margin: 15px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; color: var(--modal-header-color); }
+            .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 10px 15px; align-items: center; } .full-width { grid-column: 1 / -1; }
+            .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 8px; box-sizing: border-box; font-family: monospace; background-color: #2a2a2e; border: 1px solid #555; border-radius: 5px; color: #EAEAEA; }
+            .gemini-ocr-modal button { padding: 10px 18px; background-color: var(--modal-header-color); border: none; border-radius: 5px; color: #1A1D21; cursor: pointer; font-weight: bold; }
+            #gemini-ocr-server-status { padding: 10px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
         document.body.insertAdjacentHTML('beforeend', `
@@ -502,7 +494,7 @@
         });
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
         UI.globalAnkiButton.addEventListener('click', async () => {
-            if (!activeImageForExport) { alert("Please tap on an image to select it for export."); return; }
+            if (!activeImageForExport) { alert("Please hover over an image to select it for export."); return; }
             const btn = UI.globalAnkiButton;
             btn.textContent = '…'; btn.disabled = true;
             const success = await exportImageToAnki(activeImageForExport);
@@ -510,6 +502,8 @@
             else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; }
             setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000);
         });
+        UI.globalAnkiButton.addEventListener('mouseenter', () => clearTimeout(hideButtonTimer));
+        UI.globalAnkiButton.addEventListener('mouseleave', () => { hideButtonTimer = setTimeout(() => { UI.globalAnkiButton.classList.add('is-hidden'); if(activeImageForExport) activeImageForExport = null; }, 2350); });
         UI.statusDiv.addEventListener('click', checkServerStatus);
         UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden'));
         UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; });
@@ -557,33 +551,6 @@
     // --- SCRIPT INITIALIZATION ---
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
-        if (loaded, `Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
-        });
-        document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
-    }
-
-    function checkServerStatus() {
-        const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return;
-        UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
-        GM_xmlhttpRequest({
-            method: 'GET', url: serverUrl, timeout: 5000,
-            onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Server Cache: ${data.items_in_cache})` : 'Unresponsive Server'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } },
-            onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; },
-            ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Timed Out'; }
-        });
-    }
-
-    function createMeasurementSpan() {
-        if (measurementSpan) return;
-        measurementSpan = document.createElement('span');
-        measurementSpan.style.cssText = `position: absolute !important; visibility: hidden !important; height: auto !important; width: auto !important; white-space: nowrap !important; z-index: -1 !important;`;
-        document.body.appendChild(measurementSpan);
-        logDebug("Created shared measurement span for performance.");
-    }
-
-    // --- SCRIPT INITIALIZATION ---
-    async function init() {
-        const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) {
             try {
                 const parsedSettings = JSON.parse(loadedSettings);
@@ -595,6 +562,7 @@
         applyColorTheme();
         createMeasurementSpan();
 
+        // Populate UI from settings
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.imageServerUserInput.value = settings.imageServerUser || '';
         UI.imageServerPasswordInput.value = settings.imageServerPassword || '';
