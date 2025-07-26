@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.2 - Advanced Mobile Port)
+// @name         Automatic Content OCR (v22.M.3 - Scrolling Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.3
-// @description  Adds passive mode (interact with page under overlay) and active mode (tap box to focus). Long press to show/hide. [v.M.3 disables faulty scroll-fix]
-// @author       1Selxo (Mobile port by Gemini)
-// @match        *://127.0.0.1*/*
+// @version      22.M.4
+// @description  Fixes the aggressive scroll-fix that broke page layouts. Original: Adds passive mode and active mode for mobile.
+// @author       1Selxo (Mobile port by Gemini, with fix)
+// @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
@@ -65,22 +65,18 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.3] ${logEntry}`);
+        console.log(`[OCR v22.M.4] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
     // --- TOUCH INTERACTION LOGIC ---
     function handleTouchStart(event) {
-        // Find the target image for the long press
         const targetImg = event.target.closest('img');
         if (!targetImg || !managedElements.has(targetImg)) return;
-
-        // Clear any previous timer
         if (longPressTimer) clearTimeout(longPressTimer);
-
         longPressTimer = setTimeout(() => {
-            event.preventDefault(); // Prevent context menus or other default actions
+            event.preventDefault();
             const overlayState = managedElements.get(targetImg);
             if (overlayState && overlayState.overlay) {
                 if (overlayState.overlay === activeOverlay) {
@@ -99,38 +95,29 @@
 
     function handleGlobalTap(event) {
         if (!activeOverlay) return;
-        // If the tap is outside the active overlay and not on the settings/anki buttons, close it.
         const target = event.target;
         if (!activeOverlay.contains(target) && !target.closest('#gemini-ocr-settings-button, #gemini-ocr-global-anki-export-btn')) {
             hideActiveOverlay();
         }
     }
 
-    // This is the core of the new interaction model
     function handleOverlayInteraction(event) {
         const overlay = event.currentTarget;
         const clickedBox = event.target.closest('.gemini-ocr-text-box');
-
-        // Stop the tap from bubbling up to the global tap handler, which would close the overlay
         event.stopPropagation();
-
         if (clickedBox) {
-            // A text box was tapped. Enter or switch focus in "Active Mode".
-            overlay.style.pointerEvents = 'auto'; // Ensure overlay is interactive
+            overlay.style.pointerEvents = 'auto';
             if (!overlay.classList.contains('has-manual-highlight')) {
                  overlay.classList.add('has-manual-highlight');
             }
-
-            // If it's already highlighted, do nothing. If not, switch highlight.
             if (!clickedBox.classList.contains('manual-highlight')) {
                 overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
                 clickedBox.classList.add('manual-highlight');
             }
         } else {
-            // The overlay background was tapped. Revert to "Passive Mode".
             overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
             overlay.classList.remove('has-manual-highlight');
-            overlay.style.pointerEvents = 'none'; // Make overlay see-through again
+            overlay.style.pointerEvents = 'none';
         }
     }
 
@@ -150,26 +137,20 @@
     // --- OVERLAY & UPDATE ENGINE ---
     function showOverlay(overlay, image) {
         if (activeOverlay && activeOverlay !== overlay) {
-            hideActiveOverlay(); // Hide any previously active overlay
+            hideActiveOverlay();
         }
         activeOverlay = overlay;
         activeImageForExport = image;
-
-        // Start in "Passive Mode": visible but not interactive
         overlay.style.pointerEvents = 'none';
         overlay.classList.remove('is-hidden');
-
         UI.globalAnkiButton?.classList.remove('is-hidden');
     }
 
     function hideActiveOverlay() {
         if (!activeOverlay) return;
-
-        // Reset all states
         activeOverlay.classList.add('is-hidden');
         activeOverlay.classList.remove('has-manual-highlight');
         activeOverlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
-
         UI.globalAnkiButton?.classList.add('is-hidden');
         activeOverlay = null;
         activeImageForExport = null;
@@ -198,8 +179,6 @@
 
         overlay.appendChild(fragment);
         document.body.appendChild(overlay);
-
-        // Add the listener for the new interaction model
         overlay.addEventListener('click', handleOverlayInteraction);
 
         const state = { overlay, lastWidth: 0, lastHeight: 0 };
@@ -220,6 +199,9 @@
     async function exportImageToAnki(targetImg) { logDebug(`Anki Export: Starting screenshot...`); if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; } if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: The selected image is not valid or fully loaded.'); return false; } try { const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed."); const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); logDebug(`Anki Export: Image stored as '${filename}'`); const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; logDebug(`Anki Export: Found last card with ID ${lastNoteId}`); await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true; } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; } }
     
     // --- THIS FUNCTION CAUSED THE SCROLLING PROBLEM ---
+    // This function applies a style that hides overflow on the main HTML element.
+    // While this might fix scrolling on some specific websites, it breaks the layout on many others, as you've seen.
+    // It has been disabled by commenting out the timer that calls it in the init() function below.
     function manageScrollFix() {
         const urlPattern = '/manga/'; // This pattern was too broad.
         const shouldBeActive = window.location.href.includes(urlPattern);
@@ -235,36 +217,35 @@
 
     function createUI() {
         GM_addStyle(`
-            /* The 'ocr-scroll-fix-active' class is what caused the problem. The CSS rule is left here in case it's needed for a specific site, but the function that applies it is now disabled by default. */
-            html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
+            /* 
+             * The 'ocr-scroll-fix-active' class is what caused the problem by setting 'overflow: hidden !important;'.
+             * The CSS rule is left here in case it's needed for a specific site, but the function that applies it 
+             * is now disabled by default to prevent breaking most websites.
+            */
+            html.ocr-scroll-fix-active { overflow: hidden !important; } 
+            html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
+
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
-                /* By default, overlay is in PASSIVE mode: it is visible but clicks pass through it */
                 pointer-events: none;
                 transition: opacity 0.15s, visibility 0.15s;
             }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
-
             .gemini-ocr-text-box {
                 display: flex; justify-content: center; align-items: center; text-align: center; position: absolute;
                 box-sizing: border-box; border-radius: 4px; user-select: text; cursor: pointer;
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
                 color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
                 backdrop-filter: blur(2px); transition: all 0.2s ease-in-out;
-                /* Individual boxes are ALWAYS interactive, allowing them to be tapped even when the parent overlay is passive */
                 pointer-events: auto !important;
                 overflow: hidden; padding: 4px;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; }
-
-            /* Dimming logic for ACTIVE mode */
             .gemini-ocr-decoupled-overlay.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) {
                 opacity: var(--ocr-dimmed-opacity) !important;
                 background: rgba(10,25,40,0.5);
                 border-color: var(--ocr-border-color-dim);
             }
-
-            /* Highlight style for the focused box */
             .gemini-ocr-text-box.manual-highlight {
                 transform: scale(1.05);
                 background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color);
@@ -272,7 +253,6 @@
                 box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow);
                 z-index: 9999; opacity: 1 !important;
             }
-            /* Modal, Buttons etc. - Unchanged from previous mobile version */
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
             #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
             #gemini-ocr-global-anki-export-btn:hover { background-color: #27ae60; transform: scale(1.1); } #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; }
@@ -375,7 +355,7 @@
         UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal; UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         
-        // This line caused the unwanted scrolling behavior and has been disabled.
+        // FIX: The line below, which called manageScrollFix every 500ms, caused the page layout to break. It has been disabled.
         // setInterval(manageScrollFix, 500);
 
         activateScanner();
