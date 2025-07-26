@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.6.46
 // @description  Adds user-controlled opacity for dimmed boxes, improves centering, and adds proximity mode.
-// @author       1Selxo & Gemini
+// @author       1Selxo 
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
