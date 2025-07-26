@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v21.5.21.7-manga-fix-final)
+// @name         Automatic Content OCR (Local Overlay Manager - v21.5.21.7-manga-fix-final-no-cache)
 // @namespace    http://tampermonkey.net/
-// @version      21.5.21.7-manga-fix-final
-// @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left) and correctly finds pages in RTL mode.
-// @author       1Selxo 
+// @version      21.5.21.7-manga-fix-final-no-cache
+// @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left) and correctly finds pages in RTL mode. Always fetches OCR from the server.
+// @author       1Selxo (fix by Gemini)
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -39,7 +39,6 @@
     };
     let debugLog = [];
     const SETTINGS_KEY = 'gemini_ocr_settings_v21_5_anki';
-    const ocrCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
     const attachedAttributeObservers = new WeakMap();
@@ -62,23 +61,14 @@
         grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging & Persistence ---
+    // --- Logging ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.5.21] ${logEntry}`);
+        console.log(`[OCR v21.5.21-no-cache] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
-    };
-    const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v21_5',
-        data: null,
-        async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
-        async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
-        get(key) { return this.data?.get(key); },
-        has(key) { return this.data?.has(key) ?? false; },
-        async set(key, value) { if(this.data) { this.data.set(key, value); await this.save(); } },
     };
 
     // --- CORE LOGIC ---
@@ -104,7 +94,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner v21.5.21...");
+        logDebug("Activating scanner v21.5.21-no-cache...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -125,29 +115,27 @@
         attachedAttributeObservers.set(img, attributeObserver);
     }
     function primeImageForOcr(img) {
-        if (managedElements.has(img)) return;
+        if (managedElements.has(img) || img.dataset.ocr === 'pending') return;
         const process = () => {
-            if (managedElements.has(img)) return;
+            if (managedElements.has(img) || img.dataset.ocr === 'pending') return;
             img.crossOrigin = "anonymous"; // Necessary for canvas operations
-            const realSrc = img.src;
-            if (PersistentCache.has(realSrc)) { logDebug(`Cache HIT for: ...${realSrc.slice(-30)}`); ocrCache.set(img, PersistentCache.get(realSrc)); displayOcrResults(img); }
-            else { if (ocrCache.get(img) === 'pending') return; processImage(img, realSrc); }
+            processImage(img, img.src);
         };
         if (img.complete && img.naturalHeight > 0) process();
         else img.addEventListener('load', process, { once: true });
     }
     function processImage(img, sourceUrl) {
-        if (ocrCache.has(img)) return;
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
-        ocrCache.set(img, 'pending');
+        img.dataset.ocr = 'pending'; // Mark as in-flight to prevent duplicate requests
         GM_xmlhttpRequest({
             method: 'GET', url: `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`, timeout: 30000,
             onload: (res) => {
-                try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); PersistentCache.set(sourceUrl, data); ocrCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); }
-                catch (e) { logDebug(`OCR Error: ${e.message}`); ocrCache.delete(img); }
+                delete img.dataset.ocr;
+                try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img, data); }
+                catch (e) { logDebug(`OCR Error: ${e.message}`); }
             },
-            onerror: () => { logDebug(`Connection error.`); ocrCache.delete(img); },
-            ontimeout: () => { logDebug(`Request timed out.`); ocrCache.delete(img); }
+            onerror: () => { logDebug(`Connection error.`); delete img.dataset.ocr; },
+            ontimeout: () => { logDebug(`Request timed out.`); delete img.dataset.ocr; }
         });
     }
 
@@ -221,9 +209,8 @@
     }
 
     // --- OVERLAY & UPDATE ENGINE ---
-    function displayOcrResults(targetImg) {
-        const data = ocrCache.get(targetImg);
-        if (!data || data === 'pending' || managedElements.has(targetImg)) return;
+    function displayOcrResults(targetImg, data) {
+        if (!data || managedElements.has(targetImg)) return;
 
         // Sort blocks to follow manga reading order (top-to-bottom, then right-to-left).
         data.sort((a, b) => {
@@ -488,7 +475,7 @@
             <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button>
             <button id="gemini-ocr-settings-button">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
-                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.21)</h2></div>
+                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.21-no-cache)</h2></div>
                 <div class="gemini-ocr-modal-content">
                     <h3>OCR Server</h3><div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
                     <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div>
@@ -615,7 +602,6 @@
         }
         createUI();
         createMeasurementSpan();
-        await PersistentCache.load();
         bindUIEvents();
         applyColorTheme();
 
@@ -633,5 +619,5 @@
         activateScanner();
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
-    init().catch(e => console.error(`[OCR v21.5.21] Fatal Initialization Error: ${e.message}`));
+    init().catch(e => console.error(`[OCR v21.5.21-no-cache] Fatal Initialization Error: ${e.message}`));
 })();
