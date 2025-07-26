@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.6.42
 // @description  Passes image source credentials through the OCR server to handle authentication with sources like a secured Suwayomi server.
-// @author       1Selxo & Gemini
+// @author       1Selxo 
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
