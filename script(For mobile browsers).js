@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.6.47 - Mobile Scroll & Tap Fix)
+// @name         Automatic Content OCR (v21.6.49 - Final Mobile Build)
 // @namespace    http://tampermonkey.net/
-// @version      21.6.47
-// @description  Mobile-first update: Fixes page scrolling and improves tap detection for a smoother experience. Retains all PC features like opacity and proximity mode in a mobile-optimized UI.
+// @version      21.6.49
+// @description  Complete mobile build. Implements intuitive tap-to-toggle overlays and reenables the conditional scroll-fix for /manga/ and /chapter/ pages, mirroring PC behavior.
 // @author       1Selxo & Gemini
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -40,7 +40,7 @@
     };
     let settings = { ...DEFAULTS };
     const debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_47_mobile'; // Updated Key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_49_mobile'; // Updated Key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -69,12 +69,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.6.47 Mobile] ${logEntry}`);
+        console.log(`[OCR v21.6.49 Mobile] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- Core Observation Logic (Unchanged) ---
+    // --- Core Observation Logic ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -106,7 +106,7 @@
         logDebug("Main container observer is active.");
     }
 
-    // --- Image Processing (Unchanged) ---
+    // --- Image Processing ---
     function observeImageForSrcChange(img) {
         const processTheImage = (src) => {
             if (src?.includes('/api/v1/manga/')) {
@@ -158,90 +158,52 @@
         data.sort((a, b) => { const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x, ROW_TOLERANCE = 0.05; if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x; else return a_y - b_y; });
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
-        const fragment = document.createDocumentFragment();
-        const imgRect = targetImg.getBoundingClientRect();
-        data.forEach((item) => {
-            const ocrBox = document.createElement('div'); ocrBox.className = 'gemini-ocr-text-box';
-            ocrBox.textContent = item.text; ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
-            const pixelWidth = item.tightBoundingBox.width * imgRect.width; const pixelHeight = item.tightBoundingBox.height * imgRect.height;
-            const isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && (pixelHeight > pixelWidth || item.orientation === 90)) || (settings.textOrientation === 'serverAngle' && item.orientation === 90);
-            if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
-            Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
-            fragment.appendChild(ocrBox);
-        });
+        const fragment = document.createDocumentFragment(); const imgRect = targetImg.getBoundingClientRect();
+        data.forEach((item) => { const ocrBox = document.createElement('div'); ocrBox.className = 'gemini-ocr-text-box'; ocrBox.textContent = item.text; ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height; const pixelWidth = item.tightBoundingBox.width * imgRect.width; const pixelHeight = item.tightBoundingBox.height * imgRect.height; const isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && (pixelHeight > pixelWidth || item.orientation === 90)) || (settings.textOrientation === 'serverAngle' && item.orientation === 90); if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical'); Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` }); fragment.appendChild(ocrBox); });
         overlay.appendChild(fragment); document.body.appendChild(overlay);
         const state = { overlay, hideTimeout: null, lastWidth: 0, lastHeight: 0 };
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
-        // --- MOBILE-SPECIFIC TAP & SCROLL HANDLING (REBUILT) ---
+        // --- MOBILE-SPECIFIC TAP & SCROLL HANDLING (WITH TOGGLE) ---
         let touchStartX = 0, touchStartY = 0, isDragging = false;
-        const DRAG_THRESHOLD = 10; // pixels
+        const DRAG_THRESHOLD = 10;
 
         const showOverlay = () => {
             clearTimeout(hideButtonTimer); clearTimeout(state.hideTimeout);
             overlay.classList.remove('is-hidden'); overlay.classList.add('is-focused');
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
-             logDebug("Overlay shown via tap.");
+            logDebug("Overlay shown via tap.");
         };
 
         const hideOverlay = () => {
             state.hideTimeout = setTimeout(() => { overlay.classList.add('is-hidden'); overlay.classList.remove('is-focused'); }, 500);
             hideButtonTimer = setTimeout(() => { UI.globalAnkiButton?.classList.add('is-hidden'); if (activeImageForExport === targetImg) activeImageForExport = null; }, 3000);
+            logDebug("Overlay hidden.");
         };
 
-        targetImg.addEventListener('touchstart', (e) => {
-            isDragging = false;
-            touchStartX = e.touches[0].clientX;
-            touchStartY = e.touches[0].clientY;
-        }, { passive: true });
-
-        targetImg.addEventListener('touchmove', (e) => {
-            if (isDragging) return;
-            const deltaX = Math.abs(e.touches[0].clientX - touchStartX);
-            const deltaY = Math.abs(e.touches[0].clientY - touchStartY);
-            if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
-                isDragging = true;
-                logDebug("Drag detected, preventing overlay show.");
-            }
-        }, { passive: true });
+        targetImg.addEventListener('touchstart', (e) => { isDragging = false; touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }, { passive: true });
+        targetImg.addEventListener('touchmove', (e) => { if (isDragging) return; const deltaX = Math.abs(e.touches[0].clientX - touchStartX); const deltaY = Math.abs(e.touches[0].clientY - touchStartY); if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) { isDragging = true; } }, { passive: true });
 
         targetImg.addEventListener('touchend', (e) => {
-            if (!isDragging) {
-                e.preventDefault(); // Prevent ghost clicks
+            if (isDragging) return;
+            e.preventDefault();
+            if (overlay.classList.contains('is-hidden')) {
                 showOverlay();
+            } else {
+                hideOverlay();
             }
         });
 
-        // Hide when touching outside the ecosystem (improved)
-        document.body.addEventListener('touchstart', (e) => {
-            if (overlay.classList.contains('is-hidden')) return;
-            const isRelated = overlay.contains(e.target) || targetImg.contains(e.target) || UI.globalAnkiButton.contains(e.target) || UI.settingsButton.contains(e.target);
-            if (!isRelated) hideOverlay();
-        }, { passive: true });
+        document.body.addEventListener('touchstart', (e) => { if (overlay.classList.contains('is-hidden')) return; const isRelated = overlay.contains(e.target) || targetImg.contains(e.target) || UI.globalAnkiButton.contains(e.target) || UI.settingsButton.contains(e.target); if (!isRelated) hideOverlay(); }, { passive: true });
 
-        // Event delegation for text boxes
-        if (settings.interactionMode === 'click') {
-            overlay.addEventListener('click', (e) => {
-                const clickedBox = e.target.closest('.gemini-ocr-text-box');
-                overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
-                if (clickedBox) { clickedBox.classList.add('manual-highlight'); overlay.classList.add('has-manual-highlight'); }
-                else { overlay.classList.remove('has-manual-highlight'); }
-                e.stopPropagation();
-            });
-        }
-        // Proximity mode logic remains unchanged, as it's performant.
-        else if (settings.interactionMode === 'proximity') {
-             const textBoxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box')); let frameRequest = null;
-             const handleMove = (clientX, clientY) => { if (frameRequest) return; frameRequest = requestAnimationFrame(() => { const overlayRect = overlay.getBoundingClientRect(), mouseX = clientX - overlayRect.left, mouseY = clientY - overlayRect.top; textBoxes.forEach(box => { const boxCenterX = box.offsetLeft + box.offsetWidth / 2, boxCenterY = box.offsetTop + box.offsetHeight / 2; if (Math.hypot(boxCenterX - mouseX, boxCenterY - mouseY) < settings.proximityRadius) box.classList.add('is-near'); else box.classList.remove('is-near'); }); frameRequest = null; }); };
-             overlay.addEventListener('touchmove', (e) => { if (e.touches.length > 0) handleMove(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-             overlay.addEventListener('touchend', () => { if (frameRequest) cancelAnimationFrame(frameRequest); textBoxes.forEach(box => box.classList.remove('is-near')); });
-        }
+        if (settings.interactionMode === 'click') { overlay.addEventListener('click', (e) => { const clickedBox = e.target.closest('.gemini-ocr-text-box'); overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight')); if (clickedBox) { clickedBox.classList.add('manual-highlight'); overlay.classList.add('has-manual-highlight'); } else { overlay.classList.remove('has-manual-highlight'); } e.stopPropagation(); }); }
+        else if (settings.interactionMode === 'proximity') { const textBoxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box')); let frameRequest = null; const handleMove = (clientX, clientY) => { if (frameRequest) return; frameRequest = requestAnimationFrame(() => { const overlayRect = overlay.getBoundingClientRect(), mouseX = clientX - overlayRect.left, mouseY = clientY - overlayRect.top; textBoxes.forEach(box => { const boxCenterX = box.offsetLeft + box.offsetWidth / 2, boxCenterY = box.offsetTop + box.offsetHeight / 2; if (Math.hypot(boxCenterX - mouseX, boxCenterY - mouseY) < settings.proximityRadius) box.classList.add('is-near'); else box.classList.remove('is-near'); }); frameRequest = null; }); }; overlay.addEventListener('touchmove', (e) => { if (e.touches.length > 0) handleMove(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true }); overlay.addEventListener('touchend', () => { if (frameRequest) cancelAnimationFrame(frameRequest); textBoxes.forEach(box => box.classList.remove('is-near')); }); }
         if (!overlayUpdateRunning) { overlayUpdateRunning = true; requestAnimationFrame(updateAllOverlays); }
     }
 
-    // --- Font Calculation (Unchanged) ---
+    // --- Font Calculation ---
     function calculateAndApplyFontSizes(overlay, imgRect) {
         if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return;
         const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', });
@@ -262,7 +224,7 @@
         });
     }
 
-    // --- Main Update Loop (Unchanged, performance-optimized) ---
+    // --- Main Update Loop ---
     function updateAllOverlays() {
         try {
             if (activeSiteConfig?.overflowFixSelector) { const el = document.querySelector(activeSiteConfig.overflowFixSelector); if (el && el.style.overflow !== 'visible') el.style.overflow = 'visible'; }
@@ -285,8 +247,32 @@
     }
 
     // --- ANKI, UI, AND INITIALIZATION ---
-    async function ankiConnectRequest(action, params = {}) { /* ... Unchanged ... */ logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
-    async function exportImageToAnki(targetImg) { /* ... Unchanged ... */ logDebug(`Anki Export: Starting screenshot...`); if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; } if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: The selected image is not valid or fully loaded.'); return false; } try { const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed."); const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); logDebug(`Anki Export: Image stored as '${filename}'`); const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; logDebug(`Anki Export: Found last card with ID ${lastNoteId}`); await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true; } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; } }
+    async function ankiConnectRequest(action, params = {}) {
+        logDebug(`Anki-Connect: Firing action '${action}'`);
+        return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) }));
+    }
+    async function exportImageToAnki(targetImg) {
+        logDebug(`Anki Export: Starting screenshot...`); if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; } if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: The selected image is not valid or fully loaded.'); return false; }
+        try {
+            const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed.");
+            const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); logDebug(`Anki Export: Image stored as '${filename}'`);
+            const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; logDebug(`Anki Export: Found last card with ID ${lastNoteId}`);
+            await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true;
+        } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; }
+    }
+    // NEW: Re-introduced conditional scroll fix for reader pages.
+    function manageScrollFix() {
+        const currentUrl = window.location.href;
+        const shouldBeActive = currentUrl.includes('/manga/') || currentUrl.includes('/chapter/');
+        const isActive = document.documentElement.classList.contains('ocr-scroll-fix-active');
+        if (shouldBeActive && !isActive) {
+            document.documentElement.classList.add('ocr-scroll-fix-active');
+            logDebug("Scroll fix activated for reader page.");
+        } else if (!shouldBeActive && isActive) {
+            document.documentElement.classList.remove('ocr-scroll-fix-active');
+            logDebug("Scroll fix deactivated.");
+        }
+    }
 
     function applyStyles() {
         const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.deepblue;
@@ -305,7 +291,10 @@
 
     function createUI() {
         GM_addStyle(`
-            /* REMOVED: html.ocr-scroll-fix-active rule which was breaking mobile scrolling. */
+            /* NEW: Re-added conditional scroll fix CSS */
+            html.ocr-scroll-fix-active { overflow: hidden !important; }
+            html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
+
             .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9998; pointer-events: none !important; transition: opacity 0.15s, visibility 0.15s; }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box { display: flex; justify-content: center; align-items: center; text-align: center; position: absolute; box-sizing: border-box; border-radius: 4px; user-select: text; cursor: pointer; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px); transition: all 0.2s ease-in-out; pointer-events: auto !important; overflow: hidden; padding: 4px; }
@@ -333,7 +322,6 @@
             #gemini-ocr-server-status { padding: 12px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
-        // HTML structure remains the same
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button>
             <button id="gemini-ocr-settings-button">⚙️</button>
@@ -353,9 +341,38 @@
         `);
     }
 
-    function bindUIEvents() { /* ... Unchanged ... */ Object.assign(UI, { settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'), globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'), debugModal: document.getElementById('gemini-ocr-debug-modal'), serverUrlInput: document.getElementById('gemini-ocr-server-url'), imageServerUserInput: document.getElementById('gemini-image-server-user'), imageServerPasswordInput: document.getElementById('gemini-image-server-password'), ankiUrlInput: document.getElementById('gemini-ocr-anki-url'), ankiFieldInput: document.getElementById('gemini-ocr-anki-field'), debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'), interactionModeSelect: document.getElementById('ocr-interaction-mode'), proximityRadiusInput: document.getElementById('ocr-proximity-radius'), dimmedOpacityInput: document.getElementById('ocr-dimmed-opacity'), textOrientationSelect: document.getElementById('ocr-text-orientation'), colorThemeSelect: document.getElementById('ocr-color-theme'), fontMultiplierHorizontalInput: document.getElementById('ocr-font-multiplier-horizontal'), fontMultiplierVerticalInput: document.getElementById('ocr-font-multiplier-vertical'), sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'), statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'), saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'), }); UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden')); UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("Please tap an image to select it for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); }); UI.globalAnkiButton.addEventListener('touchstart', (e) => { e.stopPropagation(); clearTimeout(hideButtonTimer); }); UI.globalAnkiButton.addEventListener('touchend', (e) => { e.stopPropagation(); hideButtonTimer = setTimeout(() => { UI.globalAnkiButton.classList.add('is-hidden'); if(activeImageForExport) activeImageForExport = null; }, 3000); }); UI.statusDiv.addEventListener('click', checkServerStatus); UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden')); UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }); UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden')); UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); }); UI.interactionModeSelect.addEventListener('change', () => { const isProximity = UI.interactionModeSelect.value === 'proximity'; const radiusInput = UI.proximityRadiusInput; const radiusLabel = document.querySelector('label[for="ocr-proximity-radius"]'); if (radiusInput && radiusLabel) { radiusInput.style.display = isProximity ? 'block' : 'none'; radiusLabel.style.display = isProximity ? 'block' : 'none'; } }); UI.saveBtn.addEventListener('click', async () => { const newSettings = { ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value, ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(), debugMode: UI.debugModeCheckbox.checked, interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value, proximityRadius: parseInt(UI.proximityRadiusInput.value, 10) || 150, dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100, fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0, sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s) }; }) }; try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); } catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); } }); document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }}); }
-    function checkServerStatus() { /* ... Unchanged ... */ const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return; UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...'; GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Cache: ${data.items_in_cache})` : 'Unresponsive'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } }); }
-    function createMeasurementSpan() { /* ... Unchanged ... */ if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:absolute!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
+    function bindUIEvents() {
+        Object.assign(UI, { settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'), globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'), debugModal: document.getElementById('gemini-ocr-debug-modal'), serverUrlInput: document.getElementById('gemini-ocr-server-url'), imageServerUserInput: document.getElementById('gemini-image-server-user'), imageServerPasswordInput: document.getElementById('gemini-image-server-password'), ankiUrlInput: document.getElementById('gemini-ocr-anki-url'), ankiFieldInput: document.getElementById('gemini-ocr-anki-field'), debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'), interactionModeSelect: document.getElementById('ocr-interaction-mode'), proximityRadiusInput: document.getElementById('ocr-proximity-radius'), dimmedOpacityInput: document.getElementById('ocr-dimmed-opacity'), textOrientationSelect: document.getElementById('ocr-text-orientation'), colorThemeSelect: document.getElementById('ocr-color-theme'), fontMultiplierHorizontalInput: document.getElementById('ocr-font-multiplier-horizontal'), fontMultiplierVerticalInput: document.getElementById('ocr-font-multiplier-vertical'), sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'), statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'), saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'), });
+        UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
+        UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("Please tap an image to select it for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
+        UI.globalAnkiButton.addEventListener('touchstart', (e) => { e.stopPropagation(); clearTimeout(hideButtonTimer); });
+        UI.globalAnkiButton.addEventListener('touchend', (e) => { e.stopPropagation(); hideButtonTimer = setTimeout(() => { UI.globalAnkiButton.classList.add('is-hidden'); if(activeImageForExport) activeImageForExport = null; }, 3000); });
+        UI.statusDiv.addEventListener('click', checkServerStatus);
+        UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden'));
+        UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; });
+        UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
+        UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
+        UI.interactionModeSelect.addEventListener('change', () => { const isProximity = UI.interactionModeSelect.value === 'proximity'; const radiusInput = UI.proximityRadiusInput; const radiusLabel = document.querySelector('label[for="ocr-proximity-radius"]'); if (radiusInput && radiusLabel) { radiusInput.style.display = isProximity ? 'block' : 'none'; radiusLabel.style.display = isProximity ? 'block' : 'none'; } });
+        UI.saveBtn.addEventListener('click', async () => {
+            const newSettings = { ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value, ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(), debugMode: UI.debugModeCheckbox.checked, interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value, proximityRadius: parseInt(UI.proximityRadiusInput.value, 10) || 150, dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100, fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0, sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s) }; }) };
+            try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
+            catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
+        });
+        document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
+    }
+
+    function checkServerStatus() {
+        const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return;
+        UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
+        GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Cache: ${data.items_in_cache})` : 'Unresponsive'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } });
+    }
+    function createMeasurementSpan() {
+        if (measurementSpan) return;
+        measurementSpan = document.createElement('span');
+        measurementSpan.style.cssText = `position:absolute!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;`;
+        document.body.appendChild(measurementSpan);
+        logDebug("Created shared measurement span.");
+    }
 
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
@@ -368,7 +385,8 @@
         UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal; UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         UI.interactionModeSelect.dispatchEvent(new Event('change'));
-        // REMOVED: setInterval(manageScrollFix, 500); as it's no longer needed.
+        manageScrollFix(); // Run once on load
+        setInterval(manageScrollFix, 500); // And check periodically
         activateScanner();
     }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
