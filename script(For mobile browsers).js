@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Mobile Port v25.7.27-pc-feature-port)
+// @name         Automatic Content OCR (Mobile Port v25.7.27-pc-feature-port-perf-refactor)
 // @namespace    http://tampermonkey.net/
-// @version      25.7.27-pc-feature-port
-// @description  A true mobile port of v21.6.46, with credential forwarding, separate H/V font multipliers, and dimmed opacity control.
-// @author       1Selxo (Ported & Enhanced by Gemini)
+// @version      25.7.27-perf-refactor
+// @description  A true mobile port of v21.6.46, refactored for speed. Features credential forwarding, H/V font multipliers, and dimmed opacity control.
+// @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function() {
     'use strict';
-    // --- Global State and Settings (Ported from v21.6.46) ---
+    // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
         imageServerUser: '',
@@ -48,6 +48,10 @@
     const UI = {};
     let activeImageForExport = null;
     const LONG_PRESS_DURATION = 500;
+    let visibilityObserver = null;
+    let resizeDebounceTimer = null;
+    const pressState = { timer: null, longPressTriggered: false };
+
 
     // --- Color Themes ---
     const COLOR_THEMES = {
@@ -66,7 +70,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v25.7.27 Mobile] ${logEntry}`);
+        console.log(`[OCR v25.7.27 Perf] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -126,21 +130,18 @@
     }
     function primeImageForOcr(img) {
         if (ocrDataCache.get(img) === 'pending') return;
-        if (managedElements.has(img)) { managedElements.get(img).overlay.remove(); managedElements.delete(img); }
+        if (managedElements.has(img)) { visibilityObserver.unobserve(img); managedElements.get(img).overlay.remove(); managedElements.delete(img); }
         processImage(img);
     }
     function processImage(img) {
         const sourceUrl = img.src;
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
         ocrDataCache.set(img, 'pending');
-
-        // Correctly forward credentials as URL parameters
         let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`;
         if (settings.imageServerUser) {
             logDebug("Forwarding image server credentials to OCR server.");
             ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
         }
-
         GM_xmlhttpRequest({
             method: 'GET', url: ocrRequestUrl, timeout: 30000,
             onload: (res) => {
@@ -168,7 +169,6 @@
         data.forEach((item) => {
             const ocrBox = document.createElement('div'); ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.textContent = item.text;
-            // Store original OCR dimensions for robust font scaling
             ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
             const pixelWidth = item.tightBoundingBox.width * imgRect.width, pixelHeight = item.tightBoundingBox.height * imgRect.height;
             let isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && (pixelHeight > pixelWidth || item.orientation === 90)) || (settings.textOrientation === 'serverAngle' && item.orientation === 90);
@@ -177,41 +177,12 @@
             fragment.appendChild(ocrBox);
         });
         overlay.appendChild(fragment); document.body.appendChild(overlay);
-        const state = { overlay: overlay, lastWidth: 0, lastHeight: 0 };
+        const state = { overlay: overlay, lastWidth: 0, lastHeight: 0, isVisible: false };
         managedElements.set(targetImg, state);
+        targetImg.dataset.geminiOcrManaged = true; // Mark image for event delegation
+        visibilityObserver.observe(targetImg);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
-        // Mobile-first long-press interaction
-        let pressTimer = null, longPressTriggered = false;
-        const onHold = () => {
-            longPressTriggered = true;
-            const isNowVisible = overlay.classList.toggle('is-visible-on-mobile');
-            logDebug(`OCR overlay toggled ${isNowVisible ? 'ON' : 'OFF'} via long-press.`);
-            if (isNowVisible) { activeImageForExport = targetImg; UI.globalAnkiButton?.classList.remove('is-hidden'); }
-            else {
-                overlay.classList.remove('has-manual-highlight');
-                overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
-                if (activeImageForExport === targetImg) { activeImageForExport = null; UI.globalAnkiButton?.classList.add('is-hidden'); }
-            }
-        };
-        const pressDown = (e) => { longPressTriggered = false; pressTimer = setTimeout(onHold, LONG_PRESS_DURATION); };
-        const pressUp = () => clearTimeout(pressTimer);
-        const handleClick = (e) => { if (longPressTriggered) { e.preventDefault(); e.stopPropagation(); } };
-        targetImg.addEventListener("touchstart", pressDown, { passive: true });
-        targetImg.addEventListener("touchend", pressUp);
-        targetImg.addEventListener("touchcancel", pressUp);
-        targetImg.addEventListener("contextmenu", e => e.preventDefault());
-        targetImg.addEventListener("click", handleClick, { capture: true });
-        // Mobile tap-to-highlight
-        overlay.addEventListener('click', (e) => {
-            if (!overlay.classList.contains('is-visible-on-mobile')) return;
-            const tappedBox = e.target.closest('.gemini-ocr-text-box'); if (!tappedBox) return;
-            e.stopPropagation();
-            const isAlreadyHighlighted = tappedBox.classList.contains('manual-highlight');
-            overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
-            if (isAlreadyHighlighted) { overlay.classList.remove('has-manual-highlight'); }
-            else { tappedBox.classList.add('manual-highlight'); overlay.classList.add('has-manual-highlight'); }
-        });
-        if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
+        if (!overlayUpdateRunning) { overlayUpdateRunning = true; requestAnimationFrame(updateAllOverlays); }
     }
 
     // --- Font Calculation (Ported from v21.6.46) ---
@@ -252,21 +223,45 @@
         });
     }
 
-    // --- Main Update Loop ---
+    // --- Main Update Loop (Optimized) ---
     function updateAllOverlays() {
-        overlayUpdateRunning = true;
         try {
             if (activeSiteConfig?.overflowFixSelector) { const el = document.querySelector(activeSiteConfig.overflowFixSelector); if (el && el.style.overflow !== 'visible') el.style.overflow = 'visible'; }
             const elementsToDelete = [];
+            const rectsToUpdate = new Map();
+
+            // BATCH READ: Read all dimensions first to avoid layout thrashing.
             for (const [img, state] of managedElements.entries()) {
                 if (!document.body.contains(img) || !document.body.contains(state.overlay)) { elementsToDelete.push(img); continue; }
-                const rect = img.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) { if (state.overlay.classList.contains('is-visible-on-mobile')) state.overlay.classList.remove('is-visible-on-mobile'); continue; }
-                Object.assign(state.overlay.style, { top: `${rect.top + window.scrollY}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) { logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`); calculateAndApplyFontSizes(state.overlay, rect); state.lastWidth = rect.width; state.lastHeight = rect.height; }
+                if (!state.isVisible) { if (state.overlay.classList.contains('is-visible-on-mobile')) state.overlay.classList.remove('is-visible-on-mobile'); continue; }
+                const rect = img.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) continue;
+                rectsToUpdate.set(img, rect);
             }
-            elementsToDelete.forEach(img => { managedElements.get(img)?.overlay.remove(); managedElements.delete(img); logDebug(`Garbage collected overlay.`); });
+
+            // BATCH WRITE: Update all styles now.
+            for (const [img, rect] of rectsToUpdate.entries()) {
+                const state = managedElements.get(img);
+                Object.assign(state.overlay.style, { top: `${rect.top + window.scrollY}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
+                    logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`);
+                    calculateAndApplyFontSizes(state.overlay, rect);
+                    state.lastWidth = rect.width; state.lastHeight = rect.height;
+                }
+            }
+            elementsToDelete.forEach(img => {
+                const state = managedElements.get(img);
+                if(state) {
+                    visibilityObserver.unobserve(img);
+                    state.overlay.remove();
+                    managedElements.delete(img);
+                    logDebug(`Garbage collected overlay.`);
+                }
+            });
         } catch (error) { logDebug(`Critical error in updateAllOverlays: ${error.message}`); }
-        finally { overlayUpdateRunning = false; if (managedElements.size > 0) requestAnimationFrame(updateAllOverlays); }
+        finally {
+            if (managedElements.size > 0) requestAnimationFrame(updateAllOverlays); else overlayUpdateRunning = false;
+        }
     }
 
     // --- ANKI, UI, AND INITIALIZATION ---
@@ -305,14 +300,13 @@
     function createUI() {
         GM_addStyle(`
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; -webkit-user-select: none; user-select: none; }
+            img[data-gemini-ocr-managed="true"] { -webkit-tap-highlight-color: transparent; }
             .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9999; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.2s ease, visibility 0.2s ease; }
             .gemini-ocr-decoupled-overlay.is-visible-on-mobile { opacity: 1; visibility: visible; }
             .gemini-ocr-text-box { display: flex; justify-content: center; align-items: center; text-align: center; position: absolute; box-sizing: border-box; border-radius: 4px; user-select: text; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px); transition: all 0.2s ease-in-out; pointer-events: auto !important; overflow: hidden; padding: 4px; }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; line-height: 1; }
-            /* Dimmed and Highlighted States */
             .gemini-ocr-decoupled-overlay.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); transform: scale(1.0); }
             .gemini-ocr-decoupled-overlay .manual-highlight { overflow: visible; opacity: 1 !important; transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 10000; }
-            /* Modal, Buttons etc. */
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
             #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
             #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; }
@@ -359,7 +353,7 @@
         `);
     }
 
-    function bindUIEvents() {
+    function bindUIAndDelegatedEvents() {
         Object.assign(UI, {
             settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'),
             globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'), debugModal: document.getElementById('gemini-ocr-debug-modal'),
@@ -394,16 +388,76 @@
             catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
         });
         document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
+        
+        // --- Delegated Event Handlers ---
+        document.body.addEventListener("touchstart", (e) => {
+            const targetImg = e.target.closest('img[data-gemini-ocr-managed="true"]');
+            if (!targetImg) return;
+            pressState.longPressTriggered = false;
+            pressState.timer = setTimeout(() => {
+                pressState.longPressTriggered = true;
+                const state = managedElements.get(targetImg);
+                if (!state) return;
+                const isNowVisible = state.overlay.classList.toggle('is-visible-on-mobile');
+                logDebug(`OCR overlay toggled ${isNowVisible ? 'ON' : 'OFF'} via long-press.`);
+                if (isNowVisible) { activeImageForExport = targetImg; UI.globalAnkiButton?.classList.remove('is-hidden'); }
+                else {
+                    state.overlay.classList.remove('has-manual-highlight');
+                    state.overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
+                    if (activeImageForExport === targetImg) { activeImageForExport = null; UI.globalAnkiButton?.classList.add('is-hidden'); }
+                }
+            }, LONG_PRESS_DURATION);
+        }, { passive: true });
+
+        document.body.addEventListener("touchend", (e) => { clearTimeout(pressState.timer); });
+        document.body.addEventListener("touchcancel", (e) => { clearTimeout(pressState.timer); });
+
+        document.body.addEventListener("click", (e) => {
+            if (pressState.longPressTriggered) { e.preventDefault(); e.stopPropagation(); return; }
+            const tappedBox = e.target.closest('.gemini-ocr-text-box');
+            if (!tappedBox) return;
+            const overlay = tappedBox.closest('.gemini-ocr-decoupled-overlay');
+            if (!overlay || !overlay.classList.contains('is-visible-on-mobile')) return;
+            e.stopPropagation();
+            const isAlreadyHighlighted = tappedBox.classList.contains('manual-highlight');
+            overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
+            if (isAlreadyHighlighted) { overlay.classList.remove('has-manual-highlight'); }
+            else { tappedBox.classList.add('manual-highlight'); overlay.classList.add('has-manual-highlight'); }
+        }, { capture: true });
+        
+        document.body.addEventListener("contextmenu", (e) => { if (e.target.closest('img[data-gemini-ocr-managed="true"]')) e.preventDefault(); });
+        
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeDebounceTimer);
+            resizeDebounceTimer = setTimeout(() => {
+                logDebug("Window resized, queueing font recalculation for all visible elements.");
+                for (const state of managedElements.values()) { state.lastWidth = 0; state.lastHeight = 0; }
+            }, 250);
+        });
     }
 
     function checkServerStatus() { const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return; UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...'; GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Cache: ${data.items_in_cache || 'N/A'})` : 'Unresponsive'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } }); }
     function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:absolute!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
+    function createVisibilityObserver() {
+        if (visibilityObserver) return;
+        visibilityObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const state = managedElements.get(entry.target);
+                if (state) { state.isVisible = entry.isIntersecting; }
+            });
+        }, { root: null, rootMargin: '100px', threshold: 0 });
+        logDebug("Created IntersectionObserver.");
+    }
 
     // --- SCRIPT INITIALIZATION ---
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) { try { const parsed = JSON.parse(loadedSettings); settings = { ...settings, ...parsed }; } catch(e) { logDebug("Could not parse saved settings. Using defaults."); } }
-        createUI(); bindUIEvents(); applyStyles(); createMeasurementSpan();
+        createUI();
+        bindUIAndDelegatedEvents();
+        applyStyles();
+        createMeasurementSpan();
+        createVisibilityObserver();
         UI.serverUrlInput.value = settings.ocrServerUrl; UI.imageServerUserInput.value = settings.imageServerUser || ''; UI.imageServerPasswordInput.value = settings.imageServerPassword || '';
         UI.ankiUrlInput.value = settings.ankiConnectUrl; UI.ankiFieldInput.value = settings.ankiImageField; UI.debugModeCheckbox.checked = settings.debugMode;
         UI.textOrientationSelect.value = settings.textOrientation; UI.colorThemeSelect.value = settings.colorTheme;
