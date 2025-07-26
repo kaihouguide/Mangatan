@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v21.5.21.6-manga-fix-2-no-cache)
+// @name         Automatic Content OCR (v21.6.26 - Final Hybrid)
 // @namespace    http://tampermonkey.net/
-// @version      21.5.21.7-manga-fix-2-no-cache
-// @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left). Decouples overlay and button hide timers. Fixes a syntax error in image selectors. Caching is disabled to always fetch from server.
-// @author       1Selxo 
+// @version      21.6.26
+// @description  The definitive hybrid: Combines the corrected rendering engine with the classic behavior, sorting, and sizing logic of v21.5.21. No persistent cache.
+// @author       1Selxo
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -17,33 +17,29 @@
     // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
-        ankiConnectUrl: 'http://127.0.0.1:8765', // URL for Anki-Connect
-        ankiImageField: 'Image', // Default field name in Anki to place the image
+        ankiConnectUrl: 'http://127.0.0.1:8765',
+        ankiImageField: 'Image',
         sites: [{
             urlPattern: '127.0.0.1',
-                // --- FIX STARTS HERE ---
-                // Added a comma after the 'div.muiltr-cns6dc' selector
-                // to correctly include the RTL selector that follows.
-                imageContainerSelectors: [
-                'div.muiltr-masn8',      // Old Continuous Vertical
-                'div.muiltr-79elbk',      // Webtoon
-                'div.muiltr-u43rde',      // Single Page
-                'div.muiltr-1r1or1s',      // Double Page
-                'div.muiltr-18sieki',     // New Continuous Vertical
-                'div.muiltr-cns6dc',      // Added per request
-                '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical
+            imageContainerSelectors: [
+                'div.muiltr-masn8',
+                'div.muiltr-79elbk',
+                'div.muiltr-u43rde',
+                'div.muiltr-1r1or1s',
+                'div.muiltr-18sieki',
+                'div.muiltr-cns6dc',
+                '.MuiBox-root.muiltr-1noqzsz'
             ],
-            // --- FIX ENDS HERE ---
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
         debugMode: true,
-        textOrientation: 'smart', // smart, serverAngle, forceHorizontal, forceVertical
-        interactionMode: 'hover', // 'hover' or 'click' for HIGHLIGHTING
-        colorTheme: 'deepblue' // deepblue, red, green, orange, purple, turquoise, pink, grey
+        textOrientation: 'smart',
+        interactionMode: 'hover',
+        colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_5_anki';
-    const ocrCache = new WeakMap();
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_final_hybrid';
+    const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
     const attachedAttributeObservers = new WeakMap();
@@ -52,7 +48,7 @@
     let measurementSpan = null;
     const UI = {};
     let activeImageForExport = null;
-    let hideButtonTimer = null; // Global timer for the button
+    let hideButtonTimer = null;
 
     // --- Color Themes ---
     const COLOR_THEMES = {
@@ -66,26 +62,17 @@
         grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging & Persistence ---
+    // --- Logging ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.5.21] ${logEntry}`);
+        console.log(`[OCR v21.6.26] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
-    const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v21_5',
-        data: null,
-        async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
-        async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
-        get(key) { return this.data?.get(key); },
-        has(key) { return this.data?.has(key) ?? false; },
-        async set(key, value) { if(this.data) { this.data.set(key, value); await this.save(); } },
-    };
 
-    // --- CORE LOGIC ---
+    // --- Core Observation Logic ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -108,7 +95,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner v21.5.21...");
+        logDebug("Activating scanner...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -117,147 +104,80 @@
         logDebug("Main container observer is active.");
     }
 
-    // --- Image Processing ---
+    // --- Image Processing (No-Cache Workflow) ---
     function observeImageForSrcChange(img) {
-        const processTheImage = (src) => { if (src?.includes('/api/v1/manga/')) { primeImageForOcr(img); return true; } return false; };
+        const processTheImage = (src) => {
+            if (src?.includes('/api/v1/manga/')) {
+                img.crossOrigin = "anonymous"; // Set for canvas access
+                if (img.complete && img.naturalHeight > 0) {
+                    processImage(img);
+                } else {
+                    img.addEventListener('load', () => processImage(img), { once: true });
+                }
+                return true;
+            }
+            return false;
+        };
         if (processTheImage(img.src)) return;
         if (attachedAttributeObservers.has(img)) return;
         const attributeObserver = new MutationObserver((mutations) => {
-            for (const mutation of mutations) if (mutation.attributeName === 'src') if (processTheImage(img.src)) { attributeObserver.disconnect(); attachedAttributeObservers.delete(img); break; }
+            for (const mutation of mutations) {
+                if (mutation.attributeName === 'src') {
+                    if (processTheImage(img.src)) {
+                        attributeObserver.disconnect();
+                        attachedAttributeObservers.delete(img);
+                        break;
+                    }
+                }
+            }
         });
         attributeObserver.observe(img, { attributes: true });
         attachedAttributeObservers.set(img, attributeObserver);
     }
-    function primeImageForOcr(img) {
-        if (managedElements.has(img)) return;
-        const process = () => {
-            if (managedElements.has(img)) return;
-            img.crossOrigin = "anonymous"; // Necessary for canvas operations
-            const realSrc = img.src;
-            // --- MODIFICATION START: Caching logic removed ---
-            // Caching is disabled per request. Always fetch from server.
-            // Still check for 'pending' to prevent duplicate simultaneous requests for the same image.
-            if (ocrCache.get(img) === 'pending') return;
-            processImage(img, realSrc);
-            // --- MODIFICATION END ---
-        };
-        if (img.complete && img.naturalHeight > 0) process();
-        else img.addEventListener('load', process, { once: true });
-    }
-    function processImage(img, sourceUrl) {
-        if (ocrCache.has(img) && ocrCache.get(img) !== 'pending') return;
+
+    function processImage(img) {
+        if (ocrDataCache.get(img) === 'pending') return;
+        if (managedElements.has(img)) {
+            managedElements.get(img).overlay.remove();
+            managedElements.delete(img);
+        }
+        const sourceUrl = img.src;
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
-        ocrCache.set(img, 'pending');
+        ocrDataCache.set(img, 'pending');
         GM_xmlhttpRequest({
             method: 'GET', url: `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`, timeout: 30000,
             onload: (res) => {
                 try {
-                    const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error);
-                    // --- MODIFICATION START: Do not save to persistent cache ---
-                    // PersistentCache.set(sourceUrl, data);
-                    // --- MODIFICATION END ---
-                    ocrCache.set(img, data);
+                    const data = JSON.parse(res.responseText);
+                    if (data.error) throw new Error(data.error);
+                    ocrDataCache.set(img, data);
                     logDebug(`OCR success for ...${sourceUrl.slice(-30)}`);
                     displayOcrResults(img);
+                } catch (e) {
+                    logDebug(`OCR Error: ${e.message}`);
+                    ocrDataCache.delete(img);
                 }
-                catch (e) { logDebug(`OCR Error: ${e.message}`); ocrCache.delete(img); }
             },
-            onerror: () => { logDebug(`Connection error.`); ocrCache.delete(img); },
-            ontimeout: () => { logDebug(`Request timed out.`); ocrCache.delete(img); }
+            onerror: () => { logDebug(`Connection error.`); ocrDataCache.delete(img); },
+            ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); }
         });
-    }
-
-    // --- ANKI INTEGRATION ---
-    async function ankiConnectRequest(action, params = {}) {
-        logDebug(`Anki-Connect: Firing action '${action}'`);
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'POST', url: settings.ankiConnectUrl,
-                data: JSON.stringify({ action, version: 6, params }),
-                headers: { 'Content-Type': 'application/json; charset=UTF-8' },
-                timeout: 15000,
-                onload: (res) => {
-                    try { const data = JSON.parse(res.responseText); if (data.error) { reject(new Error(data.error)); } else { resolve(data.result); } }
-                    catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); }
-                },
-                onerror: () => reject(new Error('Connection to Anki-Connect failed. Is Anki running with Anki-Connect installed?')),
-                ontimeout: () => reject(new Error('Anki-Connect request timed out.')),
-            });
-        });
-    }
-
-    async function exportImageToAnki(targetImg) {
-        logDebug(`Anki Export: Starting screenshot for image...`);
-        if (!settings.ankiImageField) {
-            logDebug('Anki Export Failed: Image Field name is not configured.');
-            alert('Anki Image Field is not set in settings.');
-            return false;
-        }
-        if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) {
-             logDebug('Anki Export Failed: Target image is not valid.');
-            alert('Anki Export Failed: The selected image is not valid or fully loaded.');
-            return false;
-        }
-
-        try {
-            const canvas = document.createElement('canvas');
-            canvas.width = targetImg.naturalWidth;
-            canvas.height = targetImg.naturalHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(targetImg, 0, 0);
-
-            const base64data = canvas.toDataURL('image/png').split(',')[1];
-            if (!base64data) throw new Error("Canvas toDataURL failed to produce data.");
-
-            const filename = `screenshot_${Date.now()}.png`;
-
-            await ankiConnectRequest('storeMediaFile', { filename, data: base64data });
-            logDebug(`Anki Export: Image stored as '${filename}'`);
-
-            const notes = await ankiConnectRequest('findNotes', { query: 'added:1' });
-            if (!notes || notes.length === 0) { throw new Error('No recently added cards found (query: "added:1"). Create a card first.'); }
-            const lastNoteId = notes.sort((a, b) => b - a)[0];
-            logDebug(`Anki Export: Found last card with ID ${lastNoteId}`);
-
-            await ankiConnectRequest('updateNoteFields', {
-                note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } }
-            });
-
-            logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`);
-            return true;
-        } catch (error) {
-            logDebug(`Anki Export Error: ${error.message}`);
-            if (error.message.includes("SecurityError") || error.message.includes("tainted")) {
-                 alert(`Anki Export Failed: Canvas security error. The script cannot access the image data. This can be due to CORS policy. Try reloading the page.`);
-            } else {
-                 alert(`Anki Export Failed: ${error.message}`);
-            }
-            return false;
-        }
     }
 
     // --- OVERLAY & UPDATE ENGINE ---
     function displayOcrResults(targetImg) {
-        const data = ocrCache.get(targetImg);
+        const data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
 
-        // Sort blocks to follow manga reading order (top-to-bottom, then right-to-left).
+        // Logic from v21.5.21: Sort for manga reading order
         data.sort((a, b) => {
             const a_y = a.tightBoundingBox.y;
             const b_y = b.tightBoundingBox.y;
             const a_x = a.tightBoundingBox.x;
             const b_x = b.tightBoundingBox.x;
-
-            // Tolerance to determine if two bubbles are on the same "row".
-            // 5% of the image height is a reasonable guess for a line of text.
             const ROW_TOLERANCE = 0.05;
-
-            // Check if they are vertically close enough to be considered on the same row.
             if (Math.abs(a_y - b_y) < ROW_TOLERANCE) {
-                // If on the same row, sort from right to left (higher x-value first).
                 return b_x - a_x;
             } else {
-                // Otherwise, sort from top to bottom (lower y-value first).
                 return a_y - b_y;
             }
         });
@@ -269,10 +189,15 @@
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.textContent = item.text;
+
+            // Logic from v21.5.21: Determine text orientation
             let isVertical = (settings.textOrientation === 'forceVertical') ||
                              (settings.textOrientation === 'smart' && item.tightBoundingBox.height > item.tightBoundingBox.width) ||
                              (settings.textOrientation === 'serverAngle' && item.orientation === 90);
-            if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
+            if (isVertical) {
+                ocrBox.classList.add('gemini-ocr-text-vertical');
+            }
+
             Object.assign(ocrBox.style, {
                 left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`,
                 width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%`
@@ -283,9 +208,8 @@
         document.body.appendChild(overlay);
         const state = { overlay: overlay, hideTimeout: null, lastWidth: 0, lastHeight: 0 };
         managedElements.set(targetImg, state);
-        logDebug(`Created decoupled overlay for image: ...${targetImg.src.slice(-30)}`);
+        logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
-        // Decoupled hover logic for overlay and button
         const show = () => {
             clearTimeout(hideButtonTimer);
             clearTimeout(state.hideTimeout);
@@ -295,13 +219,10 @@
             activeImageForExport = targetImg;
         };
         const hide = () => {
-            // Start a short timer to hide the overlay
             state.hideTimeout = setTimeout(() => {
                 overlay.classList.add('is-hidden');
                 overlay.classList.remove('is-focused');
-            }, 300); // Overlay disappears quickly
-
-            // Start a long timer to hide the button
+            }, 300);
             hideButtonTimer = setTimeout(() => {
                 UI.globalAnkiButton?.classList.add('is-hidden');
                 if (activeImageForExport === targetImg) {
@@ -309,7 +230,6 @@
                 }
             }, 2350);
         };
-
         [targetImg, overlay].forEach(el => {
             el.addEventListener('mouseenter', show);
             el.addEventListener('mouseleave', hide);
@@ -327,43 +247,18 @@
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
+    // --- FONT CALCULATION (HYBRID LOGIC) ---
     function calculateAndApplyFontSizes(overlay) {
         if (!measurementSpan) return;
 
-        overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
-            const text = box.textContent || '';
-            if (!text) return;
-
-            const isVertical = box.classList.contains('gemini-ocr-text-vertical');
-            const boxRect = box.getBoundingClientRect();
-            const availableWidth = boxRect.width - 8;
-            const availableHeight = boxRect.height - 8;
-
-            if (availableWidth <= 0 || availableHeight <= 0) return;
-
-            box.style.whiteSpace = 'nowrap';
+        const applyHorizontalStyling = (box, text, availableWidth, availableHeight) => {
             let low = 8, high = 150, bestSize = 8;
-
-            Object.assign(measurementSpan.style, {
-                fontFamily: getComputedStyle(box).fontFamily,
-                fontWeight: getComputedStyle(box).fontWeight,
-                letterSpacing: getComputedStyle(box).letterSpacing,
-            });
-            measurementSpan.textContent = text;
-
+            box.style.whiteSpace = 'nowrap';
             while (low <= high) {
                 const mid = Math.floor((low + high) / 2);
                 if (mid <= 0) break;
                 measurementSpan.style.fontSize = `${mid}px`;
-                let textFits = false;
-
-                if (isVertical) {
-                    textFits = (mid * text.length * 0.9 <= availableHeight) && (mid <= availableWidth);
-                } else {
-                    textFits = (measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight);
-                }
-
-                if (textFits) {
+                if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) {
                     bestSize = mid;
                     low = mid + 1;
                 } else {
@@ -371,10 +266,52 @@
                 }
             }
             box.style.fontSize = `${bestSize}px`;
-            if (isVertical) box.style.lineHeight = '1';
+            box.style.whiteSpace = 'normal';
+        };
+
+        // Logic from v21.5.21: Use heuristic for vertical font sizing
+        const applyVerticalStyling = (box, text, availableWidth, availableHeight) => {
+            let low = 8, high = 150, bestSize = 8;
+            while (low <= high) {
+                const mid = Math.floor((low + high) / 2);
+                if (mid <= 0) break;
+                // Heuristic: Check if estimated text height and width fit.
+                if ((mid * text.length * 0.9 <= availableHeight) && (mid <= availableWidth)) {
+                    bestSize = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+            box.style.fontSize = `${bestSize}px`;
+            box.style.lineHeight = '1';
+        };
+
+        overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
+            const text = box.textContent || '';
+            if (!text) return;
+            const boxRect = box.getBoundingClientRect();
+            const availableWidth = boxRect.width - 8;
+            const availableHeight = boxRect.height - 8;
+            if (availableWidth <= 0 || availableHeight <= 0) return;
+
+            Object.assign(measurementSpan.style, {
+                fontFamily: getComputedStyle(box).fontFamily,
+                fontWeight: getComputedStyle(box).fontWeight,
+                letterSpacing: getComputedStyle(box).letterSpacing,
+                lineHeight: '1',
+            });
+            measurementSpan.textContent = text;
+
+            if (box.classList.contains('gemini-ocr-text-vertical')) {
+                applyVerticalStyling(box, text, availableWidth, availableHeight);
+            } else {
+                applyHorizontalStyling(box, text, availableWidth, availableHeight);
+            }
         });
     }
 
+    // Original update loop logic
     function updateAllOverlays() {
         overlayUpdateRunning = true;
         try {
@@ -382,25 +319,21 @@
                 const el = document.querySelector(activeSiteConfig.overflowFixSelector);
                 if (el && el.style.overflow !== 'visible') el.style.overflow = 'visible';
             }
-
             const elementsToDelete = [];
             for (const [img, state] of managedElements.entries()) {
                 if (!document.body.contains(img) || !document.body.contains(state.overlay)) {
                     elementsToDelete.push(img);
                     continue;
                 }
-
                 const rect = img.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) {
                     if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden');
                     continue;
                 }
-
                 Object.assign(state.overlay.style, {
                     top: `${rect.top + window.scrollY}px`, left: `${rect.left + window.scrollX}px`,
                     width: `${rect.width}px`, height: `${rect.height}px`
                 });
-
                 if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
                     logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`);
                     calculateAndApplyFontSizes(state.overlay);
@@ -408,7 +341,6 @@
                     state.lastHeight = rect.height;
                 }
             }
-
             elementsToDelete.forEach(img => {
                 managedElements.get(img)?.overlay.remove();
                 managedElements.delete(img);
@@ -421,12 +353,72 @@
         }
     }
 
-    // --- UI & EVENT HANDLING ---
+    // --- ANKI, UI, AND INITIALIZATION ---
+    async function ankiConnectRequest(action, params = {}) {
+        logDebug(`Anki-Connect: Firing action '${action}'`);
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'POST', url: settings.ankiConnectUrl,
+                data: JSON.stringify({ action, version: 6, params }),
+                headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+                timeout: 15000,
+                onload: (res) => {
+                    try { const data = JSON.parse(res.responseText); if (data.error) { reject(new Error(data.error)); } else { resolve(data.result); } }
+                    catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); }
+                },
+                onerror: () => reject(new Error('Connection to Anki-Connect failed. Is Anki running?')),
+                ontimeout: () => reject(new Error('Anki-Connect request timed out.')),
+            });
+        });
+    }
+
+    async function exportImageToAnki(targetImg) {
+        logDebug(`Anki Export: Starting screenshot...`);
+        if (!settings.ankiImageField) {
+            logDebug('Anki Export Failed: Image Field name is not configured.');
+            alert('Anki Image Field is not set in settings.');
+            return false;
+        }
+        if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) {
+             logDebug('Anki Export Failed: Target image is not valid.');
+            alert('Anki Export Failed: The selected image is not valid or fully loaded.');
+            return false;
+        }
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = targetImg.naturalWidth;
+            canvas.height = targetImg.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(targetImg, 0, 0);
+            const base64data = canvas.toDataURL('image/png').split(',')[1];
+            if (!base64data) throw new Error("Canvas toDataURL failed to produce data.");
+            const filename = `screenshot_${Date.now()}.png`;
+            await ankiConnectRequest('storeMediaFile', { filename, data: base64data });
+            logDebug(`Anki Export: Image stored as '${filename}'`);
+            const notes = await ankiConnectRequest('findNotes', { query: 'added:1' });
+            if (!notes || notes.length === 0) { throw new Error('No recently added cards found (query: "added:1"). Create a card first.'); }
+            const lastNoteId = notes.sort((a, b) => b - a)[0];
+            logDebug(`Anki Export: Found last card with ID ${lastNoteId}`);
+            await ankiConnectRequest('updateNoteFields', {
+                note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } }
+            });
+            logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`);
+            return true;
+        } catch (error) {
+            logDebug(`Anki Export Error: ${error.message}`);
+             if (error.message.includes("SecurityError") || error.message.includes("tainted")) {
+                 alert(`Anki Export Failed: Canvas security error. The script cannot access the image data. This can be due to CORS policy. Try reloading the page.`);
+            } else {
+                 alert(`Anki Export Failed: ${error.message}`);
+            }
+            return false;
+        }
+    }
+
     function manageScrollFix() {
         const urlPattern = '/manga/';
         const shouldBeActive = window.location.href.includes(urlPattern);
         const isActive = document.documentElement.classList.contains('ocr-scroll-fix-active');
-
         if (shouldBeActive && !isActive) {
             document.documentElement.classList.add('ocr-scroll-fix-active');
             console.log("[OCR] Applied scroll fix for /manga/ URL.");
@@ -464,14 +456,20 @@
             .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9998; pointer-events: none !important; transition: opacity 0.15s, visibility 0.15s; }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box {
-                position: absolute; display: flex; align-items: center; justify-content: center; text-align: center;
+                position: absolute;
+                display: grid; /* Corrected rendering engine */
+                place-items: center;
+                text-align: center;
                 box-sizing: border-box; border-radius: 4px; user-select: text; cursor: pointer;
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color);
                 text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px);
                 transition: all 0.2s ease-in-out; pointer-events: auto !important;
                 overflow: hidden; padding: 4px;
             }
-            .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
+            .gemini-ocr-text-vertical {
+                writing-mode: vertical-rl !important;
+                text-orientation: upright !important;
+            }
             .interaction-mode-hover.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover) { opacity: 0.3; background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
             .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
             .interaction-mode-click.is-focused .manual-highlight { overflow: visible; transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; }
@@ -504,7 +502,7 @@
             <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button>
             <button id="gemini-ocr-settings-button">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
-                <div class="gemini-ocr-modal-header"><h2>Local OCR Settings (v21.5.21)</h2></div>
+                <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings</h2></div>
                 <div class="gemini-ocr-modal-content">
                     <h3>OCR Server</h3><div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-server-url">Server URL:</label><input type="text" id="gemini-ocr-server-url"></div>
                     <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div>
@@ -542,47 +540,22 @@
             debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
         });
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
-
         UI.globalAnkiButton.addEventListener('click', async () => {
-            if (!activeImageForExport) {
-                alert("Please hover your mouse over an image to select it for export.");
-                return;
-            }
+            if (!activeImageForExport) { alert("Please hover your mouse over an image to select it for export."); return; }
             const btn = UI.globalAnkiButton;
-            btn.textContent = '…';
-            btn.disabled = true;
-
+            btn.textContent = '…'; btn.disabled = true;
             const success = await exportImageToAnki(activeImageForExport);
-
-             if (success) {
-                btn.textContent = '✓';
-                btn.style.backgroundColor = '#27ae60';
-            } else {
-                btn.textContent = '✖';
-                btn.style.backgroundColor = '#c0392b';
-            }
-            setTimeout(() => {
-                btn.textContent = '✚';
-                btn.style.backgroundColor = '';
-                btn.disabled = false;
-            }, 2000);
+            if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; }
+            else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; }
+            setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000);
         });
-
-        UI.globalAnkiButton.addEventListener('mouseenter', () => {
-            clearTimeout(hideButtonTimer);
-        });
-        UI.globalAnkiButton.addEventListener('mouseleave', () => {
-            hideButtonTimer = setTimeout(() => {
-                UI.globalAnkiButton.classList.add('is-hidden');
-                activeImageForExport = null;
-            }, 2350);
-        });
-
+        UI.globalAnkiButton.addEventListener('mouseenter', () => clearTimeout(hideButtonTimer));
+        UI.globalAnkiButton.addEventListener('mouseleave', () => { hideButtonTimer = setTimeout(() => { UI.globalAnkiButton.classList.add('is-hidden'); activeImageForExport = null; }, 2350); });
         UI.statusDiv.addEventListener('click', checkServerStatus);
         UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden'));
         UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; });
         UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
-        UI.colorThemeSelect.addEventListener('change', () => { const theme = COLOR_THEMES[UI.colorThemeSelect.value] || COLOR_THEMES.deepblue; document.documentElement.style.setProperty('--modal-header-color', theme.main + '1)'); });
+        UI.colorThemeSelect.addEventListener('change', () => { applyColorTheme(); document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
                 ocrServerUrl: UI.serverUrlInput.value.trim(),
@@ -604,7 +577,7 @@
         UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
         GM_xmlhttpRequest({
             method: 'GET', url: serverUrl, timeout: 5000,
-            onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (${data.items_in_cache} cached)` : 'Unresponsive Server'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } },
+            onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Server Cache: ${data.items_in_cache})` : 'Unresponsive Server'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } },
             onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; },
             ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Timed Out'; }
         });
@@ -625,16 +598,12 @@
             try {
                 const parsedSettings = JSON.parse(loadedSettings);
                 settings = { ...settings, ...parsedSettings };
-                delete settings.fontSizePercent;
-                delete settings.adaptiveFont;
             } catch(e) { logDebug("Could not parse saved settings. Using defaults."); }
         }
         createUI();
-        createMeasurementSpan();
-        // Caching is disabled by changes in primeImageForOcr and processImage, so PersistentCache.load() is effectively inert.
-        await PersistentCache.load();
         bindUIEvents();
         applyColorTheme();
+        createMeasurementSpan();
 
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.ankiUrlInput.value = settings.ankiConnectUrl;
@@ -646,9 +615,7 @@
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
 
         setInterval(manageScrollFix, 500);
-
         activateScanner();
-        if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
-    init().catch(e => console.error(`[OCR v21.5.21] Fatal Initialization Error: ${e.message}`));
+    init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
 })();
