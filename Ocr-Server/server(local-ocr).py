@@ -7,6 +7,7 @@ import threading
 import hashlib
 import argparse
 import sys
+import base64  # <-- ADDED: For handling Basic Authentication encoding
 
 # --- Platform-Specific Fix for Windows ---
 if sys.platform == "win32":
@@ -144,13 +145,28 @@ async def ocr_endpoint():
 
     print(f"[Processing] for: ...{image_url[-40:]}")
     try:
+        # --- NEW: Read credentials and prepare auth headers ---
+        auth_user = request.args.get('user')
+        auth_pass = request.args.get('pass')
+        auth_headers = {}
+
+        if auth_user:
+            print(f"[Auth] Using credentials for user: '{auth_user}' to fetch image.")
+            # Create the value for the 'Authorization: Basic ...' header
+            auth_string = f"{auth_user}:{auth_pass}"
+            auth_base64 = base64.b64encode(auth_string.encode('utf-8')).decode('utf-8')
+            auth_headers['Authorization'] = f'Basic {auth_base64}'
+        # --- END OF NEW CODE ---
+
         url_hash = hashlib.sha256(image_url.encode('utf-8')).hexdigest()
         local_image_path = os.path.join(IMAGE_CACHE_FOLDER, f"{url_hash}.jpg")
 
+        # --- MODIFIED: Pass the 'auth_headers' to the get request ---
         async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as response:
-                response.raise_for_status()
+            async with session.get(image_url, headers=auth_headers) as response:
+                response.raise_for_status() # This will now check for 401 errors
                 image_bytes = await response.read()
+        # --- END OF MODIFICATION ---
 
         # Disable Pillow's decompression bomb check to handle large images,
         # since we are controlling the processing flow.
@@ -211,6 +227,10 @@ async def ocr_endpoint():
         print(f"OCR successful for: ...{image_url[-40:]}")
         return jsonify(transformed_result)
         
+    except aiohttp.ClientResponseError as e:
+        error_message = f"Failed to fetch image from URL: {image_url}, status: {e.status}"
+        print(f"ERROR: {error_message}")
+        return jsonify({'error': error_message}), 500
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
         print(f"ERROR on {image_url[-40:]}: {error_message}")
