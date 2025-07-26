@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.4 - Scrolling Fix)
+// @name         Automatic Content OCR (v22.M.5 - Layout Stability Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.4
-// @description  Fixes the aggressive scroll-fix that broke page layouts. Original: Adds passive mode and active mode for mobile.
-// @author       1Selxo (Mobile port by Gemini, with fix)
+// @version      22.M.5
+// @description  Permanently removes the aggressive scroll-fix that broke page layouts and caused resizing issues.
+// @author       1Selxo (Mobile port by Gemini, with layout fix)
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -65,7 +65,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.4] ${logEntry}`);
+        console.log(`[OCR v22.M.5] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -197,34 +197,22 @@
     // --- ANKI, UI, AND INITIALIZATION ---
     async function ankiConnectRequest(action, params = {}) { logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
     async function exportImageToAnki(targetImg) { logDebug(`Anki Export: Starting screenshot...`); if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; } if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: The selected image is not valid or fully loaded.'); return false; } try { const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed."); const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); logDebug(`Anki Export: Image stored as '${filename}'`); const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; logDebug(`Anki Export: Found last card with ID ${lastNoteId}`); await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true; } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; } }
-    
-    // --- THIS FUNCTION CAUSED THE SCROLLING PROBLEM ---
-    // This function applies a style that hides overflow on the main HTML element.
-    // While this might fix scrolling on some specific websites, it breaks the layout on many others, as you've seen.
-    // It has been disabled by commenting out the timer that calls it in the init() function below.
-    function manageScrollFix() {
-        const urlPattern = '/manga/'; // This pattern was too broad.
-        const shouldBeActive = window.location.href.includes(urlPattern);
-        const isActive = document.documentElement.classList.contains('ocr-scroll-fix-active');
-        if (shouldBeActive && !isActive) {
-            document.documentElement.classList.add('ocr-scroll-fix-active');
-        } else if (!shouldBeActive && isActive) {
-            document.documentElement.classList.remove('ocr-scroll-fix-active');
-        }
-    }
+
+    // --- FIX ---
+    // The function `manageScrollFix` and its associated CSS class `ocr-scroll-fix-active`
+    // have been completely removed from the script. They were causing major layout issues
+    // on many websites by setting 'overflow: hidden' on the entire page, which resulted
+    // in the "page becomes really small" problem. Removing them ensures the script
+    // no longer modifies global page dimensions.
 
     function applyStyles() { const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.deepblue; const cssVars = `:root { --ocr-bg-color: rgba(10,25,40,0.85); --ocr-border-color: ${theme.main}0.6); --ocr-border-color-dim: ${theme.main}0.3); --ocr-border-color-hover: ${theme.main}0.8); --ocr-text-color: ${theme.text}; --ocr-highlight-bg-color: ${theme.main}0.9); --ocr-highlight-border-color: rgba(255,255,255,0.9); --ocr-highlight-text-color: ${theme.highlightText}; --ocr-highlight-shadow: 0 0 10px ${theme.main}0.5); --ocr-highlight-inset-shadow: inset 0 0 0 2px white; --modal-header-color: ${theme.main}1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; }`; let styleTag = document.getElementById('gemini-ocr-dynamic-styles'); if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); } styleTag.textContent = cssVars; logDebug(`Applied theme ${settings.colorTheme} and styles (Dim Opacity: ${settings.dimmedOpacity})`); }
 
     function createUI() {
         GM_addStyle(`
             /* 
-             * The 'ocr-scroll-fix-active' class is what caused the problem by setting 'overflow: hidden !important;'.
-             * The CSS rule is left here in case it's needed for a specific site, but the function that applies it 
-             * is now disabled by default to prevent breaking most websites.
+             * NOTE: The problematic 'html.ocr-scroll-fix-active' CSS rule has been REMOVED 
+             * from this script to prevent page layout breakage.
             */
-            html.ocr-scroll-fix-active { overflow: hidden !important; } 
-            html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
-
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
                 pointer-events: none;
@@ -354,10 +342,8 @@
         UI.dimmedOpacityInput.value = settings.dimmedOpacity * 100;
         UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal; UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
-        
-        // FIX: The line below, which called manageScrollFix every 500ms, caused the page layout to break. It has been disabled.
-        // setInterval(manageScrollFix, 500);
 
+        // FIX: The interval that called the problematic manageScrollFix function has been completely removed.
         activateScanner();
     }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
