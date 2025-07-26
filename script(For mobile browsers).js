@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.3 - Scrolling Fix)
+// @name         Automatic Content OCR (v22.M.4 - Scrolling Fix)
 // @namespace    http://tampermonkey.net/
 // @version      22.M.4
 // @description  Fixes the aggressive scroll-fix that broke page layouts. Original: Adds passive mode and active mode for mobile.
