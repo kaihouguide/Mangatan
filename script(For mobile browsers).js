@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      25.7.27-pc-feature-port
 // @description  A true mobile port of v21.6.46, with credential forwarding, separate H/V font multipliers, and dimmed opacity control.
-// @author       1Selxo (Ported & Enhanced by Gemini)
+// @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
