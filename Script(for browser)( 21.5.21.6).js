@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (Local Overlay Manager - v21.5.21.6-manga-fix-2)
+// @name         Automatic Content OCR (Local Overlay Manager - v21.5.21.7-manga-fix-final)
 // @namespace    http://tampermonkey.net/
-// @version      21.5.21.6-manga-fix-2
-// @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left). Decouples overlay and button hide timers. Fixes a syntax error in image selectors.
+// @version      21.5.21.7-manga-fix-final
+// @description  Correctly sorts OCR results for full manga pages (top-to-bottom, then right-to-left) and correctly finds pages in RTL mode.
 // @author       1Selxo 
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
@@ -21,19 +21,15 @@
         ankiImageField: 'Image', // Default field name in Anki to place the image
         sites: [{
             urlPattern: '127.0.0.1',
-                // --- FIX STARTS HERE ---
-                // Added a comma after the 'div.muiltr-cns6dc' selector
-                // to correctly include the RTL selector that follows.
-                imageContainerSelectors: [
+            imageContainerSelectors: [
                 'div.muiltr-masn8',      // Old Continuous Vertical
                 'div.muiltr-79elbk',      // Webtoon
                 'div.muiltr-u43rde',      // Single Page
                 'div.muiltr-1r1or1s',      // Double Page
                 'div.muiltr-18sieki',     // New Continuous Vertical
                 'div.muiltr-cns6dc',      // Added per request
-                '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical
+                '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical (FIXED)
             ],
-            // --- FIX ENDS HERE ---
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
         debugMode: true,
