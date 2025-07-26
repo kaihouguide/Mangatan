@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.6.48 - Mobile Restoration)
+// @name         Automatic Content OCR (v21.6.49 - Long Press & Final Polish)
 // @namespace    http://tampermonkey.net/
-// @version      21.6.48
-// @description  Restores all original mobile port features (focus, highlighting, text selection) and correctly merges new PC features (proximity mode, opacity control).
-// @author       1Selxo (Ported and Restored by Gemini)
+// @version      21.6.49
+// @description  Restores the original long-press interaction to show the overlay, providing the definitive mobile experience with all features.
+// @author       1Selxo (Ported and Polished by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -36,10 +36,11 @@
         dimmedOpacity: 0.3,
         colorTheme: 'deepblue',
         fontMultiplierHorizontal: 1.0,
-        fontMultiplierVertical: 1.0
+        fontMultiplierVertical: 1.0,
+        longPressDuration: 500 // Duration in ms for long press
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_mobile_restored'; // New key to prevent conflicts
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_mobile_final'; // Final key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -68,7 +69,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.6.48 Mobile] ${logEntry}`);
+        console.log(`[OCR v21.6.49 Mobile] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -150,7 +151,7 @@
         });
     }
 
-    // --- OVERLAY & UPDATE ENGINE (RESTORATION) ---
+    // --- OVERLAY & UPDATE ENGINE ---
     function displayOcrResults(targetImg) {
         const data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
@@ -175,12 +176,12 @@
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
-        // --- RESTORED: Original Mobile Interaction Logic ---
+        // --- FINAL: Long Press Interaction Logic ---
+        let longPressTimer = null;
         const show = (e) => {
-            e.preventDefault();
+            if (e) e.preventDefault();
             clearTimeout(hideButtonTimer); clearTimeout(state.hideTimeout);
             overlay.classList.remove('is-hidden');
-            // This is the key "focus" state for the entire overlay
             overlay.classList.add('is-focused');
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
@@ -188,7 +189,6 @@
         const hide = () => {
             state.hideTimeout = setTimeout(() => {
                 overlay.classList.add('is-hidden');
-                // Remove all focus and highlight states when hiding
                 overlay.classList.remove('is-focused', 'has-manual-highlight');
                 overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
             }, 500);
@@ -197,25 +197,40 @@
                 if (activeImageForExport === targetImg) activeImageForExport = null;
             }, 3000);
         };
-        targetImg.addEventListener('touchstart', show, { passive: false });
+
+        const startLongPress = (e) => {
+            e.preventDefault();
+            longPressTimer = setTimeout(() => {
+                show(e);
+                longPressTimer = null;
+            }, settings.longPressDuration);
+        };
+        const cancelLongPress = () => {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+        };
+
+        targetImg.addEventListener('touchstart', startLongPress, { passive: false });
+        targetImg.addEventListener('touchend', cancelLongPress);
+        targetImg.addEventListener('touchmove', cancelLongPress);
+
+        // Allow keeping the overlay active with a simple tap on its background
         overlay.addEventListener('touchstart', (e) => {
-            // If the overlay itself is touched (not a box), treat it as a "show" event to keep it active
             if (e.target === overlay) show(e);
         }, { passive: false });
+
         document.body.addEventListener('touchstart', (e) => { if (!overlay.contains(e.target) && !targetImg.contains(e.target)) { hide(); } });
 
-        // --- RESTORED: Mode-specific Interaction Logic ---
         if (settings.interactionMode === 'click') {
             overlay.addEventListener('click', (e) => {
                 const clickedBox = e.target.closest('.gemini-ocr-text-box');
-                // Remove previous highlight first
                 overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
                 if (clickedBox) {
-                    // Add highlight to the clicked box
                     clickedBox.classList.add('manual-highlight');
                     overlay.classList.add('has-manual-highlight');
                 } else {
-                    // If background is clicked, remove the general highlight state
                     overlay.classList.remove('has-manual-highlight');
                 }
                 e.stopPropagation();
@@ -239,7 +254,7 @@
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
-    // --- FONT CALCULATION (UNIFIED) ---
+    // --- FONT CALCULATION ---
     function calculateAndApplyFontSizes(overlay, imgRect) {
         if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return;
         const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', });
@@ -321,27 +336,10 @@
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
             .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9998; pointer-events: none !important; transition: opacity 0.15s, visibility 0.15s; }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
-            /* RESTORED: user-select is critical for mobile text selection */
             .gemini-ocr-text-box { position: absolute; display: flex; justify-content: center; align-items: center; text-align: center; box-sizing: border-box; border-radius: 4px; user-select: text; -webkit-user-select: text; cursor: pointer; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px); transition: all 0.2s ease-in-out; pointer-events: auto !important; overflow: hidden; padding: 4px; }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; }
-
-            /* --- RESTORED: Full Interaction CSS Logic --- */
-            /* Highlighted Box State (Click, Proximity, or Hover) */
-            .interaction-mode-click.is-focused .manual-highlight,
-            .interaction-mode-proximity.is-focused .is-near,
-            .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover {
-                transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color);
-                color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow);
-                z-index: 9999; opacity: 1;
-            }
-            /* Dimmed Box State (when another box is highlighted) */
-            .interaction-mode-click.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight),
-            .interaction-mode-proximity.is-focused .gemini-ocr-text-box:not(.is-near),
-            .interaction-mode-hover.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover) {
-                opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim);
-            }
-
-            /* --- RESTORED: Mobile-first Modal and UI Layout --- */
+            .interaction-mode-click.is-focused .manual-highlight, .interaction-mode-proximity.is-focused .is-near, .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover { transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; opacity: 1; }
+            .interaction-mode-click.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight), .interaction-mode-proximity.is-focused .gemini-ocr-text-box:not(.is-near), .interaction-mode-hover.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover) { opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 55px; height: 55px; font-size: 30px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
             #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 85px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 55px; height: 55px; font-size: 36px; line-height: 55px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
             #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; } #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
@@ -372,6 +370,7 @@
                         <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field">
                     </div>
                     <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid">
+                        <label for="ocr-long-press-duration">Long Press Duration (ms):</label><input type="number" id="ocr-long-press-duration" min="100" max="2000" step="50">
                         <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme">${Object.keys(COLOR_THEMES).map(t => `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join('')}</select>
                         <label for="ocr-interaction-mode">Highlight Mode:</label><select id="ocr-interaction-mode"><option value="click">On Click</option><option value="proximity">On Proximity</option><option value="hover">On Hover (PC)</option></select>
                         <div id="proximity-radius-container" style="display: none;"><label for="ocr-proximity-radius">Proximity Radius (px):</label><input type="number" id="ocr-proximity-radius" min="10" max="1000" step="10"></div>
@@ -404,20 +403,17 @@
             statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
             saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'),
             debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
+            longPressDurationInput: document.getElementById('ocr-long-press-duration'),
         });
 
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
-        UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("Tap on an image to select it for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
+        UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("Long-press an image to select it for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
         UI.statusDiv.addEventListener('click', checkServerStatus);
         UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden'));
         UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; });
         UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
         UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
-
-        UI.interactionModeSelect.addEventListener('change', () => {
-            UI.proximityRadiusContainer.style.display = UI.interactionModeSelect.value === 'proximity' ? '' : 'none';
-        });
-
+        UI.interactionModeSelect.addEventListener('change', () => { UI.proximityRadiusContainer.style.display = UI.interactionModeSelect.value === 'proximity' ? '' : 'none'; });
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
                 ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value,
@@ -425,6 +421,7 @@
                 interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value,
                 proximityRadius: parseInt(UI.proximityRadiusInput.value, 10) || 150, dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100,
                 fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0,
+                longPressDuration: parseInt(UI.longPressDurationInput.value, 10) || 500,
                 sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s) }; })
             };
             try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
@@ -446,6 +443,7 @@
         UI.interactionModeSelect.value = settings.interactionMode; UI.textOrientationSelect.value = settings.textOrientation; UI.colorThemeSelect.value = settings.colorTheme;
         UI.dimmedOpacityInput.value = settings.dimmedOpacity * 100; UI.proximityRadiusInput.value = settings.proximityRadius;
         UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal; UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical;
+        UI.longPressDurationInput.value = settings.longPressDuration;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         UI.interactionModeSelect.dispatchEvent(new Event('change'));
         setInterval(manageScrollFix, 500);
