@@ -4,7 +4,7 @@
 // @version      24.7.24-final-fix-2
 // @description  Restores the old, reliable scroll-fix logic that is URL-aware, fixing the "no exit" bug and allowing normal scrolling on non-reader pages. Fixes a syntax error in image selectors.
 // @author       1Selxo 
-// @match        http://127.0.0.1/*
+// @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
