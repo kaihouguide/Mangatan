@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.6.50 - Classic Controls)
+// @name         Automatic Content OCR (v21.6.51 - Long Press & Classic Scroll)
 // @namespace    http://tampermonkey.net/
-// @version      21.6.50
-// @description  Brings back the original mobile touch controls from v21.6.42 while retaining the modern, performant backend and conditional scroll-fix.
+// @version      21.6.51
+// @description  Implements long-press to toggle overlays and restores the original /manga/ scroll-fix, combining classic controls with the modern, performant backend.
 // @author       1Selxo & Gemini
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -38,7 +38,7 @@
     };
     let settings = { ...DEFAULTS };
     const debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_50_classic_controls'; // Updated Key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_51_longpress'; // Updated Key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -67,7 +67,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.6.50 Classic] ${logEntry}`);
+        console.log(`[OCR v21.6.51 Long Press] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -179,31 +179,64 @@
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
-        // --- REVERTED: Original mobile touch events from v21.6.42 ---
-        const show = (e) => {
-            e.preventDefault();
+        // --- NEW: Long Press to Toggle Controls ---
+        let longPressTimer;
+        let isDragging = false;
+        const LONG_PRESS_DURATION = 500; // ms
+        const DRAG_THRESHOLD = 10; // pixels
+
+        const showOverlay = () => {
             clearTimeout(hideButtonTimer); clearTimeout(state.hideTimeout);
-            overlay.classList.remove('is-hidden', 'is-focused'); // Ensure it's visible
+            overlay.classList.remove('is-hidden');
             overlay.classList.add('is-focused');
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
         };
-        const hide = () => {
-            state.hideTimeout = setTimeout(() => { overlay.classList.add('is-hidden'); overlay.classList.remove('is-focused'); }, 500); // Longer delay for touch
-            hideButtonTimer = setTimeout(() => { UI.globalAnkiButton?.classList.add('is-hidden'); if (activeImageForExport === targetImg) activeImageForExport = null; }, 3000);
+
+        const hideOverlay = () => {
+            state.hideTimeout = setTimeout(() => { overlay.classList.add('is-hidden'); overlay.classList.remove('is-focused'); }, 100); // Shorter hide delay
+            hideButtonTimer = setTimeout(() => { UI.globalAnkiButton?.classList.add('is-hidden'); if (activeImageForExport === targetImg) activeImageForExport = null; }, 100);
         };
 
-        targetImg.addEventListener('touchstart', show, { passive: false });
-        overlay.addEventListener('touchstart', show, { passive: false });
+        targetImg.addEventListener('touchstart', (e) => {
+            isDragging = false;
+            const touchX = e.touches[0].clientX;
+            const touchY = e.touches[0].clientY;
 
-        // Hide when touching outside
-        document.body.addEventListener('touchstart', (e) => {
-            const isRelated = overlay.contains(e.target) || targetImg.contains(e.target) || UI.globalAnkiButton.contains(e.target) || UI.settingsButton.contains(e.target);
-            if (!isRelated && !overlay.classList.contains('is-hidden')) {
-               hide();
-            }
+            longPressTimer = setTimeout(() => {
+                if (isDragging) return; // Don't fire if user started dragging
+                e.preventDefault(); // Prevent context menu
+                logDebug("Long press detected.");
+                // Toggle visibility
+                if (overlay.classList.contains('is-hidden')) {
+                    showOverlay();
+                } else {
+                    hideOverlay();
+                }
+            }, LONG_PRESS_DURATION);
+
+            // Listener to detect dragging
+            const handleMove = (moveEvent) => {
+                if (isDragging) return;
+                const deltaX = Math.abs(moveEvent.touches[0].clientX - touchX);
+                const deltaY = Math.abs(moveEvent.touches[0].clientY - touchY);
+                if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
+                    isDragging = true;
+                    logDebug("Drag detected, cancelling long press.");
+                    clearTimeout(longPressTimer);
+                    targetImg.removeEventListener('touchmove', handleMove);
+                }
+            };
+            targetImg.addEventListener('touchmove', handleMove, { passive: true });
+        }, { passive: true });
+
+        targetImg.addEventListener('touchend', () => {
+            clearTimeout(longPressTimer); // Always clear timer on touch end
         });
-        // --- End of reverted controls ---
+        targetImg.addEventListener('touchcancel', () => {
+            clearTimeout(longPressTimer);
+        });
+        // --- End of new controls ---
 
         if (settings.interactionMode === 'click') {
             overlay.addEventListener('click', (e) => {
@@ -278,12 +311,18 @@
             await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true;
         } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; }
     }
+    // REVERTED: Original scroll fix logic from v21.6.42
     function manageScrollFix() {
-        const currentUrl = window.location.href;
-        const shouldBeActive = currentUrl.includes('/manga/') || currentUrl.includes('/chapter/');
+        const urlPattern = '/manga/';
+        const shouldBeActive = window.location.href.includes(urlPattern);
         const isActive = document.documentElement.classList.contains('ocr-scroll-fix-active');
-        if (shouldBeActive && !isActive) { document.documentElement.classList.add('ocr-scroll-fix-active'); logDebug("Scroll fix activated for reader page."); }
-        else if (!shouldBeActive && isActive) { document.documentElement.classList.remove('ocr-scroll-fix-active'); logDebug("Scroll fix deactivated."); }
+        if (shouldBeActive && !isActive) {
+            document.documentElement.classList.add('ocr-scroll-fix-active');
+            logDebug("Classic scroll fix activated for /manga/ page.");
+        } else if (!shouldBeActive && isActive) {
+            document.documentElement.classList.remove('ocr-scroll-fix-active');
+            logDebug("Classic scroll fix deactivated.");
+        }
     }
 
     function applyStyles() {
@@ -304,7 +343,7 @@
 
     function createUI() {
         GM_addStyle(`
-            /* Conditional scroll fix for reader pages */
+            /* REVERTED: Original scroll fix CSS */
             html.ocr-scroll-fix-active { overflow: hidden !important; }
             html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
 
@@ -379,7 +418,7 @@
             closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
         });
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
-        UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("Please tap an image to select it for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
+        UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("Please long press an image to select it for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
         UI.statusDiv.addEventListener('click', checkServerStatus);
         UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden'));
         UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; });
@@ -423,8 +462,10 @@
         UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal; UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         
-        manageScrollFix(); // Run once on load
-        setInterval(manageScrollFix, 500); // And check periodically
+        // Activate the classic scroll fix
+        manageScrollFix();
+        setInterval(manageScrollFix, 500);
+        
         activateScanner();
     }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
