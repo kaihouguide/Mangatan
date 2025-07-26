@@ -184,8 +184,13 @@ function transformOcrData(lensResult) {
     });
 }
 
-app.listen(port, () => {
-    loadCacheFromFile();
-    console.log(`Local OCR Server V2.5 listening at http://127.0.0.1:${port}`);
-    console.log('Features: Persistent Caching, Import/Export, Conditional Auth Forwarding');
+app.listen(port, (err) => {
+    if (err) {
+        console.error('An error has occurred while booting up the server.');
+        console.error(err);
+    } else {
+        loadCacheFromFile();
+        console.log(`Local OCR Server V2.5 listening at http://127.0.0.1:${port}`);
+        console.log('Features: Persistent Caching, Import/Export, Conditional Auth Forwarding');
+    }
 });
