@@ -38,6 +38,7 @@ You'll need a few things before you start. Please install them in the following 
 
 1.  Download the OCR Server project files as a **ZIP** and unzip the folder.
 2.  Open your terminal or Command Prompt and navigate into the unzipped OCR Server folder.
+3.  ![showcase](Mangatan/kaihouguide mangatan/For PC Desktop (Windows版)/Step 2 Get the OCR Server Source Code/1. downloading ocr server.gif)
 
 ### ⚙️ Step 3: Install Dependencies & Configure
 
