@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.6.46 - Bugfix & Opacity Control)
+// @name         Automatic Content OCR (v21.6.48 - Restored Logic)
 // @namespace    http://tampermonkey.net/
-// @version      21.6.46
-// @description  Adds user-controlled opacity for dimmed boxes, improves centering, and adds proximity mode.
-// @author       1Selxo 
+// @version      21.6.48
+// @description  Restores both the stable font calculation and "smart" orientation logic from v21.6.26. Keeps new features like proximity mode, opacity control, and multipliers.
+// @author       1Selxo
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -68,7 +68,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v21.6.46] ${logEntry}`);
+        console.log(`[OCR v21.6.48] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -161,14 +161,25 @@
         });
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
-        const fragment = document.createDocumentFragment(), imgRect = targetImg.getBoundingClientRect();
+        const fragment = document.createDocumentFragment();
         data.forEach((item) => {
-            const ocrBox = document.createElement('div'); ocrBox.className = 'gemini-ocr-text-box';
-            ocrBox.textContent = item.text; ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
-            const pixelWidth = item.tightBoundingBox.width * imgRect.width, pixelHeight = item.tightBoundingBox.height * imgRect.height;
-            let isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && (pixelHeight > pixelWidth || item.orientation === 90)) || (settings.textOrientation === 'serverAngle' && item.orientation === 90);
-            if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
-            Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
+            const ocrBox = document.createElement('div');
+            ocrBox.className = 'gemini-ocr-text-box';
+            ocrBox.textContent = item.text;
+
+            // *** LOGIC RESTORED from v21.6.26 ***
+            let isVertical = (settings.textOrientation === 'forceVertical') ||
+                             (settings.textOrientation === 'smart' && item.tightBoundingBox.height > item.tightBoundingBox.width) ||
+                             (settings.textOrientation === 'serverAngle' && item.orientation === 90);
+
+            if (isVertical) {
+                ocrBox.classList.add('gemini-ocr-text-vertical');
+            }
+
+            Object.assign(ocrBox.style, {
+                left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`,
+                width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%`
+            });
             fragment.appendChild(ocrBox);
         });
         overlay.appendChild(fragment); document.body.appendChild(overlay);
@@ -205,25 +216,65 @@
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
-    // --- Font Calculation ---
-    function calculateAndApplyFontSizes(overlay, imgRect) {
-        if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return;
-        const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', });
-        textBoxes.forEach(box => {
-            const text = box.textContent || ''; if (!text) return;
-            const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8, availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8;
-            if (availableWidth <= 0 || availableHeight <= 0) return; let bestSize = 8, multiplier; measurementSpan.textContent = text;
-            if (box.classList.contains('gemini-ocr-text-vertical')) {
-                measurementSpan.style.writingMode = 'vertical-rl'; measurementSpan.style.textOrientation = 'upright';
-                let low = 8, high = 150;
-                while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } }
-                measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; multiplier = settings.fontMultiplierVertical;
-            } else {
-                let low = 8, high = 150; box.style.whiteSpace = 'nowrap';
-                while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } }
-                box.style.whiteSpace = 'normal'; multiplier = settings.fontMultiplierHorizontal;
+    // --- FONT CALCULATION (Restored from v21.6.26 for stability, with multipliers) ---
+    function calculateAndApplyFontSizes(overlay) {
+        if (!measurementSpan) return;
+
+        const applyHorizontalStyling = (box, text, availableWidth, availableHeight) => {
+            let low = 8, high = 150, bestSize = 8;
+            box.style.whiteSpace = 'nowrap';
+            while (low <= high) {
+                const mid = Math.floor((low + high) / 2);
+                if (mid <= 0) break;
+                measurementSpan.style.fontSize = `${mid}px`;
+                if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) {
+                    bestSize = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
             }
-            box.style.fontSize = `${bestSize * multiplier}px`;
+            box.style.fontSize = `${bestSize * settings.fontMultiplierHorizontal}px`;
+            box.style.whiteSpace = 'normal';
+        };
+
+        const applyVerticalStyling = (box, text, availableWidth, availableHeight) => {
+            let low = 8, high = 150, bestSize = 8;
+            while (low <= high) {
+                const mid = Math.floor((low + high) / 2);
+                if (mid <= 0) break;
+                if ((mid * text.length * 0.9 <= availableHeight) && (mid <= availableWidth)) {
+                    bestSize = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+            box.style.fontSize = `${bestSize * settings.fontMultiplierVertical}px`;
+            box.style.lineHeight = '1';
+        };
+
+        overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
+            const text = box.textContent || '';
+            if (!text) return;
+            const boxRect = box.getBoundingClientRect();
+            const availableWidth = boxRect.width - 8;
+            const availableHeight = boxRect.height - 8;
+            if (availableWidth <= 0 || availableHeight <= 0) return;
+
+            Object.assign(measurementSpan.style, {
+                fontFamily: getComputedStyle(box).fontFamily,
+                fontWeight: getComputedStyle(box).fontWeight,
+                letterSpacing: getComputedStyle(box).letterSpacing,
+                lineHeight: '1',
+            });
+            measurementSpan.textContent = text;
+
+            if (box.classList.contains('gemini-ocr-text-vertical')) {
+                applyVerticalStyling(box, text, availableWidth, availableHeight);
+            } else {
+                applyHorizontalStyling(box, text, availableWidth, availableHeight);
+            }
         });
     }
 
@@ -237,7 +288,12 @@
                 if (!document.body.contains(img) || !document.body.contains(state.overlay)) { elementsToDelete.push(img); continue; }
                 const rect = img.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) { if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden'); continue; }
                 Object.assign(state.overlay.style, { top: `${rect.top + window.scrollY}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) { logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`); calculateAndApplyFontSizes(state.overlay, rect); state.lastWidth = rect.width; state.lastHeight = rect.height; }
+                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
+                    logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`);
+                    calculateAndApplyFontSizes(state.overlay);
+                    state.lastWidth = rect.width;
+                    state.lastHeight = rect.height;
+                }
             }
             elementsToDelete.forEach(img => { managedElements.get(img)?.overlay.remove(); managedElements.delete(img); logDebug(`Garbage collected overlay.`); });
         } catch (error) { logDebug(`Critical error in updateAllOverlays: ${error.message}`); }
@@ -341,7 +397,6 @@
     }
 
     function bindUIEvents() {
-        // BUGFIX: Reverted from broken shorthand to full, readable document.getElementById
         Object.assign(UI, {
             settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'),
             globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'), debugModal: document.getElementById('gemini-ocr-debug-modal'),
