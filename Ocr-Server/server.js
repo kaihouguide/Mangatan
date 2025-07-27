@@ -1,14 +1,14 @@
 // server.js - V2.5 with Conditional Authentication
 import express from 'express';
-import Lens from 'chrome-lens-ocr';
-import fs from 'fs';
-import path from 'path';
+import LensCore from 'chrome-lens-ocr/src/core.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch'; // Required for the auth path
 
 const app = express();
 const port = 3000;
-const lens = new Lens();
+const lens = new LensCore();
 
 const CACHE_FILE_PATH = path.join(process.cwd(), 'ocr-cache.json');
 const upload = multer({ dest: 'uploads/' });
