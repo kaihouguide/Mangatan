@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.9 - Minimal Layout Fix)
+// @name         Automatic Content OCR (v22.M.10 - Mobile Interaction Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.9.4
-// @description  Fixes layout issues by correctly placing overlays and not overriding site styles.
+// @version      22.M.10.0
+// @description  Restores pinch-to-zoom and text selection on mobile devices.
 // @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
 // @match        http://127.0.0.1/*
 // @grant        GM_setValue
@@ -29,7 +29,6 @@
                 'div.muiltr-masn8', 'div.muiltr-79elbk', 'div.muiltr-u43rde', 'div.muiltr-1r1or1s',
                 'div.muiltr-18sieki', 'div.muiltr-cns6dc', '.MuiBox-root.muiltr-1noqzsz'
             ],
-            // --- FIX: Removed the overflowFixSelector which was breaking the site layout. ---
             overflowFixSelector: ''
         }],
         debugMode: true,
@@ -73,12 +72,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.9.4] ${logEntry}`);
+        console.log(`[OCR v22.M.10.0] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- TOUCH INTERACTION LOGIC (from original script) ---
+    // --- TOUCH INTERACTION LOGIC (with fixes) ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
         if (overlayState && overlayState.overlay) {
@@ -91,6 +90,14 @@
     }
 
     function handleActivationGesture(event) {
+        // --- FIX: Allow multi-touch gestures (like pinch-zoom) to pass through ---
+        if (event.touches.length > 1) {
+            // If more than one finger is on the screen, do nothing.
+            // This allows the browser's native pinch-to-zoom to function.
+            if (longPressTimer) clearTimeout(longPressTimer); // Also cancel any pending long press
+            return;
+        }
+
         const targetImg = event.target.closest('img');
         if (!targetImg || !managedElements.has(targetImg)) return;
 
@@ -213,7 +220,6 @@
         const data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
 
-        // --- FIX: Position overlay within the image's parent, not the body ---
         const parent = targetImg.parentNode;
         if (!parent) return;
         const parentPosition = window.getComputedStyle(parent).position;
@@ -247,7 +253,6 @@
 
     function calculateAndApplyFontSizes(overlay, imgRect) { if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return; const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', }); textBoxes.forEach(box => { const text = box.textContent || ''; if (!text) return; const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8, availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8; if (availableWidth <= 0 || availableHeight <= 0) return; let bestSize = 8, multiplier; measurementSpan.textContent = text; if (box.classList.contains('gemini-ocr-text-vertical')) { measurementSpan.style.writingMode = 'vertical-rl'; measurementSpan.style.textOrientation = 'upright'; let low = 8, high = 150; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; multiplier = settings.fontMultiplierVertical; } else { let low = 8, high = 150; box.style.whiteSpace = 'nowrap'; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } box.style.whiteSpace = 'normal'; multiplier = settings.fontMultiplierHorizontal; } box.style.fontSize = `${bestSize * multiplier}px`; }); }
 
-    // --- FIX: Removed overflow override and adjusted positioning logic ---
     function updateAllOverlays() {
         overlayUpdateRunning = true;
         try {
@@ -285,7 +290,7 @@
         }
     }
 
-    // --- ANKI, UI, AND INITIALIZATION (from original script) ---
+    // --- ANKI, UI, AND INITIALIZATION (with CSS fix) ---
     async function ankiConnectRequest(action, params = {}) { logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
     async function exportImageToAnki(targetImg) { logDebug(`Anki Export: Starting screenshot...`); if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; } if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: The selected image is not valid or fully loaded.'); return false; } try { const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed."); const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); logDebug(`Anki Export: Image stored as '${filename}'`); const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; logDebug(`Anki Export: Found last card with ID ${lastNoteId}`); await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true; } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; } }
 
@@ -296,18 +301,22 @@
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
                 pointer-events: none;
+                /* This touch-action helps with panning/zooming on the page level */
                 touch-action: manipulation;
                 transition: opacity 0.15s, visibility 0.15s;
             }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box {
                 display: flex; justify-content: center; align-items: center; text-align: center; position: absolute;
-                box-sizing: border-box; border-radius: 4px; user-select: text; cursor: pointer;
+                box-sizing: border-box; border-radius: 4px;
+                /* --- FIX: Enable native text selection and touch behaviors (like long press) --- */
+                user-select: text !important;
+                touch-action: auto !important;
+                cursor: pointer;
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
                 color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
                 backdrop-filter: blur(2px); transition: all 0.2s ease-in-out;
                 pointer-events: auto;
-                touch-action: manipulation;
                 overflow: hidden; padding: 4px;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; }
