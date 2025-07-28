@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.9 - Layout Fix)
+// @name         Automatic Content OCR (v22.M.10 - Robust Layout Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.9
-// @description  Fixes an issue where a highlighted overlay box at the edge of an image could expand the page dimensions.
+// @version      22.M.10
+// @description  Robustly fixes layout and dimension issues by properly containing highlighted elements and implementing smarter overflow management.
 // @author       1Selxo (Mobile port by Gemini)
 // @match        *://*/*
 // @grant        GM_setValue
@@ -42,7 +42,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_mobile_port_activation_choice'; // Re-using key is fine
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_mobile_port_activation_choice';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -54,9 +54,9 @@
     let activeImageForExport = null;
     let activeOverlay = null;
 
-    // --- FIX: Track original overflow values ---
+    // --- FIX: Track original overflow values and state ---
     const originalOverflowValues = new Map();
-    let overflowFixApplied = false;
+    let isOverflowFixApplied = false;
 
     // --- Interaction Timers & Trackers ---
     let longPressTimer = null;
@@ -76,39 +76,41 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.9] ${logEntry}`);
+        console.log(`[OCR v22.M.10] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- FIX: Overflow management functions ---
+    // --- FIX: Robust Overflow management functions ---
     function applyOverflowFix() {
-        if (overflowFixApplied || !activeSiteConfig?.overflowFixSelector) return;
-        
+        if (isOverflowFixApplied || !activeSiteConfig?.overflowFixSelector) return;
         const elements = document.querySelectorAll(activeSiteConfig.overflowFixSelector);
+        if (elements.length === 0) return;
+
+        originalOverflowValues.clear();
         elements.forEach(el => {
-            const currentOverflow = window.getComputedStyle(el).overflow;
-            originalOverflowValues.set(el, currentOverflow);
+            originalOverflowValues.set(el, el.style.overflow);
             el.style.overflow = 'visible';
         });
-        
-        overflowFixApplied = true;
-        logDebug(`Applied overflow fix to ${elements.length} elements`);
+
+        isOverflowFixApplied = true;
+        logDebug(`Applied overflow fix to ${elements.length} elements.`);
     }
 
     function revertOverflowFix() {
-        if (!overflowFixApplied) return;
-        
+        if (!isOverflowFixApplied) return;
+
         originalOverflowValues.forEach((originalValue, el) => {
-            if (document.contains(el)) {
-                el.style.overflow = originalValue === 'visible' ? '' : originalValue;
+            if (document.body.contains(el)) {
+                el.style.overflow = originalValue;
             }
         });
-        
+
         originalOverflowValues.clear();
-        overflowFixApplied = false;
-        logDebug("Reverted overflow fix");
+        isOverflowFixApplied = false;
+        logDebug("Reverted overflow fix.");
     }
+
 
     // --- TOUCH INTERACTION LOGIC ---
     function triggerOverlayToggle(targetImg) {
@@ -202,8 +204,6 @@
         overlay.classList.remove('is-hidden');
         overlay.classList.add('is-focused');
         UI.globalAnkiButton?.classList.remove('is-hidden');
-        
-        applyOverflowFix();
     }
 
     function hideActiveOverlay() {
@@ -215,8 +215,6 @@
         UI.globalAnkiButton?.classList.add('is-hidden');
         activeOverlay = null;
         activeImageForExport = null;
-        
-        revertOverflowFix();
     }
 
     function displayOcrResults(targetImg) {
@@ -248,56 +246,82 @@
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
-        if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
+        if (!overlayUpdateRunning) {
+            overlayUpdateRunning = true;
+            requestAnimationFrame(updateAllOverlays);
+        }
     }
 
     // --- Font Calculation ---
     function calculateAndApplyFontSizes(overlay, imgRect) { if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return; const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', }); textBoxes.forEach(box => { const text = box.textContent || ''; if (!text) return; const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8, availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8; if (availableWidth <= 0 || availableHeight <= 0) return; let bestSize = 8, multiplier; measurementSpan.textContent = text; if (box.classList.contains('gemini-ocr-text-vertical')) { measurementSpan.style.writingMode = 'vertical-rl'; measurementSpan.style.textOrientation = 'upright'; let low = 8, high = 150; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; multiplier = settings.fontMultiplierVertical; } else { let low = 8, high = 150; box.style.whiteSpace = 'nowrap'; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } box.style.whiteSpace = 'normal'; multiplier = settings.fontMultiplierHorizontal; } box.style.fontSize = `${bestSize * multiplier}px`; }); }
 
     // --- Main Update Loop ---
-    function updateAllOverlays() { 
-        overlayUpdateRunning = true; 
-        try { 
-            const elementsToDelete = []; 
-            for (const [img, state] of managedElements.entries()) { 
-                if (!document.body.contains(img) || !document.body.contains(state.overlay)) { 
-                    elementsToDelete.push(img); 
-                    continue; 
-                } 
-                const rect = img.getBoundingClientRect(); 
-                if (rect.width === 0 || rect.height === 0) { 
-                    if (!state.overlay.classList.contains('is-hidden')) 
-                        state.overlay.classList.add('is-hidden'); 
-                    continue; 
-                } 
-                Object.assign(state.overlay.style, { 
-                    top: `${rect.top + window.scrollY}px`, 
-                    left: `${rect.left + window.scrollX}px`, 
-                    width: `${rect.width}px`, 
-                    height: `${rect.height}px` 
-                }); 
-                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) { 
-                    logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`); 
-                    calculateAndApplyFontSizes(state.overlay, rect); 
-                    state.lastWidth = rect.width; 
-                    state.lastHeight = rect.height; 
-                } 
-            } 
-            elementsToDelete.forEach(img => { 
-                managedElements.get(img)?.overlay.remove(); 
-                managedElements.delete(img); 
-                logDebug(`Garbage collected overlay.`); 
-            }); 
-        } catch (error) { 
-            logDebug(`Critical error in updateAllOverlays: ${error.message}`); 
-        } finally { 
-            overlayUpdateRunning = false; 
-            if (managedElements.size > 0) {
-                requestAnimationFrame(updateAllOverlays);
+    function updateAllOverlays() {
+        if (managedElements.size === 0) {
+            overlayUpdateRunning = false;
+            revertOverflowFix();
+            return;
+        }
+
+        try {
+            const elementsToDelete = [];
+            let isAnyOverlayFocused = false;
+
+            for (const [img, state] of managedElements.entries()) {
+                if (!document.body.contains(img) || !document.body.contains(state.overlay)) {
+                    elementsToDelete.push(img);
+                    continue;
+                }
+                const rect = img.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) {
+                    if (!state.overlay.classList.contains('is-hidden')) {
+                         state.overlay.classList.add('is-hidden');
+                         if (state.overlay === activeOverlay) {
+                             hideActiveOverlay();
+                         }
+                    }
+                    continue;
+                }
+
+                if (state.overlay.classList.contains('is-focused')) {
+                    isAnyOverlayFocused = true;
+                }
+
+                Object.assign(state.overlay.style, {
+                    top: `${rect.top + window.scrollY}px`,
+                    left: `${rect.left + window.scrollX}px`,
+                    width: `${rect.width}px`,
+                    height: `${rect.height}px`
+                });
+                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
+                    logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`);
+                    calculateAndApplyFontSizes(state.overlay, rect);
+                    state.lastWidth = rect.width;
+                    state.lastHeight = rect.height;
+                }
+            }
+
+            // --- FIX: Robust overflow management inside the loop ---
+            if (isAnyOverlayFocused) {
+                applyOverflowFix();
             } else {
                 revertOverflowFix();
             }
-        } 
+
+            elementsToDelete.forEach(img => {
+                const state = managedElements.get(img);
+                if(state) {
+                   if (state.overlay === activeOverlay) hideActiveOverlay();
+                   state.overlay.remove();
+                }
+                managedElements.delete(img);
+                logDebug(`Garbage collected overlay.`);
+            });
+        } catch (error) {
+            logDebug(`Critical error in updateAllOverlays: ${error.message}`);
+        } finally {
+            requestAnimationFrame(updateAllOverlays);
+        }
     }
 
     // --- ANKI, UI, AND INITIALIZATION ---
@@ -308,13 +332,12 @@
 
     function createUI() {
         GM_addStyle(`
-            /* Layout stability fix: No ocr-scroll-fix-active rule */
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
-                pointer-events: none; /* Let clicks pass through overlay background */
-                touch-action: manipulation; /* Allow pinch-zoom and pan gestures */
+                pointer-events: none;
+                touch-action: manipulation;
                 transition: opacity 0.15s, visibility 0.15s;
-                overflow: hidden; /* FIX: Prevent scaled children from affecting page layout */
+                overflow: hidden; /* CRITICAL FIX: This contains all children, including scaled ones. */
             }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box {
@@ -323,19 +346,35 @@
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
                 color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
                 backdrop-filter: blur(2px); transition: all 0.2s ease-in-out;
-                pointer-events: auto; /* Capture clicks on the box itself */
-                touch-action: manipulation; /* Allow pinch-zoom even if gesture starts on a box */
+                pointer-events: auto;
+                touch-action: manipulation;
                 overflow: hidden; padding: 4px;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; }
+
             /* Highlighted Box State */
             .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
             .interaction-mode-click.is-focused .manual-highlight,
-            .interaction-mode-proximity.is-focused .is-near { overflow: visible; transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; opacity: 1; }
+            .interaction-mode-proximity.is-focused .is-near {
+                /* 'overflow: visible;' REMOVED FROM THIS RULE - THIS IS THE PRIMARY FIX */
+                transform: scale(1.05);
+                background: var(--ocr-highlight-bg-color);
+                border-color: var(--ocr-highlight-border-color);
+                color: var(--ocr-highlight-text-color);
+                text-shadow: none;
+                box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow);
+                z-index: 9999;
+                opacity: 1;
+            }
+
             /* Dimmed Box State */
             .interaction-mode-hover.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover),
             .interaction-mode-click.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight),
-            .interaction-mode-proximity.is-focused .gemini-ocr-text-box:not(.is-near) { opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
+            .interaction-mode-proximity.is-focused .gemini-ocr-text-box:not(.is-near) {
+                opacity: var(--ocr-dimmed-opacity);
+                background: rgba(10,25,40,0.5);
+                border-color: var(--ocr-border-color-dim);
+            }
             /* Modal, Buttons etc. */
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
             #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
