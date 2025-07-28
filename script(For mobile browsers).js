@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.9 - Layout Fix)
+// @name         Automatic Content OCR (v22.M.9 - Minimal Layout Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.9.1
-// @description  Fixes UI scaling and layout issues on tablets and other devices by placing overlays correctly and not overriding site styles.
-// @author       1Selxo (Mobile port by Gemini, Responsive Fix by Gemini, Layout Fix by Gemini)
+// @version      22.M.9.4
+// @description  Fixes layout issues by correctly placing overlays and not overriding site styles.
+// @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -16,7 +16,7 @@
 (function() {
     'use strict';
 
-    // --- Global State and Settings ---
+    // --- Global State and Settings (from original script) ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
         imageServerUser: '',
@@ -29,15 +29,13 @@
                 'div.muiltr-masn8', 'div.muiltr-79elbk', 'div.muiltr-u43rde', 'div.muiltr-1r1or1s',
                 'div.muiltr-18sieki', 'div.muiltr-cns6dc', '.MuiBox-root.muiltr-1noqzsz'
             ],
-            // --- FIX START ---
-            // Removed the overflowFixSelector which was breaking the site layout.
+            // --- FIX: Removed the overflowFixSelector which was breaking the site layout. ---
             overflowFixSelector: ''
-            // --- FIX END ---
         }],
         debugMode: true,
         textOrientation: 'smart',
-        interactionMode: 'hover', // 'hover', 'click', or 'proximity'
-        activationMode: 'longPress', // 'longPress' or 'doubleTap'
+        interactionMode: 'hover',
+        activationMode: 'longPress',
         proximityRadius: 150,
         dimmedOpacity: 0.3,
         fontMultiplierHorizontal: 1.0,
@@ -45,7 +43,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_mobile_port_activation_choice';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -57,30 +55,30 @@
     let activeImageForExport = null;
     let activeOverlay = null;
 
-    // --- Interaction Timers & Trackers ---
+    // --- Interaction Timers & Trackers (from original script) ---
     let longPressTimer = null;
     const LONG_PRESS_DURATION = 500;
     let tapTracker = new WeakMap();
     const DOUBLE_TAP_THRESHOLD = 300;
 
-    // --- Color Themes ---
+    // --- Color Themes (from original script) ---
     const COLOR_THEMES = {
         deepblue: { main: 'rgba(0,191,255,',  text: '#FFFFFF', highlightText: '#000000' },
         red:      { main: 'rgba(255, 71, 87,',   text: '#FFFFFF', highlightText: '#000000' },
         green:    { main: 'rgba(46, 204, 113,',  text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging ---
+    // --- Logging (from original script) ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.9] ${logEntry}`);
+        console.log(`[OCR v22.M.9.4] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- TOUCH INTERACTION LOGIC ---
+    // --- TOUCH INTERACTION LOGIC (from original script) ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
         if (overlayState && overlayState.overlay) {
@@ -148,8 +146,7 @@
         }
     }
 
-
-    // --- Core Observation & Processing ---
+    // --- Core Observation & Processing (with minimal fixes) ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -159,10 +156,37 @@
     function manageContainer(container) { if (!managedContainers.has(container)) { logDebug(`New container found: ${container.className}`); container.querySelectorAll('img').forEach(observeImageForSrcChange); imageObserver.observe(container, { childList: true, subtree: true }); managedContainers.set(container, true); } }
     const containerObserver = new MutationObserver((mutations) => { if (!activeSiteConfig) return; const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', '); for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) { if (node.matches(selectorQuery)) manageContainer(node); else node.querySelectorAll(selectorQuery).forEach(manageContainer); } });
     function activateScanner() { logDebug("Activating scanner..."); activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern)); if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No config for URL: ${window.location.href}.`); const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', '); document.querySelectorAll(selectorQuery).forEach(manageContainer); containerObserver.observe(document.body, { childList: true, subtree: true }); logDebug("Main container observer active."); }
-    function observeImageForSrcChange(img) { const processTheImage = (src) => { if (src?.includes('/api/v1/manga/') && src?.includes('/chapter/')) { img.crossOrigin = "anonymous"; if (img.complete && img.naturalHeight > 0) processImage(img); else img.addEventListener('load', () => processImage(img), { once: true }); return true; } return false; }; if (processTheImage(img.src) || attachedAttributeObservers.has(img)) return; const attributeObserver = new MutationObserver((mutations) => { for (const mutation of mutations) if (mutation.attributeName === 'src' && processTheImage(img.src)) { attributeObserver.disconnect(); attachedAttributeObservers.delete(img); break; } }); attributeObserver.observe(img, { attributes: true }); attachedAttributeObservers.set(img, attributeObserver); }
-    function processImage(img) { if (ocrDataCache.get(img) === 'pending') return; if (managedElements.has(img)) { managedElements.get(img).overlay.remove(); managedElements.delete(img); } const sourceUrl = img.src; logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`); ocrDataCache.set(img, 'pending'); let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`; if (settings.imageServerUser) { logDebug("Forwarding credentials."); ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`; } GM_xmlhttpRequest({ method: 'GET', url: ocrRequestUrl, timeout: 30000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); ocrDataCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); } catch (e) { logDebug(`OCR Error: ${e.message}`); ocrDataCache.delete(img); } }, onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); }, ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); } }); }
 
-    // --- OVERLAY & UPDATE ENGINE ---
+    function observeImageForSrcChange(img) {
+        const processTheImage = (src) => {
+            if (src?.includes('/api/v1/manga/') && src?.includes('/chapter/')) {
+                img.crossOrigin = "anonymous";
+                if (img.complete && img.naturalHeight > 0) processImage(img);
+                else img.addEventListener('load', () => processImage(img), { once: true });
+                return true;
+            }
+            return false;
+        };
+        if (processTheImage(img.src) || attachedAttributeObservers.has(img)) return;
+        const attributeObserver = new MutationObserver((mutations) => { for (const mutation of mutations) if (mutation.attributeName === 'src' && processTheImage(img.src)) { attributeObserver.disconnect(); attachedAttributeObservers.delete(img); break; } });
+        attributeObserver.observe(img, { attributes: true });
+        attachedAttributeObservers.set(img, attributeObserver);
+    }
+    function processImage(img) {
+        if (ocrDataCache.get(img) === 'pending') return;
+        if (managedElements.has(img)) {
+            managedElements.get(img).overlay.remove();
+            managedElements.delete(img);
+        }
+        const sourceUrl = img.src;
+        logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
+        ocrDataCache.set(img, 'pending');
+        let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`;
+        if (settings.imageServerUser) { logDebug("Forwarding credentials."); ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`; }
+        GM_xmlhttpRequest({ method: 'GET', url: ocrRequestUrl, timeout: 30000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); ocrDataCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); } catch (e) { logDebug(`OCR Error: ${e.message}`); ocrDataCache.delete(img); } }, onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); }, ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); } });
+    }
+
+    // --- OVERLAY & UPDATE ENGINE (with minimal fixes) ---
     function showOverlay(overlay, image) {
         if (activeOverlay && activeOverlay !== overlay) {
             hideActiveOverlay();
@@ -189,22 +213,18 @@
         const data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
 
-        // --- FIX START: Ensure parent container is positioned for the overlay ---
+        // --- FIX: Position overlay within the image's parent, not the body ---
         const parent = targetImg.parentNode;
-        if (!parent) return; // Can't attach if there's no parent
+        if (!parent) return;
         const parentPosition = window.getComputedStyle(parent).position;
         if (parentPosition === 'static') {
             parent.style.position = 'relative';
         }
-        // --- FIX END ---
 
         data.sort((a, b) => { const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x, ROW_TOLERANCE = 0.05; if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x; else return a_y - b_y; });
-
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
-        const fragment = document.createDocumentFragment();
-        const imgRect = targetImg.getBoundingClientRect();
-
+        const fragment = document.createDocumentFragment(), imgRect = targetImg.getBoundingClientRect();
         data.forEach((item) => {
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
@@ -216,58 +236,39 @@
             Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
             fragment.appendChild(ocrBox);
         });
-
         overlay.appendChild(fragment);
-
-        // --- FIX START: Append to parent node instead of body ---
         parent.appendChild(overlay);
-        // --- FIX END ---
-
         overlay.addEventListener('click', handleOverlayInteraction);
-
         const state = { overlay, lastWidth: 0, lastHeight: 0, parentNode: parent };
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
-
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
-    // --- Font Calculation ---
     function calculateAndApplyFontSizes(overlay, imgRect) { if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return; const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', }); textBoxes.forEach(box => { const text = box.textContent || ''; if (!text) return; const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8, availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8; if (availableWidth <= 0 || availableHeight <= 0) return; let bestSize = 8, multiplier; measurementSpan.textContent = text; if (box.classList.contains('gemini-ocr-text-vertical')) { measurementSpan.style.writingMode = 'vertical-rl'; measurementSpan.style.textOrientation = 'upright'; let low = 8, high = 150; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; multiplier = settings.fontMultiplierVertical; } else { let low = 8, high = 150; box.style.whiteSpace = 'nowrap'; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } box.style.whiteSpace = 'normal'; multiplier = settings.fontMultiplierHorizontal; } box.style.fontSize = `${bestSize * multiplier}px`; }); }
 
-    // --- Main Update Loop ---
+    // --- FIX: Removed overflow override and adjusted positioning logic ---
     function updateAllOverlays() {
         overlayUpdateRunning = true;
         try {
-            // --- FIX START: Removed overflow override ---
-            // The problematic line that caused layout issues has been deleted.
-            // --- FIX END ---
-
             const elementsToDelete = [];
             for (const [img, state] of managedElements.entries()) {
-                // --- FIX START: Simplified check, since overlay and image share a parent ---
-                if (!document.body.contains(img)) {
+                if (!document.body.contains(img) || !document.body.contains(state.overlay)) {
                     elementsToDelete.push(img);
                     continue;
                 }
-                // --- FIX END ---
-
                 const rect = img.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) {
                     if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden');
                     continue;
                 }
-
-                // --- FIX START: Update positioning relative to the parent node ---
                 const parentRect = state.parentNode.getBoundingClientRect();
                 Object.assign(state.overlay.style, {
-                    top: `${rect.top - parentRect.top}px`,
-                    left: `${rect.left - parentRect.left}px`,
+                    top: `${rect.top - parentRect.top + state.parentNode.scrollTop}px`,
+                    left: `${rect.left - parentRect.left + state.parentNode.scrollLeft}px`,
                     width: `${rect.width}px`,
                     height: `${rect.height}px`
                 });
-                // --- FIX END ---
-
                 if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
                     logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`);
                     calculateAndApplyFontSizes(state.overlay, rect);
@@ -275,11 +276,7 @@
                     state.lastHeight = rect.height;
                 }
             }
-            elementsToDelete.forEach(img => {
-                managedElements.get(img)?.overlay.remove();
-                managedElements.delete(img);
-                logDebug(`Garbage collected overlay.`);
-            });
+            elementsToDelete.forEach(img => { managedElements.get(img)?.overlay.remove(); managedElements.delete(img); logDebug(`Garbage collected overlay.`); });
         } catch (error) {
             logDebug(`Critical error in updateAllOverlays: ${error.message}`);
         } finally {
@@ -288,7 +285,7 @@
         }
     }
 
-    // --- ANKI, UI, AND INITIALIZATION ---
+    // --- ANKI, UI, AND INITIALIZATION (from original script) ---
     async function ankiConnectRequest(action, params = {}) { logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
     async function exportImageToAnki(targetImg) { logDebug(`Anki Export: Starting screenshot...`); if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; } if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: The selected image is not valid or fully loaded.'); return false; } try { const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed."); const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); logDebug(`Anki Export: Image stored as '${filename}'`); const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; logDebug(`Anki Export: Found last card with ID ${lastNoteId}`); await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true; } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; } }
 
@@ -410,7 +407,7 @@
                         <label for="ocr-font-multiplier-vertical">V. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-vertical" min="0.1" max="5" step="0.1">
                     </div>
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
-                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
+                    <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1;.container1;.container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
             </div>
@@ -462,7 +459,7 @@
                 dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100,
                 fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0,
                 fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0,
-                sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s) }; })
+                sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: '', imageContainerSelectors: parts.slice(1).filter(s => s) }; })
             };
             try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
             catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
@@ -492,7 +489,7 @@
         UI.dimmedOpacityInput.value = settings.dimmedOpacity * 100;
         UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal;
         UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical;
-        UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
+        UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         activateScanner();
     }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
