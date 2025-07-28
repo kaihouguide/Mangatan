@@ -54,6 +54,10 @@
     let activeImageForExport = null;
     let activeOverlay = null;
 
+    // --- FIX: Track original overflow values ---
+    const originalOverflowValues = new Map();
+    let overflowFixApplied = false;
+
     // --- Interaction Timers & Trackers ---
     let longPressTimer = null;
     const LONG_PRESS_DURATION = 500;
@@ -76,6 +80,35 @@
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
+
+    // --- FIX: Overflow management functions ---
+    function applyOverflowFix() {
+        if (overflowFixApplied || !activeSiteConfig?.overflowFixSelector) return;
+        
+        const elements = document.querySelectorAll(activeSiteConfig.overflowFixSelector);
+        elements.forEach(el => {
+            const currentOverflow = window.getComputedStyle(el).overflow;
+            originalOverflowValues.set(el, currentOverflow);
+            el.style.overflow = 'visible';
+        });
+        
+        overflowFixApplied = true;
+        logDebug(`Applied overflow fix to ${elements.length} elements`);
+    }
+
+    function revertOverflowFix() {
+        if (!overflowFixApplied) return;
+        
+        originalOverflowValues.forEach((originalValue, el) => {
+            if (document.contains(el)) {
+                el.style.overflow = originalValue === 'visible' ? '' : originalValue;
+            }
+        });
+        
+        originalOverflowValues.clear();
+        overflowFixApplied = false;
+        logDebug("Reverted overflow fix");
+    }
 
     // --- TOUCH INTERACTION LOGIC ---
     function triggerOverlayToggle(targetImg) {
@@ -169,6 +202,9 @@
         overlay.classList.remove('is-hidden');
         overlay.classList.add('is-focused');
         UI.globalAnkiButton?.classList.remove('is-hidden');
+        
+        // FIX: Apply overflow fix only when showing overlay
+        applyOverflowFix();
     }
 
     function hideActiveOverlay() {
@@ -180,6 +216,9 @@
         UI.globalAnkiButton?.classList.add('is-hidden');
         activeOverlay = null;
         activeImageForExport = null;
+        
+        // FIX: Revert overflow fix when hiding overlay
+        revertOverflowFix();
     }
 
     function displayOcrResults(targetImg) {
@@ -217,8 +256,57 @@
     // --- Font Calculation ---
     function calculateAndApplyFontSizes(overlay, imgRect) { if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return; const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', }); textBoxes.forEach(box => { const text = box.textContent || ''; if (!text) return; const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8, availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8; if (availableWidth <= 0 || availableHeight <= 0) return; let bestSize = 8, multiplier; measurementSpan.textContent = text; if (box.classList.contains('gemini-ocr-text-vertical')) { measurementSpan.style.writingMode = 'vertical-rl'; measurementSpan.style.textOrientation = 'upright'; let low = 8, high = 150; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; multiplier = settings.fontMultiplierVertical; } else { let low = 8, high = 150; box.style.whiteSpace = 'nowrap'; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } box.style.whiteSpace = 'normal'; multiplier = settings.fontMultiplierHorizontal; } box.style.fontSize = `${bestSize * multiplier}px`; }); }
 
-    // --- Main Update Loop ---
-    function updateAllOverlays() { overlayUpdateRunning = true; try { if (activeSiteConfig?.overflowFixSelector) { const el = document.querySelector(activeSiteConfig.overflowFixSelector); if (el && el.style.overflow !== 'visible') el.style.overflow = 'visible'; } const elementsToDelete = []; for (const [img, state] of managedElements.entries()) { if (!document.body.contains(img) || !document.body.contains(state.overlay)) { elementsToDelete.push(img); continue; } const rect = img.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) { if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden'); continue; } Object.assign(state.overlay.style, { top: `${rect.top + window.scrollY}px`, left: `${rect.left + window.scrollX}px`, width: `${rect.width}px`, height: `${rect.height}px` }); if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) { logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`); calculateAndApplyFontSizes(state.overlay, rect); state.lastWidth = rect.width; state.lastHeight = rect.height; } } elementsToDelete.forEach(img => { managedElements.get(img)?.overlay.remove(); managedElements.delete(img); logDebug(`Garbage collected overlay.`); }); } catch (error) { logDebug(`Critical error in updateAllOverlays: ${error.message}`); } finally { overlayUpdateRunning = false; if (managedElements.size > 0) requestAnimationFrame(updateAllOverlays); } }
+    // --- Main Update Loop (FIXED) ---
+    function updateAllOverlays() { 
+        overlayUpdateRunning = true; 
+        try { 
+            // FIX: Removed the problematic overflow fix from here
+            // The overflow fix is now only applied when showing overlays
+            
+            const elementsToDelete = []; 
+            for (const [img, state] of managedElements.entries()) { 
+                if (!document.body.contains(img) || !document.body.contains(state.overlay)) { 
+                    elementsToDelete.push(img); 
+                    continue; 
+                } 
+                const rect = img.getBoundingClientRect(); 
+                if (rect.width === 0 || rect.height === 0) { 
+                    if (!state.overlay.classList.contains('is-hidden')) 
+                        state.overlay.classList.add('is-hidden'); 
+                    continue; 
+                } 
+                Object.assign(state.overlay.style, { 
+                    top: `${rect.top + window.scrollY}px`, 
+                    left: `${rect.left + window.scrollX}px`, 
+                    width: `${rect.width}px`, 
+                    height: `${rect.height}px` 
+                }); 
+                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) { 
+                    logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`); 
+                    calculateAndApplyFontSizes(state.overlay, rect); 
+                    state.lastWidth = rect.width; 
+                    state.lastHeight = rect.height; 
+                } 
+            } 
+            elementsToDelete.forEach(img => { 
+                managedElements.get(img)?.overlay.remove(); 
+                managedElements.delete(img); 
+                logDebug(`Garbage collected overlay.`); 
+            }); 
+        } catch (error) { 
+            logDebug(`Critical error in updateAllOverlays: ${error.message}`); 
+        } finally { 
+            overlayUpdateRunning = false; 
+            
+            // FIX: Only continue animation loop if there are managed elements
+            if (managedElements.size > 0) {
+                requestAnimationFrame(updateAllOverlays);
+            } else {
+                // FIX: Clean up overflow fix when no overlays exist
+                revertOverflowFix();
+            }
+        } 
+    }
 
     // --- ANKI, UI, AND INITIALIZATION ---
     async function ankiConnectRequest(action, params = {}) { logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
