@@ -4,7 +4,7 @@
 // @version      22.M.9.4
 // @description  Fixes layout issues by correctly placing overlays and not overriding site styles.
 // @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
-// @match        *://*/*
+// @match        http://127.0.0.1/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
