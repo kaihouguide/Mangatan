@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.8 - Zoom Fix)
+// @name         Automatic Content OCR (v22.M.9 - Layout Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.8
-// @description  Fixes an issue where the overlay would block pinch-to-zoom gestures on the page. All previous features are retained.
+// @version      22.M.9
+// @description  Fixes an issue where a highlighted overlay box at the edge of an image could expand the page dimensions.
 // @author       1Selxo (Mobile port by Gemini)
 // @match        *://*/*
 // @grant        GM_setValue
@@ -76,7 +76,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.8] ${logEntry}`);
+        console.log(`[OCR v22.M.9] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -203,7 +203,6 @@
         overlay.classList.add('is-focused');
         UI.globalAnkiButton?.classList.remove('is-hidden');
         
-        // FIX: Apply overflow fix only when showing overlay
         applyOverflowFix();
     }
 
@@ -217,7 +216,6 @@
         activeOverlay = null;
         activeImageForExport = null;
         
-        // FIX: Revert overflow fix when hiding overlay
         revertOverflowFix();
     }
 
@@ -256,13 +254,10 @@
     // --- Font Calculation ---
     function calculateAndApplyFontSizes(overlay, imgRect) { if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return; const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', }); textBoxes.forEach(box => { const text = box.textContent || ''; if (!text) return; const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8, availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8; if (availableWidth <= 0 || availableHeight <= 0) return; let bestSize = 8, multiplier; measurementSpan.textContent = text; if (box.classList.contains('gemini-ocr-text-vertical')) { measurementSpan.style.writingMode = 'vertical-rl'; measurementSpan.style.textOrientation = 'upright'; let low = 8, high = 150; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; multiplier = settings.fontMultiplierVertical; } else { let low = 8, high = 150; box.style.whiteSpace = 'nowrap'; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } box.style.whiteSpace = 'normal'; multiplier = settings.fontMultiplierHorizontal; } box.style.fontSize = `${bestSize * multiplier}px`; }); }
 
-    // --- Main Update Loop (FIXED) ---
+    // --- Main Update Loop ---
     function updateAllOverlays() { 
         overlayUpdateRunning = true; 
         try { 
-            // FIX: Removed the problematic overflow fix from here
-            // The overflow fix is now only applied when showing overlays
-            
             const elementsToDelete = []; 
             for (const [img, state] of managedElements.entries()) { 
                 if (!document.body.contains(img) || !document.body.contains(state.overlay)) { 
@@ -297,12 +292,9 @@
             logDebug(`Critical error in updateAllOverlays: ${error.message}`); 
         } finally { 
             overlayUpdateRunning = false; 
-            
-            // FIX: Only continue animation loop if there are managed elements
             if (managedElements.size > 0) {
                 requestAnimationFrame(updateAllOverlays);
             } else {
-                // FIX: Clean up overflow fix when no overlays exist
                 revertOverflowFix();
             }
         } 
@@ -322,6 +314,7 @@
                 pointer-events: none; /* Let clicks pass through overlay background */
                 touch-action: manipulation; /* Allow pinch-zoom and pan gestures */
                 transition: opacity 0.15s, visibility 0.15s;
+                overflow: hidden; /* FIX: Prevent scaled children from affecting page layout */
             }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box {
