@@ -1,13 +1,13 @@
-import json
-import os
-import asyncio
-import io
-import math
-import threading
-import hashlib
 import argparse
-import sys
+import asyncio
 import base64  # <-- ADDED: For handling Basic Authentication encoding
+import hashlib
+import io
+import json
+import math
+import os
+import sys
+import threading
 
 # --- Platform-Specific Fix for Windows ---
 if sys.platform == "win32":
@@ -15,14 +15,14 @@ if sys.platform == "win32":
 
     init(autoreset=True)
 
-from flask import Flask, request, jsonify, send_file
-from werkzeug.utils import secure_filename
 import aiohttp
-from PIL import Image
 
 # Import the OCR library and the stable production server
 import oneocr
+from flask import Flask, jsonify, request, send_file
+from PIL import Image
 from waitress import serve
+from werkzeug.utils import secure_filename
 
 # --- NEW: Configuration for Image Slicing ---
 # The height of each chunk to process.
@@ -76,11 +76,11 @@ def load_cache():
 
 def save_cache():
     if is_debug_mode:
-        print(f"[DEBUG] Acquiring lock to save OCR cache...")
+        print("[DEBUG] Acquiring lock to save OCR cache...")
     with open(CACHE_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump(ocr_cache, f, indent=2, ensure_ascii=False)
     if is_debug_mode:
-        print(f"[DEBUG] OCR cache saved successfully.")
+        print("[DEBUG] OCR cache saved successfully.")
 
 
 def transform_ocr_data(oneocr_result, image_size):
@@ -132,7 +132,7 @@ def transform_ocr_data(oneocr_result, image_size):
 @app.route("/")
 def status_endpoint():
     if is_debug_mode:
-        print(f"[DEBUG] /status endpoint hit.")
+        print("[DEBUG] /status endpoint hit.")
     with cache_lock:
         num_requests = ocr_requests_processed
         num_cache_items = len(ocr_cache)
@@ -241,7 +241,7 @@ async def ocr_endpoint():
 
         with cache_lock:
             if is_debug_mode:
-                print(f"[DEBUG] Caching transformed result for URL.")
+                print("[DEBUG] Caching transformed result for URL.")
             ocr_cache[image_url] = transformed_result
             ocr_requests_processed += 1
             save_cache()
@@ -321,7 +321,7 @@ if __name__ == "__main__":
         print("--- Starting Flask Development Server in DEBUG MODE ---")
         print("WARNING: This server is for development only. Do not use in production.")
         print("Auto-reloader is disabled to prevent console errors on Windows.")
-        print(f"URL: http://127.0.0.1:3000")
+        print("URL: http://127.0.0.1:3000")
         app.run(host="127.0.0.1", port=3000, debug=True, use_reloader=False)
     else:
         print("--- Starting Waitress Production Server ---")
