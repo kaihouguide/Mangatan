@@ -4,7 +4,7 @@
 // @version      22.M.10.0
 // @description  Restores pinch-to-zoom and text selection on mobile devices.
 // @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
-// @match        http://127.0.0.1/*
+// @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
