@@ -1,4 +1,5 @@
 node_modules
 server-local-ocr*
-*.exe
 ocr-cache.json
+*.exe
+*.pyc
