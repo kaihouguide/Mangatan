@@ -8,7 +8,7 @@ import math
 import os
 import sys
 import threading
-from typing import TypedDict
+from engines import OneOCR, GoogleLens
 
 # --- Platform-Specific Fix for Windows ---
 if sys.platform == "win32":
@@ -17,10 +17,7 @@ if sys.platform == "win32":
     init(autoreset=True)
 
 import aiohttp
-import chrome_lens_py
 
-# Import the OCR library and the stable production server
-import oneocr
 from flask import Flask, jsonify, request, send_file
 from PIL import Image
 from waitress import serve
@@ -34,136 +31,12 @@ CHUNK_HEIGHT = 1500
 OVERLAP = 150
 
 
-class BoundingBox(TypedDict):
-    x: float
-    y: float
-    width: float
-    height: float
-
-
-class Bubble(TypedDict):
-    text: str
-    tight_bounding_box: BoundingBox
-    orientation: float
-    font_size: float
-    confidence: float
-
-
-class OneOCR:
-    def __init__(self):
-        self.engine = oneocr.OcrEngine()
-
-    def ocr(self, img, image_size):
-        result = self.engine.recognize_pil(img)
-        return self.transform(result, image_size)
-
-    def transform(self, result, image_size):
-        if not result or not result.get("lines"):
-            return []
-        image_width, image_height = image_size
-        if image_width == 0 or image_height == 0:
-            return []
-        output_json = []
-        for line in result.get("lines", []):
-            text = line.get("text", "").strip()
-            rect = line.get("bounding_rect")
-            if not rect or not text or not line.get("words"):
-                continue
-            x_coords = [rect["x1"], rect["x2"], rect["x3"], rect["x4"]]
-            y_coords = [rect["y1"], rect["y2"], rect["y3"], rect["y4"]]
-            x_min = min(x_coords)
-            y_min = min(y_coords)
-            x_max = max(x_coords)
-            y_max = max(y_coords)
-            width = x_max - x_min
-            height = y_max - y_min
-            snapped_angle = 90.0 if height > width else 0.0
-            word_count = len(line.get("words", []))
-            avg_confidence = (
-                sum(word.get("confidence", 0.95) for word in line.get("words", []))
-                / word_count
-                if word_count > 0
-                else 0.95
-            )
-
-            bubble = Bubble(
-                text=text,
-                tight_bounding_box=BoundingBox(
-                    x=x_min / image_width,
-                    y=y_min / image_height,
-                    width=width / image_width,
-                    height=height / image_height,
-                ),
-                orientation=snapped_angle,
-                font_size=0.04,
-                confidence=avg_confidence,
-            )
-            output_json.append(bubble)
-        return output_json
-
-
-class GoogleLens:
-    def __init__(self):
-        self.engine = chrome_lens_py.LensAPI()
-
-    async def ocr(self, img):
-        result = await self.engine.process_image(img, "ja")
-        return self.transform(result)
-
-    def transform(self, result: dict[str]):
-        if result["ocr_test"] == "":
-            return []
-
-        output_json = []
-        word_data = result["word_data"]
-
-        # lens result example
-        # {
-        #     "word": "フィリス",
-        #     "separator": "",
-        #     "geometry": {
-        #         "center_x": 0.33466535806655884,
-        #         "center_y": 0.8910037875175476,
-        #         "width": 0.08266666531562805,
-        #         "height": 0.04028436169028282,
-        #         "angle_deg": 0.006643266102336543,
-        #         "coordinate_type": "NORMALIZED",
-        #     },
-        # },
-
-        for data in word_data:
-            word = data["word"]
-            # separator = data["separator"]
-            geometry = data["geometry"]
-            center_x = geometry["center_x"]
-            center_y = geometry["center_y"]
-            width = geometry["width"]
-            height = geometry["height"]
-            angle_deg = geometry["angle_deg"]
-            # coordinate_type = geometry["coordinate_type"]
-
-            bubble = Bubble(
-                text=word,
-                tight_bounding_box=BoundingBox(
-                    x=center_x - width / 2,
-                    y=center_y - height / 2,
-                    width=width,
-                    height=height,
-                ),
-                orientation=round(angle_deg, 1),
-                font_size=0.04,
-                confidence=0.98,
-            )
-            output_json.append(bubble)
-
-        return output_json
-
-
 # --- Engine and App Initialization ---
 
 print("[Engine] Initializing oneocr.OcrEngine()...")
 try:
-    ocr_engine = OneOCR().engine
+    # ocr_engine = OneOCR()
+    ocr_engine = GoogleLens()
     print("[Engine] Initialization complete.")
 except Exception as e:
     print(f"[Engine] CRITICAL: Failed to initialize oneocr.OcrEngine: {e}")
@@ -209,51 +82,6 @@ def save_cache():
         json.dump(ocr_cache, f, indent=2, ensure_ascii=False)
     if is_debug_mode:
         print("[DEBUG] OCR cache saved successfully.")
-
-
-def transform_ocr_data(oneocr_result, image_size):
-    if not oneocr_result or not oneocr_result.get("lines"):
-        return []
-    image_width, image_height = image_size
-    if image_width == 0 or image_height == 0:
-        return []
-    output_json = []
-    for line in oneocr_result.get("lines", []):
-        text = line.get("text", "").strip()
-        rect = line.get("bounding_rect")
-        if not rect or not text or not line.get("words"):
-            continue
-        x_coords = [rect["x1"], rect["x2"], rect["x3"], rect["x4"]]
-        y_coords = [rect["y1"], rect["y2"], rect["y3"], rect["y4"]]
-        x_min = min(x_coords)
-        y_min = min(y_coords)
-        x_max = max(x_coords)
-        y_max = max(y_coords)
-        width = x_max - x_min
-        height = y_max - y_min
-        snapped_angle = 90.0 if height > width else 0.0
-        word_count = len(line.get("words", []))
-        avg_confidence = (
-            sum(word.get("confidence", 0.95) for word in line.get("words", []))
-            / word_count
-            if word_count > 0
-            else 0.95
-        )
-        output_json.append(
-            {
-                "text": text,
-                "tightBoundingBox": {
-                    "x": x_min / image_width,
-                    "y": y_min / image_height,
-                    "width": width / image_width,
-                    "height": height / image_height,
-                },
-                "orientation": snapped_angle,
-                "fontSize": 0.04,
-                "confidence": avg_confidence,
-            }
-        )
-    return output_json
 
 
 # --- API Endpoints ---
@@ -343,10 +171,15 @@ async def ocr_endpoint():
             chunk_width, chunk_height = chunk_image.size
 
             # Run OCR on the smaller chunk
-            result = await asyncio.to_thread(ocr_engine.recognize_pil, chunk_image)
+            # result = await asyncio.to_thread(ocr_engine.recognize_pil, chunk_image)
 
             # Change up data from OCR result for Mangatan usage
-            transformed_chunk = transform_ocr_data(result, chunk_image.size)
+            # transformed_chunk = transform_ocr_data(result, chunk_image.size)
+
+            # transformed_chunk = await asyncio.to_thread(
+            #     ocr_engine.ocr, chunk_image, chunk_image.size
+            # )
+            transformed_chunk = await ocr_engine.ocr(chunk_image, chunk_image.size)
 
             # Remap the coordinates of the detected text to be relative to the FULL image
             for item in transformed_chunk:
