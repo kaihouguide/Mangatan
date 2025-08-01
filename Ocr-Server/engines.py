@@ -3,6 +3,7 @@ from typing import TypedDict
 
 import chrome_lens_py
 import oneocr
+from PIL.Image import Image
 
 
 class BoundingBox(TypedDict):
@@ -22,7 +23,7 @@ class Bubble(TypedDict):
 
 class Engine(ABC):
     @abstractmethod
-    async def ocr(self, img, image_size) -> list[Bubble]:
+    async def ocr(self, img: Image) -> list[Bubble]:
         pass
 
 
@@ -30,9 +31,9 @@ class OneOCR(Engine):
     def __init__(self):
         self.engine = oneocr.OcrEngine()
 
-    async def ocr(self, img, image_size):
+    async def ocr(self, img):
         result = self.engine.recognize_pil(img)
-        return self.transform(result, image_size)
+        return self.transform(result, img.size)
 
     def transform(self, result, image_size) -> list[Bubble]:
         if not result or not result.get("lines"):
@@ -83,7 +84,7 @@ class GoogleLens(Engine):
     def __init__(self):
         self.engine = chrome_lens_py.LensAPI()
 
-    async def ocr(self, img, image_size):
+    async def ocr(self, img):
         result = await self.engine.process_image(img, "ja")
         return self.transform(result)
 

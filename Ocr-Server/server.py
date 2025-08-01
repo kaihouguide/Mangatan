@@ -8,7 +8,8 @@ import math
 import os
 import sys
 import threading
-from engines import OneOCR, GoogleLens
+
+from engines import Engine, GoogleLens, OneOCR
 
 # --- Platform-Specific Fix for Windows ---
 if sys.platform == "win32":
@@ -17,7 +18,6 @@ if sys.platform == "win32":
     init(autoreset=True)
 
 import aiohttp
-
 from flask import Flask, jsonify, request, send_file
 from PIL import Image
 from waitress import serve
@@ -36,7 +36,7 @@ OVERLAP = 150
 print("[Engine] Initializing oneocr.OcrEngine()...")
 try:
     # ocr_engine = OneOCR()
-    ocr_engine = GoogleLens()
+    ocr_engine: Engine = GoogleLens()
     print("[Engine] Initialization complete.")
 except Exception as e:
     print(f"[Engine] CRITICAL: Failed to initialize oneocr.OcrEngine: {e}")
@@ -132,17 +132,14 @@ async def ocr_endpoint():
             auth_string = f"{auth_user}:{auth_pass}"
             auth_base64 = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
             auth_headers["Authorization"] = f"Basic {auth_base64}"
-        # --- END OF NEW CODE ---
 
         url_hash = hashlib.sha256(image_url.encode("utf-8")).hexdigest()
         local_image_path = os.path.join(IMAGE_CACHE_FOLDER, f"{url_hash}.jpg")
 
-        # --- MODIFIED: Pass the 'auth_headers' to the get request ---
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url, headers=auth_headers) as response:
                 response.raise_for_status()  # This will now check for 401 errors
                 image_bytes = await response.read()
-        # --- END OF MODIFICATION ---
 
         # Disable Pillow's decompression bomb check to handle large images,
         # since we are controlling the processing flow.
@@ -171,18 +168,10 @@ async def ocr_endpoint():
             chunk_width, chunk_height = chunk_image.size
 
             # Run OCR on the smaller chunk
-            # result = await asyncio.to_thread(ocr_engine.recognize_pil, chunk_image)
-
-            # Change up data from OCR result for Mangatan usage
-            # transformed_chunk = transform_ocr_data(result, chunk_image.size)
-
-            # transformed_chunk = await asyncio.to_thread(
-            #     ocr_engine.ocr, chunk_image, chunk_image.size
-            # )
-            transformed_chunk = await ocr_engine.ocr(chunk_image, chunk_image.size)
+            results = await ocr_engine.ocr(chunk_image)
 
             # Remap the coordinates of the detected text to be relative to the FULL image
-            for item in transformed_chunk:
+            for item in results:
                 bbox = item["tightBoundingBox"]
                 # Adjust y and height based on the chunk's position and size
                 bbox["y"] = (bbox["y"] * chunk_height + y_offset) / full_height
