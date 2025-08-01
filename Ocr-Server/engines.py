@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TypedDict
+from typing import TypedDict, Any
 
 import chrome_lens_py
 import oneocr
@@ -88,7 +88,7 @@ class GoogleLens(Engine):
         result = await self.engine.process_image(img, "ja")
         return self.transform(result)
 
-    def transform(self, result: dict[str]) -> list[Bubble]:
+    def transform(self, result: dict[str, Any]) -> list[Bubble]:
         if result["ocr_text"] == "":
             return []
 
@@ -96,15 +96,15 @@ class GoogleLens(Engine):
         word_data = result["word_data"]
 
         for data in word_data:
-            word = data["word"]
-            # separator = data["separator"]
-            geometry = data["geometry"]
-            center_x = geometry["center_x"]
-            center_y = geometry["center_y"]
-            width = geometry["width"]
-            height = geometry["height"]
-            angle_deg = geometry["angle_deg"]
-            # coordinate_type = geometry["coordinate_type"]
+            word: str = data["word"]
+            # separator: str = data["separator"]
+            geometry: dict[str, Any] = data["geometry"]
+            center_x: float = geometry["center_x"]
+            center_y: float = geometry["center_y"]
+            width: float = geometry["width"]
+            height: float = geometry["height"]
+            angle_deg: float = geometry["angle_deg"]
+            # coordinate_type: str = geometry["coordinate_type"]
 
             bubble = Bubble(
                 text=word,

@@ -130,6 +130,8 @@ async def ocr_endpoint():
             auth_base64 = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
             auth_headers["Authorization"] = f"Basic {auth_base64}"
 
+        # TODO: this could be async
+        # sha512 might be faster for large files? https://crypto.stackexchange.com/questions/26336/sha-512-faster-than-sha-256
         url_hash = hashlib.sha256(image_url.encode("utf-8")).hexdigest()
         local_image_path = os.path.join(IMAGE_CACHE_FOLDER, f"{url_hash}.jpg")
 
@@ -228,10 +230,11 @@ def import_cache_endpoint():
     if "cacheFile" not in request.files:
         return jsonify({"error": "No file part."}), 400
     file = request.files["cacheFile"]
-    if file.filename == "" or not file.filename.endswith(".json"):
+    filename = file.filename
+    if filename == "" or (filename is not None and filename.endswith(".json") is False):
         return jsonify({"error": "Invalid file."}), 400
     try:
-        imported_data = json.load(file)
+        imported_data = json.loads(file.read().decode("utf-8"))
         if not isinstance(imported_data, dict):
             return jsonify({"error": "Invalid cache format."}), 400
         with cache_lock:
