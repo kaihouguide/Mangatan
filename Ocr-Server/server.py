@@ -1,10 +1,8 @@
 import argparse
-import asyncio
 import base64  # <-- ADDED: For handling Basic Authentication encoding
 import hashlib
 import io
 import json
-import math
 import os
 import sys
 import threading
@@ -21,7 +19,6 @@ import aiohttp
 from flask import Flask, jsonify, request, send_file
 from PIL import Image
 from waitress import serve
-from werkzeug.utils import secure_filename
 
 # --- NEW: Configuration for Image Slicing ---
 # The height of each chunk to process.
