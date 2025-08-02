@@ -122,11 +122,6 @@ async def ocr_endpoint():
             auth_base64 = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
             auth_headers["Authorization"] = f"Basic {auth_base64}"
 
-        # TODO: this could be async
-        # sha512 might be faster for large files? https://crypto.stackexchange.com/questions/26336/sha-512-faster-than-sha-256
-        url_hash = hashlib.sha256(image_url.encode("utf-8")).hexdigest()
-        local_image_path = os.path.join(IMAGE_CACHE_FOLDER, f"{url_hash}.jpg")
-
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url, headers=auth_headers) as response:
                 response.raise_for_status()  # This will now check for 401 errors
