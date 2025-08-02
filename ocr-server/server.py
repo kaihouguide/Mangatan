@@ -4,21 +4,14 @@ import hashlib
 import io
 import json
 import os
-import sys
 import threading
 
-from engines import Engine, GoogleLens, OneOCR
-
-# --- Platform-Specific Fix for Windows ---
-if sys.platform == "win32":
-    from colorama import init
-
-    init(autoreset=True)
-
 import aiohttp
+from engines import Engine, GoogleLens, OneOCR
 from flask import Flask, jsonify, request, send_file
 from PIL import Image
 from waitress import serve
+
 
 # --- NEW: Configuration for Image Slicing ---
 # The height of each chunk to process.
