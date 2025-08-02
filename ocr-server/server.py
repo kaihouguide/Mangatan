@@ -20,10 +20,9 @@ CHUNK_HEIGHT = 1500
 # The pixel overlap between chunks to prevent cutting text in half.
 OVERLAP = 150
 
-
 # --- Engine and App Initialization ---
 
-print("[Engine] Initializing oneocr.OcrEngine()...")
+print("[Engine] Initializing...")
 try:
     # ocr_engine = OneOCR()
     ocr_engine: Engine = GoogleLens()
