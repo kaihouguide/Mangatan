@@ -200,3 +200,5 @@ Your server should now be active and ready to use. To stop it at any time, retur
 ### DEMO
 *(This entire project was tested kindly by **sonphamthai** on Discord, who also made the demo)*
 ![alt text](https://files.catbox.moe/9px8v2.gif)
+
+##TODO: maybe we add an option to use Mansive's compiled server.exes?
