@@ -1,5 +1,6 @@
 node_modules
-server-local-ocr*
+*.dist/
+*.build/
 ocr-cache.json
 *.exe
 *.pyc
