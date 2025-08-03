@@ -24,6 +24,10 @@ class Bubble(TypedDict):
 
 
 class Engine(ABC):
+    """Base class for OCR engines. Each engine should implement the `ocr` method
+    which processes an image and returns a list of Bubble objects.
+    """
+
     @abstractmethod
     async def ocr(self, img: Image) -> list[Bubble]:
         pass
@@ -32,23 +36,67 @@ class Engine(ABC):
 class OneOCR(Engine):
     def __init__(self):
         self.engine = oneocr.OcrEngine()
+        # The height of each chunk to process.
+        # A value between 1000-2000 is a good starting point.
+        self.CHUNK_HEIGHT = 1500
+        # The pixel overlap between chunks to prevent cutting text in half.
+        self.OVERLAP = 150
 
     async def ocr(self, img):
-        result = self.engine.recognize_pil(img)
-        return self.transform(result, img.size)
+        chunk_image = self.process_image(img)
+        return chunk_image
+
+    def process_image(self, img: Image) -> list[Bubble]:
+        full_width, full_height = img.size
+        y_offset = 0
+        all_transformed_results: list[Bubble] = []
+
+        while y_offset < full_height:
+            # Define the crop box for the current chunk
+            box = (
+                0,
+                y_offset,
+                full_width,
+                min(y_offset + self.CHUNK_HEIGHT, full_height),
+            )
+
+            # Crop the image to get the current chunk
+            chunk_image = img.crop(box)
+            chunk_width, chunk_height = chunk_image.size
+
+            # Run OCR on the smaller chunk
+            results = self.engine.recognize_pil(chunk_image)
+            data = self.transform(results, chunk_image.size)
+
+            # Remap the coordinates of the detected text to be relative to the FULL image
+            for item in data:
+                bbox = item["tightBoundingBox"]
+                # Adjust y and height based on the chunk's position and size
+                bbox["y"] = (bbox["y"] * chunk_height + y_offset) / full_height
+                bbox["height"] = (bbox["height"] * chunk_height) / full_height
+                all_transformed_results.append(item)
+
+            # Move to the next chunk position
+            y_offset += self.CHUNK_HEIGHT - self.OVERLAP
+        return all_transformed_results
 
     def transform(self, result, image_size) -> list[Bubble]:
         if not result or not result.get("lines"):
             return []
+
         image_width, image_height = image_size
         if image_width == 0 or image_height == 0:
             return []
+
         output_json = []
+
         for line in result.get("lines", []):
             text = line.get("text", "").strip()
             rect = line.get("bounding_rect")
+
             if not rect or not text or not line.get("words"):
                 continue
+
             x_coords = [rect["x1"], rect["x2"], rect["x3"], rect["x4"]]
             y_coords = [rect["y1"], rect["y2"], rect["y3"], rect["y4"]]
             x_min = min(x_coords)
