@@ -136,56 +136,22 @@ async def ocr_endpoint():
         if is_debug_mode:
             print(f"[DEBUG] Image downloaded. Size: {rgb_image.size}")
 
-        # --- SLICING AND PROCESSING LOGIC ---
-
-        full_width, full_height = rgb_image.size
-        y_offset = 0
-        all_transformed_results = []
-
-        while y_offset < full_height:
-            # Define the crop box for the current chunk
-            box = (0, y_offset, full_width, min(y_offset + CHUNK_HEIGHT, full_height))
-
-            if is_debug_mode:
-                print(f"[DEBUG] Processing chunk at y-offset: {y_offset}")
-
-            # Crop the image to get the current chunk
-            chunk_image = rgb_image.crop(box)
-            chunk_width, chunk_height = chunk_image.size
-
-            # Run OCR on the smaller chunk
-            results = await ocr_engine.ocr(chunk_image)
-
-            # Remap the coordinates of the detected text to be relative to the FULL image
-            for item in results:
-                bbox = item["tightBoundingBox"]
-                # Adjust y and height based on the chunk's position and size
-                bbox["y"] = (bbox["y"] * chunk_height + y_offset) / full_height
-                bbox["height"] = (bbox["height"] * chunk_height) / full_height
-                all_transformed_results.append(item)
-
-            # Move to the next chunk position
-            y_offset += CHUNK_HEIGHT - OVERLAP
-
-        # --- END OF SLICING LOGIC ---
+        results = await ocr_engine.ocr(rgb_image)
 
         if is_debug_mode:
             print(
-                f"[DEBUG] OCR recognition finished. Found {len(all_transformed_results)} text blocks."
+                f"[DEBUG] OCR recognition finished. Found {len(results)} text blocks."
             )
-
-        # The final result is the list of all text blocks from all chunks
-        transformed_result = all_transformed_results
 
         with cache_lock:
             if is_debug_mode:
                 print("[DEBUG] Caching transformed result for URL.")
-            ocr_cache[image_url] = transformed_result
+            ocr_cache[image_url] = results
             ocr_requests_processed += 1
             save_cache()
 
         print(f"OCR successful for: ...{image_url[-40:]}")
-        return jsonify(transformed_result)
+        return jsonify(results)
 
     except aiohttp.ClientResponseError as e:
         error_message = (
