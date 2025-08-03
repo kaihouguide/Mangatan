@@ -178,3 +178,14 @@ class GoogleLens(Engine):
                 output_json.append(bubble)
 
         return output_json
+
+
+# TODO: get a mac
+class AppleVision(Engine):
+    def __init__(self):
+        print("stubbed function")
+        self.engine = object()
+
+    async def ocr(self, img: Image) -> list[Bubble]:
+        print("stubbed function")
+        return []
