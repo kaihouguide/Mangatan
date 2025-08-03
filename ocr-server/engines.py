@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import TypedDict, Any
+from typing import Any, TypedDict
+from math import pi
 
 import chrome_lens_py
 import oneocr
+from chrome_lens_py.utils.lens_betterproto import LensOverlayObjectsResponse
 from PIL.Image import Image
 
 
@@ -77,6 +79,7 @@ class OneOCR(Engine):
                 confidence=avg_confidence,
             )
             output_json.append(bubble)
+
         return output_json
 
 
@@ -85,39 +88,45 @@ class GoogleLens(Engine):
         self.engine = chrome_lens_py.LensAPI()
 
     async def ocr(self, img):
-        result = await self.engine.process_image(img, "ja")
+        result = await self.engine.process_image(image_path=img, ocr_language="ja")
         return self.transform(result)
 
+    # TODO: Refactor when chrome_lens_py supports lines output_format
     def transform(self, result: dict[str, Any]) -> list[Bubble]:
         if result["ocr_text"] == "":
             return []
 
-        output_json = []
-        word_data = result["word_data"]
+        output_json: list[Bubble] = []
+        response: LensOverlayObjectsResponse = result["raw_response_objects"]
 
-        for data in word_data:
-            word: str = data["word"]
-            # separator: str = data["separator"]
-            geometry: dict[str, Any] = data["geometry"]
-            center_x: float = geometry["center_x"]
-            center_y: float = geometry["center_y"]
-            width: float = geometry["width"]
-            height: float = geometry["height"]
-            angle_deg: float = geometry["angle_deg"]
-            # coordinate_type: str = geometry["coordinate_type"]
+        # The library has parsed fields for us, but we'll have to manually parse
+        # the raw response for individual line geometry
+        for paragraph in response.text.text_layout.paragraphs:
+            for line in paragraph.lines:
+                line_text = "".join(
+                    word.plain_text + (word.text_separator or "") for word in line.words
+                ).strip()
+                geometry = line.geometry
 
-            bubble = Bubble(
-                text=word,
-                tightBoundingBox=BoundingBox(
-                    x=center_x - width / 2,
-                    y=center_y - height / 2,
-                    width=width,
-                    height=height,
-                ),
-                orientation=round(angle_deg, 1),
-                font_size=0.04,
-                confidence=0.98,
-            )
-            output_json.append(bubble)
+                bounding_box = geometry.bounding_box
+                center_x = bounding_box.center_x
+                center_y = bounding_box.center_y
+                width = bounding_box.width
+                height = bounding_box.height
+                rotation_z = bounding_box.rotation_z
+
+                bubble = Bubble(
+                    text=line_text,
+                    tightBoundingBox=BoundingBox(
+                        x=center_x - width / 2,
+                        y=center_y - height / 2,
+                        width=width,
+                        height=height,
+                    ),
+                    orientation=round(rotation_z * (180 / pi), 1),
+                    font_size=0.04,
+                    confidence=0.98,
+                )
+                output_json.append(bubble)
 
         return output_json
