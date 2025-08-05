@@ -1,11 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import Any, TypedDict
 from math import pi
+from typing import TypedDict
 
 import chrome_lens_py
-import oneocr
 from chrome_lens_py.utils.lens_betterproto import LensOverlayObjectsResponse
 from PIL.Image import Image
+
+try:
+    import oneocr
+
+    ONEOCR_AVAILABLE = True
+except ImportError as e:
+    print(f"[Warning] OneOCR import failed: {e}")
+    ONEOCR_AVAILABLE = False
 
 
 class BoundingBox(TypedDict):
@@ -35,7 +42,7 @@ class Engine(ABC):
 
 class OneOCR(Engine):
     def __init__(self):
-        self.engine = oneocr.OcrEngine()
+        self.engine = oneocr.OcrEngine()  # pyright: ignore[reportPossiblyUnboundVariable]
         # The height of each chunk to process.
         # A value between 1000-2000 is a good starting point.
         self.CHUNK_HEIGHT = 1500
@@ -140,7 +147,7 @@ class GoogleLens(Engine):
         return self.transform(result)
 
     # TODO: Refactor when chrome_lens_py supports lines output_format
-    def transform(self, result: dict[str, Any]) -> list[Bubble]:
+    def transform(self, result: dict) -> list[Bubble]:
         if result["ocr_text"] == "":
             return []
 
@@ -148,12 +155,17 @@ class GoogleLens(Engine):
         response: LensOverlayObjectsResponse = result["raw_response_objects"]
 
         # The library has parsed fields for us, but we'll have to manually parse
-        # the raw response for individual line geometry
+        # the raw response for individual line geometry for now
         for paragraph in response.text.text_layout.paragraphs:
             for line in paragraph.lines:
-                line_text = "".join(
-                    word.plain_text + (word.text_separator or "") for word in line.words
-                ).strip()
+                line_text = (
+                    "".join(
+                        word.plain_text + (word.text_separator or "")
+                        for word in line.words
+                    )
+                    .strip()
+                    .replace("･･･", "…")
+                )
                 geometry = line.geometry
 
                 bounding_box = geometry.bounding_box
@@ -183,9 +195,22 @@ class GoogleLens(Engine):
 # TODO: get a mac
 class AppleVision(Engine):
     def __init__(self):
-        print("stubbed function")
+        print("AppleVision is not implemented yet")
         self.engine = object()
 
     async def ocr(self, img: Image) -> list[Bubble]:
-        print("stubbed function")
+        print("AppleVision is not implemented yet")
         return []
+
+
+def initialize_engine(engine_name: str) -> Engine:
+    engine_name = engine_name.strip().lower()
+    if engine_name == "lens":
+        return GoogleLens()
+    elif engine_name == "oneocr":
+        if ONEOCR_AVAILABLE:
+            return OneOCR()
+        else:
+            raise RuntimeError("OneOCR is not available.")
+    else:
+        raise ValueError(f"Invalid engine: {engine_name}")
