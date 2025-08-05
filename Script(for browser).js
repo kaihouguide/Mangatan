@@ -4,7 +4,7 @@
 // @version      21.6.48-Manga-Fix-Hybrid
 // @description  Combines the stable manga sorting and font logic of v21.5.21 with the new features (Proximity Mode, Opacity Control, Font Multipliers, Credentials) of v21.6.48.
 // @author       1Selxo 
-// @match        http://127.0.0.1/*
+// @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
