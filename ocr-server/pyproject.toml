@@ -12,3 +12,8 @@ dependencies = [
     "oneocr>=1.0.9",
     "waitress>=3.0.2",
 ]
+
+[dependency-groups]
+dev = [
+    "nuitka>=2.7.12",
+]
