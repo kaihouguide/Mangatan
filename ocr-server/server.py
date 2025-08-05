@@ -230,7 +230,7 @@ def main():
         print(f"[Engine] {args.engine} initialization complete.")
     except Exception as e:
         print(f"[Engine] Failed to initialize {args.engine}: {e}")
-        exit(1)
+        raise SystemExit(1)
 
     load_cache()
 

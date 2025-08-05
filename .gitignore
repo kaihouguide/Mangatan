@@ -4,3 +4,4 @@ node_modules
 ocr-cache.json
 *.exe
 *.pyc
+ocr-server/nuitka-crash-report.xml
