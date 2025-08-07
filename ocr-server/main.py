@@ -1,3 +1,4 @@
+"""This file is used for Nuitka configuration"""
 # nuitka-project: --standalone
 # nuitka-project: --output-filename=mangatan-server.exe
 # nuitka-project-if: {OS} == "Windows":
