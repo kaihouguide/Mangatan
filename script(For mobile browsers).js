@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.17 - Themed & Refactored)
+// @name         Automatic Content OCR (v22.M.17 - Themed & Refactored + Batch)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.17.0
-// @description  Adds all PC color themes and refactors core logic for significant performance improvements, especially in font calculation and overlay management.
+// @version      22.M.17.1
+// @description  Adds all PC color themes and refactors core logic for significant performance improvements, and adds PC batch processing features.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -71,15 +71,25 @@
         grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging ---
+    // --- Logging & Persistence ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.17.0] ${logEntry}`);
+        console.log(`[OCR v22.M.17.1] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
+    const PersistentCache = {
+        CACHE_KEY: 'gemini_ocr_cache_v22_M',
+        data: null,
+        async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
+        async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
+        get(key) { return this.data?.get(key); },
+        has(key) { return this.data?.has(key) ?? false; },
+        async set(key, value) { if(this.data) { this.data.set(key, value); await this.save(); } },
+    };
+
 
     // --- TOUCH INTERACTION LOGIC (Event-Driven) ---
     function triggerOverlayToggle(targetImg) {
@@ -192,6 +202,26 @@
     function manageContainer(container) { if (!managedContainers.has(container)) { logDebug(`New container found: ${container.className}`); container.querySelectorAll('img').forEach(observeImageForSrcChange); imageObserver.observe(container, { childList: true, subtree: true }); managedContainers.set(container, true); } }
     const containerObserver = new MutationObserver((mutations) => { if (!activeSiteConfig) return; const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', '); for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) { if (node.matches(selectorQuery)) manageContainer(node); else node.querySelectorAll(selectorQuery).forEach(manageContainer); } });
     function activateScanner() { logDebug("Activating scanner..."); activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern)); if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No config for URL: ${window.location.href}.`); const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', '); document.querySelectorAll(selectorQuery).forEach(manageContainer); containerObserver.observe(document.body, { childList: true, subtree: true }); logDebug("Main container observer active."); }
+    // --- Chapter List Observer ---
+    const chapterObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType === 1) {
+                    const chapterLinks = node.matches('a[href*="/manga/"][href*="/chapter/"]') ? [node] : node.querySelectorAll('a[href*="/manga/"][href*="/chapter/"]');
+                    chapterLinks.forEach(addOcrButtonToChapter);
+                }
+            }
+        }
+    });
+    function observeChapters() {
+        const targetNode = document.getElementById('root');
+        if (targetNode) {
+            logDebug("Chapter observer activated on #root.");
+            targetNode.querySelectorAll('a[href*="/manga/"][href*="/chapter/"]').forEach(addOcrButtonToChapter);
+            chapterObserver.observe(targetNode, { childList: true, subtree: true });
+        }
+    }
+
 
     function observeImageForSrcChange(img) {
         const processTheImage = (src) => {
@@ -215,12 +245,21 @@
             managedElements.get(img).overlay.remove();
             managedElements.delete(img);
         }
+
         const sourceUrl = img.src;
+
+        if (PersistentCache.has(sourceUrl)) {
+            logDebug(`Cache HIT for: ...${sourceUrl.slice(-30)}`);
+            ocrDataCache.set(img, PersistentCache.get(sourceUrl));
+            displayOcrResults(img);
+            return;
+        }
+
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
         ocrDataCache.set(img, 'pending');
         let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`;
         if (settings.imageServerUser) { logDebug("Forwarding credentials."); ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`; }
-        GM_xmlhttpRequest({ method: 'GET', url: ocrRequestUrl, timeout: 30000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); ocrDataCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); } catch (e) { logDebug(`OCR Error: ${e.message}`); ocrDataCache.delete(img); } }, onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); }, ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); } });
+        GM_xmlhttpRequest({ method: 'GET', url: ocrRequestUrl, timeout: 30000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); PersistentCache.set(sourceUrl, data); ocrDataCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); } catch (e) { logDebug(`OCR Error: ${e.message}`); ocrDataCache.delete(img); } }, onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); }, ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); } });
     }
 
     // --- OVERLAY & UPDATE ENGINE ---
@@ -417,6 +456,121 @@
         }
     }
 
+    // --- BATCH PROCESSING & INLINE UI ---
+    async function runProbingProcess(baseUrl, btn) {
+        logDebug(`Starting sequential batch probe from: ${baseUrl}`);
+        let successCount = 0;
+        let consecutiveErrors = 0;
+        let currentPage = 0;
+        const CONSECUTIVE_ERROR_THRESHOLD = 3; // Stop after 3 failures in a row
+        const originalText = btn.textContent;
+
+        while (consecutiveErrors < CONSECUTIVE_ERROR_THRESHOLD) {
+            const url = `${baseUrl}${currentPage}`;
+            btn.textContent = `P:${currentPage}`;
+
+            const success = await new Promise(resolve => {
+                let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
+                if (settings.imageServerUser) {
+                    ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
+                }
+
+                GM_xmlhttpRequest({
+                    method: 'GET', url: ocrRequestUrl, timeout: 45000,
+                    onload: (res) => {
+                        try {
+                            const data = JSON.parse(res.responseText);
+                            if (data.error) throw new Error(data.error);
+                            PersistentCache.set(url, data);
+                            logDebug(`Probe Success: Page ${currentPage}`);
+                            resolve(true);
+                        } catch (e) {
+                            logDebug(`Probe Failed (Server Error): Page ${currentPage} - ${e.message}`);
+                            resolve(false);
+                        }
+                    },
+                    onerror: () => { logDebug(`Probe Failed (Connection Error): Page ${currentPage}`); resolve(false); },
+                    ontimeout: () => { logDebug(`Probe Failed (Timeout): Page ${currentPage}`); resolve(false); }
+                });
+            });
+
+            if (success) {
+                successCount++;
+                consecutiveErrors = 0;
+            } else {
+                consecutiveErrors++;
+            }
+            currentPage++;
+        }
+
+        const pagesFound = currentPage - CONSECUTIVE_ERROR_THRESHOLD;
+        logDebug(`Batch probe finished. Detected end of chapter after page ${pagesFound - 1}. Total successful: ${successCount}.`);
+
+        btn.textContent = 'Done!';
+        btn.style.borderColor = '#27ae60'; // Green border for success
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.style.borderColor = ''; // Revert border color
+        }, 2500);
+
+        if (btn.id === 'gemini-ocr-batch-chapter-btn') {
+            alert(`Chapter pre-processing complete!\n\nDetected approximately ${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
+        }
+    }
+
+    async function batchProcessCurrentChapterFromURL() {
+        const btn = UI.batchChapterBtn;
+        btn.disabled = true;
+        btn.textContent = "Checking...";
+
+        const urlPath = window.location.pathname;
+        const urlMatch = urlPath.match(/\/manga\/\d+\/chapter\/\d+/);
+
+        if (!urlMatch) {
+            alert(`Error: The current page URL does not match the expected format '.../manga/ID/chapter/ID'.`);
+            btn.disabled = false;
+            btn.textContent = "Pre-process Chapter";
+            return;
+        }
+
+        const baseUrl = `${window.location.origin}/api/v1${urlMatch[0]}/page/`;
+        await runProbingProcess(baseUrl, btn);
+        btn.disabled = false;
+    }
+
+    async function handleChapterBatchClick(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const btn = event.currentTarget;
+        const chapterLinkElement = btn.closest('a[href*="/manga/"][href*="/chapter/"]');
+        if (!chapterLinkElement || !chapterLinkElement.href) return;
+
+        logDebug(`Inline batch processing requested for: ${chapterLinkElement.href}`);
+        const urlPath = new URL(chapterLinkElement.href).pathname;
+        const baseUrl = `${window.location.origin}/api/v1${urlPath}/page/`;
+
+        btn.disabled = true;
+        await runProbingProcess(baseUrl, btn);
+        btn.disabled = false;
+    }
+
+    function addOcrButtonToChapter(chapterLinkElement) {
+        const moreButton = chapterLinkElement.querySelector('button[aria-label="more"]');
+        if (!moreButton) return;
+
+        const actionContainer = moreButton.parentElement;
+        if (!actionContainer || actionContainer.querySelector('.gemini-ocr-chapter-batch-btn')) return;
+
+        const ocrButton = document.createElement('button');
+        ocrButton.textContent = 'OCR';
+        ocrButton.className = 'gemini-ocr-chapter-batch-btn';
+        ocrButton.title = 'Pre-process this chapter';
+        ocrButton.addEventListener('click', handleChapterBatchClick);
+
+        actionContainer.insertBefore(ocrButton, moreButton);
+    }
+
 
     // --- ANKI, UI, AND INITIALIZATION ---
     async function ankiConnectRequest(action, params = {}) { logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
@@ -426,6 +580,16 @@
 
     function createUI() {
         GM_addStyle(`
+            /* Inline Chapter OCR Button */
+            .gemini-ocr-chapter-batch-btn {
+                font-family: "Roboto","Helvetica","Arial",sans-serif;
+                font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;
+                border: 1px solid rgba(240,153,136,0.5); color: #f09988;
+                background-color: transparent; cursor: pointer; margin-right: 4px;
+                transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); }
+            .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; background-color: transparent; }
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
                 pointer-events: none;
@@ -558,7 +722,12 @@
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
                     <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1;.container1;.container2\n"></textarea></div>
                 </div>
-                <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
+                <div class="gemini-ocr-modal-footer">
+                    <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db; margin-right: auto;" title="Processes the entire chapter based on the page URL, probing for pages until it finds the end.">Pre-process Chapter</button>
+                    <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button>
+                    <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button>
+                    <button id="gemini-ocr-save-btn">Save & Reload</button>
+                </div>
               </div>
             </div>
             <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden">
@@ -586,6 +755,7 @@
             debugLogTextarea: document.getElementById('gemini-ocr-debug-log'), saveBtn: document.getElementById('gemini-ocr-save-btn'),
             closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'),
             closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
+            batchChapterBtn: document.getElementById('gemini-ocr-batch-chapter-btn'),
         });
 
         document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -602,6 +772,7 @@
         UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; });
         UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
         UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
+        UI.batchChapterBtn.addEventListener('click', batchProcessCurrentChapterFromURL);
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
                 ocrServerUrl: UI.serverUrlInput.value.trim(),
@@ -633,6 +804,7 @@
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) { try { const parsed = JSON.parse(loadedSettings); settings = { ...settings, ...parsed }; } catch(e) { logDebug("Could not parse saved settings. Using defaults."); } }
+        await PersistentCache.load();
         createUI(); bindUIEvents(); applyStyles(); createMeasurementSpan();
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.imageServerUserInput.value = settings.imageServerUser || '';
@@ -650,6 +822,7 @@
         UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, ...(s.imageContainerSelectors || [])].join('; ')).join('\n');
         activateScanner();
+        observeChapters();
     }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
 })();
