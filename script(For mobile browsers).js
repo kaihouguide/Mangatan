@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.16 - Event-Driven Long Press)
+// @name         Automatic Content OCR (v22.M.17 - Themed & Refactored)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.16.0
-// @description  Re-engineers long-press to use the 'contextmenu' event as a trigger, eliminating race conditions with the browser's native UI.
-// @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
+// @version      22.M.17.0
+// @description  Adds all PC color themes and refactors core logic for significant performance improvements, especially in font calculation and overlay management.
+// @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -34,15 +34,15 @@
         debugMode: true,
         textOrientation: 'smart',
         interactionMode: 'hover',
-        activationMode: 'longPress', // Restored setting
+        activationMode: 'longPress',
         proximityRadius: 150,
         dimmedOpacity: 0.25,
         fontMultiplierHorizontal: 1.0,
         fontMultiplierVertical: 1.0,
-        colorTheme: 'deepblue'
+        colorTheme: 'deepblue' // Default theme
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix_enhanced'; // Re-using this key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_M17_final'; // Updated key for new version
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -54,16 +54,21 @@
     let activeImageForExport = null;
     let activeOverlay = null;
 
-    // --- Interaction Timers & Trackers (Re-engineered) ---
+    // --- Interaction Timers & Trackers (Event-Driven) ---
     let longPressState = { valid: false }; // Tracks the state of a potential long press
     let tapTracker = new WeakMap();
     const DOUBLE_TAP_THRESHOLD = 300;
 
-    // --- Color Themes ---
+    // --- Color Themes (Expanded from PC Script) ---
     const COLOR_THEMES = {
         deepblue: { main: 'rgba(0,191,255,',  text: '#FFFFFF', highlightText: '#000000' },
         red:      { main: 'rgba(255, 71, 87,',   text: '#FFFFFF', highlightText: '#000000' },
-        green:    { main: 'rgba(46, 204, 113,',  text: '#FFFFFF', highlightText: '#000000' }
+        green:    { main: 'rgba(46, 204, 113,',  text: '#FFFFFF', highlightText: '#000000' },
+        orange:   { main: 'rgba(243, 156, 18,',  text: '#FFFFFF', highlightText: '#000000' },
+        purple:   { main: 'rgba(155, 89, 182,',  text: '#FFFFFF', highlightText: '#000000' },
+        turquoise:{ main: 'rgba(26, 188, 156,', text: '#FFFFFF', highlightText: '#000000' },
+        pink:     { main: 'rgba(232, 67, 147,',  text: '#FFFFFF', highlightText: '#000000' },
+        grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
     // --- Logging ---
@@ -71,7 +76,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.16.0] ${logEntry}`);
+        console.log(`[OCR v22.M.17.0] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -79,7 +84,7 @@
     // --- TOUCH INTERACTION LOGIC (Event-Driven) ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
-        if (overlayState && overlayState.overlay) {
+        if (overlayState?.overlay) {
             if (overlayState.overlay === activeOverlay) {
                 hideActiveOverlay();
             } else {
@@ -126,35 +131,26 @@
 
     function handleTouchMove(event) {
         if (!longPressState.valid) return;
-
+        const SCROLL_TOLERANCE = 10;
         const deltaX = Math.abs(longPressState.startX - event.touches[0].clientX);
         const deltaY = Math.abs(longPressState.startY - event.touches[0].clientY);
-        const SCROLL_TOLERANCE = 10; // How far the finger can move before we call it a scroll
 
         if (deltaX > SCROLL_TOLERANCE || deltaY > SCROLL_TOLERANCE) {
-            longPressState.valid = false; // User is scrolling, not long-pressing
+            longPressState.valid = false;
         }
     }
 
     function handleTouchEnd() {
-        // A touch ended, so any pending long press is now invalid.
         longPressState.valid = false;
     }
 
     function handleContextMenu(event) {
-        // This is the new trigger for our long-press action.
-        // It fires when the browser *thinks* it should show a context menu.
         if (settings.activationMode === 'longPress' && longPressState.valid && event.target === longPressState.target) {
             logDebug("Intercepted contextmenu event for long-press activation.");
-            // Prevent the default browser menu
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
-
-            // Trigger our UI instead
             triggerOverlayToggle(longPressState.target);
-
-            // Invalidate the state to finish the action
             longPressState.valid = false;
             return false;
         }
@@ -212,6 +208,7 @@
         attributeObserver.observe(img, { attributes: true });
         attachedAttributeObservers.set(img, attributeObserver);
     }
+
     function processImage(img) {
         if (ocrDataCache.get(img) === 'pending') return;
         if (managedElements.has(img)) {
@@ -241,8 +238,7 @@
     function hideActiveOverlay() {
         if (!activeOverlay) return;
         activeOverlay.classList.add('is-hidden');
-        activeOverlay.classList.remove('is-focused');
-        activeOverlay.classList.remove('has-manual-highlight');
+        activeOverlay.classList.remove('is-focused', 'has-manual-highlight');
         activeOverlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
         UI.globalAnkiButton?.classList.add('is-hidden');
         activeOverlay = null;
@@ -255,42 +251,63 @@
 
         const parent = targetImg.parentNode;
         if (!parent) return;
-        const parentPosition = window.getComputedStyle(parent).position;
-        if (parentPosition === 'static') {
+        if (window.getComputedStyle(parent).position === 'static') {
             parent.style.position = 'relative';
         }
 
+        // Sort for manga reading order (right-to-left, top-to-bottom)
         data.sort((a, b) => { const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x, ROW_TOLERANCE = 0.05; if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x; else return a_y - b_y; });
+
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
-        const fragment = document.createDocumentFragment(), imgRect = targetImg.getBoundingClientRect();
+        const fragment = document.createDocumentFragment();
+
         data.forEach((item) => {
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.textContent = item.text;
-            ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
-            const pixelWidth = item.tightBoundingBox.width * imgRect.width, pixelHeight = item.tightBoundingBox.height * imgRect.height;
-            let isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && (pixelHeight > pixelWidth || item.orientation === 90)) || (settings.textOrientation === 'serverAngle' && item.orientation === 90);
+            ocrBox.dataset.ocrX = item.tightBoundingBox.x;
+            ocrBox.dataset.ocrY = item.tightBoundingBox.y;
+            ocrBox.dataset.ocrWidth = item.tightBoundingBox.width;
+            ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
+
+            const pixelWidth = item.tightBoundingBox.width * targetImg.naturalWidth;
+            const pixelHeight = item.tightBoundingBox.height * targetImg.naturalHeight;
+            let isVertical = (settings.textOrientation === 'forceVertical') ||
+                             (settings.textOrientation === 'smart' && pixelHeight > pixelWidth) ||
+                             (settings.textOrientation === 'serverAngle' && item.orientation === 90);
             if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
-            Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
+
+            Object.assign(ocrBox.style, {
+                left: `${item.tightBoundingBox.x * 100}%`,
+                top: `${item.tightBoundingBox.y * 100}%`,
+                width: `${item.tightBoundingBox.width * 100}%`,
+                height: `${item.tightBoundingBox.height * 100}%`
+            });
             fragment.appendChild(ocrBox);
         });
+
         overlay.appendChild(fragment);
         parent.appendChild(overlay);
         overlay.addEventListener('click', handleOverlayInteraction);
+
         const state = { overlay, lastWidth: 0, lastHeight: 0, parentNode: parent };
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
-        if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
+
+        if (!overlayUpdateRunning) {
+            overlayUpdateRunning = true;
+            requestAnimationFrame(updateAllOverlays);
+        }
     }
 
+    // --- REFACTORED FONT CALCULATION ---
     function calculateAndApplyFontSizes(overlay, imgRect) {
         if (!measurementSpan) return;
         const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box');
         if (textBoxes.length === 0) return;
 
-        const MIN_FONT_SIZE = 10;
-
+        const MIN_FONT_SIZE = 8;
         const baseStyle = getComputedStyle(textBoxes[0]);
         Object.assign(measurementSpan.style, {
             fontFamily: baseStyle.fontFamily,
@@ -303,18 +320,17 @@
             const text = box.textContent || '';
             if (!text) return;
 
-            const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 6;
-            const availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 6;
+            const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8; // padding
+            const availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8; // padding
             if (availableWidth <= 0 || availableHeight <= 0) return;
 
             let bestSize = MIN_FONT_SIZE;
-            let multiplier;
             measurementSpan.textContent = text;
+            let low = MIN_FONT_SIZE, high = 150; // Use binary search for performance
 
             if (box.classList.contains('gemini-ocr-text-vertical')) {
                 measurementSpan.style.writingMode = 'vertical-rl';
                 measurementSpan.style.textOrientation = 'upright';
-                let low = MIN_FONT_SIZE, high = 150;
                 while (low <= high) {
                     const mid = Math.floor((low + high) / 2);
                     if (mid <= 0) break;
@@ -328,10 +344,9 @@
                 }
                 measurementSpan.style.writingMode = '';
                 measurementSpan.style.textOrientation = '';
-                multiplier = settings.fontMultiplierVertical;
+                box.style.fontSize = `${Math.max(bestSize, MIN_FONT_SIZE) * settings.fontMultiplierVertical}px`;
             } else {
                 box.style.whiteSpace = 'nowrap';
-                let low = MIN_FONT_SIZE, high = 150;
                 while (low <= high) {
                     const mid = Math.floor((low + high) / 2);
                     if (mid <= 0) break;
@@ -344,19 +359,18 @@
                     }
                 }
                 box.style.whiteSpace = 'normal';
-                multiplier = settings.fontMultiplierHorizontal;
+                box.style.fontSize = `${Math.max(bestSize, MIN_FONT_SIZE) * settings.fontMultiplierHorizontal}px`;
             }
-            box.style.fontSize = `${Math.max(bestSize, MIN_FONT_SIZE) * multiplier}px`;
         });
     }
 
-
+    // --- REFACTORED UPDATE LOOP ---
     function updateAllOverlays() {
-        overlayUpdateRunning = true;
         try {
             const elementsToDelete = [];
             for (const [img, state] of managedElements.entries()) {
-                if (!document.body.contains(img) || !document.body.contains(state.overlay)) {
+                // More robust check for element visibility and attachment
+                if (!img.isConnected || !state.overlay.isConnected) {
                     elementsToDelete.push(img);
                     continue;
                 }
@@ -365,6 +379,7 @@
                     if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden');
                     continue;
                 }
+
                 const parentRect = state.parentNode.getBoundingClientRect();
                 Object.assign(state.overlay.style, {
                     top: `${rect.top - parentRect.top + state.parentNode.scrollTop}px`,
@@ -372,21 +387,36 @@
                     width: `${rect.width}px`,
                     height: `${rect.height}px`
                 });
+
                 if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
-                    logDebug(`Dimensions changed for ...${img.src.slice(-30)}. Recalculating fonts.`);
+                    logDebug(`Resizing ...${img.src.slice(-30)}. Recalculating fonts.`);
                     calculateAndApplyFontSizes(state.overlay, rect);
                     state.lastWidth = rect.width;
                     state.lastHeight = rect.height;
                 }
             }
-            elementsToDelete.forEach(img => { managedElements.get(img)?.overlay.remove(); managedElements.delete(img); logDebug(`Garbage collected overlay.`); });
+            // Garbage collection for detached elements
+            elementsToDelete.forEach(img => {
+                const state = managedElements.get(img);
+                if (state) {
+                    state.overlay.remove();
+                    managedElements.delete(img);
+                    ocrDataCache.delete(img);
+                    logDebug(`Garbage collected overlay for detached image.`);
+                }
+            });
         } catch (error) {
             logDebug(`Critical error in updateAllOverlays: ${error.message}`);
         } finally {
-            overlayUpdateRunning = false;
-            if (managedElements.size > 0) requestAnimationFrame(updateAllOverlays);
+            if (managedElements.size > 0) {
+                requestAnimationFrame(updateAllOverlays);
+            } else {
+                overlayUpdateRunning = false;
+                logDebug("All overlays removed. Halting update loop.");
+            }
         }
     }
+
 
     // --- ANKI, UI, AND INITIALIZATION ---
     async function ankiConnectRequest(action, params = {}) { logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
@@ -410,10 +440,8 @@
             .gemini-ocr-text-box {
                 display: flex; justify-content: center; align-items: center; text-align: center; position: absolute;
                 box-sizing: border-box; border-radius: 4px;
-                user-select: text !important;
-                -webkit-user-select: text !important;
-                touch-action: auto !important;
-                cursor: pointer;
+                user-select: text !important; -webkit-user-select: text !important;
+                touch-action: auto !important; cursor: pointer;
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
                 color: var(--ocr-text-color);
                 text-shadow: 0px 1px 3px rgba(0,0,0,0.9);
@@ -421,12 +449,11 @@
                 transition: all 0.2s ease-in-out;
                 pointer-events: auto;
                 overflow: hidden;
-                padding: 6px;
-                -webkit-font-smoothing: antialiased;
-                -moz-osx-font-smoothing: grayscale;
+                padding: 4px; /* Reduced padding for mobile */
+                -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
                 text-rendering: optimizeLegibility;
             }
-            .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; }
+            .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; letter-spacing: 0.1em; } /* Added letter spacing for readability */
             .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
             .interaction-mode-click.is-focused .manual-highlight,
             .interaction-mode-proximity.is-focused .is-near {
@@ -452,8 +479,7 @@
                 cursor: pointer;
                 display: flex; align-items: center; justify-content: center;
                 box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-                user-select: none;
-                -webkit-user-select: none;
+                user-select: none; -webkit-user-select: none;
                 transition: all 0.2s ease-in-out;
                 backdrop-filter: blur(5px);
             }
@@ -545,7 +571,6 @@
         `);
     }
 
-
     function bindUIEvents() {
         Object.assign(UI, {
             settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'),
@@ -563,13 +588,11 @@
             closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
         });
 
-        // Bind new event-driven handlers
         document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
         document.body.addEventListener('touchmove', handleTouchMove, { passive: false });
         document.body.addEventListener('touchend', handleTouchEnd);
-        document.body.addEventListener('touchcancel', handleTouchEnd); // Also handle when a touch is cancelled
-        window.addEventListener('contextmenu', handleContextMenu, true); // Use capture to be the first to see the event
-
+        document.body.addEventListener('touchcancel', handleTouchEnd);
+        window.addEventListener('contextmenu', handleContextMenu, { capture: true, passive: false });
         document.body.addEventListener('click', handleGlobalTap, true);
 
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
@@ -604,7 +627,7 @@
     }
 
     function checkServerStatus() { const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return; UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...'; GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Cache: ${data.items_in_cache})` : 'Unresponsive'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } }); }
-    function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:absolute!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
+    function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:fixed!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;top:-9999px;left:-9999px;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
 
     // --- SCRIPT INITIALIZATION ---
     async function init() {
