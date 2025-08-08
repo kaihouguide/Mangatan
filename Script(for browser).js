@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.6.48-Manga-Fix-Hybrid-Inline-OCR-v2
 // @description  Adds a stable, inline OCR button to each chapter for targeted pre-processing, designed for dynamic web apps like Suwayomi.
-// @author       1Selxo (with modifications)
+// @author       1Selxo 
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
