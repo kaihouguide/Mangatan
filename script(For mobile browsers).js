@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.14 - Final Context Menu Fix)
+// @name         Automatic Content OCR (v22.M.16 - Event-Driven Long Press)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.14.0
-// @description  Uses a direct CSS approach (-webkit-touch-callout) to definitively disable the browser's context menu on long press.
+// @version      22.M.16.0
+// @description  Re-engineers long-press to use the 'contextmenu' event as a trigger, eliminating race conditions with the browser's native UI.
 // @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -34,7 +34,7 @@
         debugMode: true,
         textOrientation: 'smart',
         interactionMode: 'hover',
-        activationMode: 'longPress',
+        activationMode: 'longPress', // Restored setting
         proximityRadius: 150,
         dimmedOpacity: 0.25,
         fontMultiplierHorizontal: 1.0,
@@ -42,7 +42,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix_enhanced';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix_enhanced'; // Re-using this key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -54,12 +54,10 @@
     let activeImageForExport = null;
     let activeOverlay = null;
 
-    // --- Interaction Timers & Trackers ---
-    let longPressTimer = null;
-    const LONG_PRESS_DURATION = 500;
+    // --- Interaction Timers & Trackers (Re-engineered) ---
+    let longPressState = { valid: false }; // Tracks the state of a potential long press
     let tapTracker = new WeakMap();
     const DOUBLE_TAP_THRESHOLD = 300;
-    let longPressTriggered = false;
 
     // --- Color Themes ---
     const COLOR_THEMES = {
@@ -73,12 +71,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.14.0] ${logEntry}`);
+        console.log(`[OCR v22.M.16.0] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- TOUCH INTERACTION LOGIC ---
+    // --- TOUCH INTERACTION LOGIC (Event-Driven) ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
         if (overlayState && overlayState.overlay) {
@@ -90,42 +88,76 @@
         }
     }
 
-    function handleActivationGesture(event) {
+    function handleTouchStart(event) {
         if (event.touches.length > 1) {
-            if (longPressTimer) clearTimeout(longPressTimer);
+            longPressState.valid = false; // Invalidate if multi-touch starts
             return;
         }
 
         const targetImg = event.target.closest('img');
-        if (!targetImg || !managedElements.has(targetImg)) return;
+        if (!targetImg || !managedElements.has(targetImg)) {
+            longPressState.valid = false;
+            return;
+        }
 
         if (settings.activationMode === 'doubleTap') {
             const now = Date.now();
             const lastTap = tapTracker.get(targetImg);
             if (lastTap && (now - lastTap.time) < DOUBLE_TAP_THRESHOLD) {
-                event.preventDefault();
+                event.preventDefault(); // Prevent zoom on double-tap
                 triggerOverlayToggle(targetImg);
                 tapTracker.delete(targetImg);
+                longPressState.valid = false;
             } else {
                 tapTracker.set(targetImg, { time: now });
             }
-        } else { // 'longPress'
-            if (longPressTimer) clearTimeout(longPressTimer);
-            longPressTriggered = false;
-            longPressTimer = setTimeout(() => {
-                longPressTriggered = true;
-                triggerOverlayToggle(targetImg);
-                longPressTimer = null;
-            }, LONG_PRESS_DURATION);
+            return;
+        }
+
+        if (settings.activationMode === 'longPress') {
+            longPressState = {
+                valid: true,
+                startX: event.touches[0].clientX,
+                startY: event.touches[0].clientY,
+                target: targetImg
+            };
+        }
+    }
+
+    function handleTouchMove(event) {
+        if (!longPressState.valid) return;
+
+        const deltaX = Math.abs(longPressState.startX - event.touches[0].clientX);
+        const deltaY = Math.abs(longPressState.startY - event.touches[0].clientY);
+        const SCROLL_TOLERANCE = 10; // How far the finger can move before we call it a scroll
+
+        if (deltaX > SCROLL_TOLERANCE || deltaY > SCROLL_TOLERANCE) {
+            longPressState.valid = false; // User is scrolling, not long-pressing
         }
     }
 
     function handleTouchEnd() {
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
+        // A touch ended, so any pending long press is now invalid.
+        longPressState.valid = false;
+    }
+
+    function handleContextMenu(event) {
+        // This is the new trigger for our long-press action.
+        // It fires when the browser *thinks* it should show a context menu.
+        if (settings.activationMode === 'longPress' && longPressState.valid && event.target === longPressState.target) {
+            logDebug("Intercepted contextmenu event for long-press activation.");
+            // Prevent the default browser menu
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+
+            // Trigger our UI instead
+            triggerOverlayToggle(longPressState.target);
+
+            // Invalidate the state to finish the action
+            longPressState.valid = false;
+            return false;
         }
-        // Reset the flag shortly after the touch ends, just in case.
-        setTimeout(() => { longPressTriggered = false; }, 50);
     }
 
     function handleGlobalTap(event) {
@@ -364,11 +396,6 @@
 
     function createUI() {
         GM_addStyle(`
-            /* --- FIX: THE DEFINITIVE CONTEXT MENU FIX --- */
-            /* This tells WebKit-based browsers (Chrome, Safari) to not display the default menu on long-press. */
-            body {
-                -webkit-touch-callout: none !important;
-            }
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
                 pointer-events: none;
@@ -536,18 +563,14 @@
             closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
         });
 
-        document.body.addEventListener('touchstart', handleActivationGesture, { passive: false });
+        // Bind new event-driven handlers
+        document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
+        document.body.addEventListener('touchmove', handleTouchMove, { passive: false });
         document.body.addEventListener('touchend', handleTouchEnd);
-        document.body.addEventListener('click', handleGlobalTap, true);
+        document.body.addEventListener('touchcancel', handleTouchEnd); // Also handle when a touch is cancelled
+        window.addEventListener('contextmenu', handleContextMenu, true); // Use capture to be the first to see the event
 
-        // Keep this as a backup, but the CSS fix should be the primary solution.
-        window.addEventListener('contextmenu', (e) => {
-            if (longPressTriggered) {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-            }
-        }, true);
+        document.body.addEventListener('click', handleGlobalTap, true);
 
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
         UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("No active image selected for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
