@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.6.48-Manga-Fix-Hybrid)
+// @name         Automatic Content OCR (v21.6.48-Manga-Fix-Hybrid-Inline-OCR-v2)
 // @namespace    http://tampermonkey.net/
-// @version      21.6.48-Manga-Fix-Hybrid
-// @description  Combines the stable manga sorting and font logic of v21.5.21 with the new features (Proximity Mode, Opacity Control, Font Multipliers, Credentials) of v21.6.48.
-// @author       1Selxo 
+// @version      21.6.48-Manga-Fix-Hybrid-Inline-OCR-v2
+// @description  Adds a stable, inline OCR button to each chapter for targeted pre-processing, designed for dynamic web apps like Suwayomi.
+// @author       1Selxo (with modifications)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -17,8 +17,8 @@
     // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
-        imageServerUser: '', // Feature from v21.6.48
-        imageServerPassword: '', // Feature from v21.6.48
+        imageServerUser: '',
+        imageServerPassword: '',
         ankiConnectUrl: 'http://127.0.0.1:8765',
         ankiImageField: 'Image',
         sites: [{
@@ -37,14 +37,14 @@
         debugMode: true,
         textOrientation: 'smart', // smart, serverAngle, forceHorizontal, forceVertical
         interactionMode: 'hover', // 'hover', 'click', or 'proximity'
-        proximityRadius: 150,     // Feature from v21.6.48
-        dimmedOpacity: 0.3,       // Feature from v21.6.48
-        fontMultiplierHorizontal: 1.0, // Feature from v21.6.48
-        fontMultiplierVertical: 1.0,   // Feature from v21.6.48
+        proximityRadius: 150,
+        dimmedOpacity: 0.3,
+        fontMultiplierHorizontal: 1.0,
+        fontMultiplierVertical: 1.0,
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_hybrid'; // New settings key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v21_6_hybrid';
     const ocrCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -68,7 +68,7 @@
         grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging & Persistence (v21.5 Logic) ---
+    // --- Logging & Persistence ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
@@ -78,7 +78,7 @@
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
     const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v21_5', // Retaining old cache key for compatibility
+        CACHE_KEY: 'gemini_ocr_cache_v21_5',
         data: null,
         async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
         async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
@@ -87,7 +87,7 @@
         async set(key, value) { if(this.data) { this.data.set(key, value); await this.save(); } },
     };
 
-    // --- CORE LOGIC (v21.5 Logic) ---
+    // --- CORE LOGIC & OBSERVERS ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -118,8 +118,30 @@
         containerObserver.observe(document.body, { childList: true, subtree: true });
         logDebug("Main container observer is active.");
     }
+    // --- Chapter List Observer ---
+    const chapterObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType === 1) {
+                    // Stably find chapter links by their URL structure
+                    const chapterLinks = node.matches('a[href*="/manga/"][href*="/chapter/"]') ? [node] : node.querySelectorAll('a[href*="/manga/"][href*="/chapter/"]');
+                    chapterLinks.forEach(addOcrButtonToChapter);
+                }
+            }
+        }
+    });
+    function observeChapters() {
+        // The entire app is rendered inside #root
+        const targetNode = document.getElementById('root');
+        if (targetNode) {
+            logDebug("Chapter observer activated on #root.");
+            // Initial run for chapters already on the page
+            targetNode.querySelectorAll('a[href*="/manga/"][href*="/chapter/"]').forEach(addOcrButtonToChapter);
+            chapterObserver.observe(targetNode, { childList: true, subtree: true });
+        }
+    }
 
-    // --- Image Processing (v21.5 Logic) ---
+    // --- Image Processing ---
     function observeImageForSrcChange(img) {
         const processTheImage = (src) => { if (src?.includes('/api/v1/manga/')) { primeImageForOcr(img); return true; } return false; };
         if (processTheImage(img.src)) return;
@@ -142,7 +164,6 @@
         if (img.complete && img.naturalHeight > 0) process();
         else img.addEventListener('load', process, { once: true });
     }
-    // --- Image Processing (MERGED LOGIC: v21.5 base + v21.6 credential forwarding) ---
     function processImage(img, sourceUrl) {
         if (ocrCache.has(img)) return;
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
@@ -165,7 +186,7 @@
         });
     }
 
-    // --- ANKI INTEGRATION (v21.5 Logic) ---
+    // --- ANKI INTEGRATION ---
     async function ankiConnectRequest(action, params = {}) {
         logDebug(`Anki-Connect: Firing action '${action}'`);
         return new Promise((resolve, reject) => {
@@ -212,12 +233,11 @@
         }
     }
 
-    // --- OVERLAY & UPDATE ENGINE (MERGED LOGIC) ---
+    // --- OVERLAY & UPDATE ENGINE ---
     function displayOcrResults(targetImg) {
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
 
-        // ** RETAINED: v21.5 manga sorting logic **
         data.sort((a, b) => {
             const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y;
             const a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x;
@@ -233,7 +253,6 @@
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.textContent = item.text;
-            // ** RETAINED: v21.5 smart orientation logic **
             let isVertical = (settings.textOrientation === 'forceVertical') ||
                              (settings.textOrientation === 'smart' && item.tightBoundingBox.height > item.tightBoundingBox.width) ||
                              (settings.textOrientation === 'serverAngle' && item.orientation === 90);
@@ -250,12 +269,10 @@
         managedElements.set(targetImg, state);
         logDebug(`Created decoupled overlay for image: ...${targetImg.src.slice(-30)}`);
 
-        // Decoupled hover logic for overlay and button
         const show = () => { clearTimeout(hideButtonTimer); clearTimeout(state.hideTimeout); overlay.classList.remove('is-hidden'); overlay.classList.add('is-focused'); UI.globalAnkiButton?.classList.remove('is-hidden'); activeImageForExport = targetImg; };
         const hide = () => { state.hideTimeout = setTimeout(() => { overlay.classList.add('is-hidden'); overlay.classList.remove('is-focused'); }, 300); hideButtonTimer = setTimeout(() => { UI.globalAnkiButton?.classList.add('is-hidden'); if (activeImageForExport === targetImg) { activeImageForExport = null; } }, 2350); };
         [targetImg, overlay].forEach(el => { el.addEventListener('mouseenter', show); el.addEventListener('mouseleave', hide); });
 
-        // ** MERGED: Interaction mode logic **
         if (settings.interactionMode === 'click') {
             overlay.addEventListener('click', (e) => {
                 const clickedBox = e.target.closest('.gemini-ocr-text-box');
@@ -264,7 +281,7 @@
                 else { overlay.classList.remove('has-manual-highlight'); }
                 e.stopPropagation();
             });
-        } else if (settings.interactionMode === 'proximity') { // NEW: Proximity mode
+        } else if (settings.interactionMode === 'proximity') {
             const textBoxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box')); let frameRequest = null;
             overlay.addEventListener('mousemove', (e) => {
                 if (frameRequest) return;
@@ -283,7 +300,7 @@
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
-    // --- FONT CALCULATION (MERGED LOGIC: v21.5 base + v21.6 multipliers) ---
+    // --- FONT CALCULATION ---
     function calculateAndApplyFontSizes(overlay) {
         if (!measurementSpan) return;
         overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
@@ -298,7 +315,6 @@
             Object.assign(measurementSpan.style, { fontFamily: getComputedStyle(box).fontFamily, fontWeight: getComputedStyle(box).fontWeight, letterSpacing: getComputedStyle(box).letterSpacing, });
             measurementSpan.textContent = text;
 
-            // ** RETAINED: v21.5 core font calculation loop **
             while (low <= high) {
                 const mid = Math.floor((low + high) / 2); if (mid <= 0) break;
                 measurementSpan.style.fontSize = `${mid}px`;
@@ -308,7 +324,6 @@
                 if (textFits) { bestSize = mid; low = mid + 1; }
                 else { high = mid - 1; }
             }
-            // ** ADDED: v21.6 font multipliers **
             const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
             box.style.fontSize = `${bestSize * multiplier}px`;
             if (isVertical) box.style.lineHeight = '1';
@@ -364,7 +379,9 @@
 
     function createUI() {
         GM_addStyle(`
+            /* Scroll fix */
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
+            /* OCR Overlay */
             .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9998; pointer-events: none !important; transition: opacity 0.15s, visibility 0.15s; }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; border-radius: 4px; user-select: text; cursor: pointer; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px); transition: all 0.2s ease-in-out; pointer-events: auto !important; overflow: hidden; padding: 4px; }
@@ -373,16 +390,27 @@
             .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
             .interaction-mode-click.is-focused .manual-highlight,
             .interaction-mode-proximity.is-focused .is-near { overflow: visible; transform: scale(1.05); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; opacity: 1; }
-            /* Dimmed Box State (uses CSS variable for opacity) */
+            /* Dimmed Box State */
             .interaction-mode-hover.is-focused:has(.gemini-ocr-text-box:hover) .gemini-ocr-text-box:not(:hover),
             .interaction-mode-click.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight),
             .interaction-mode-proximity.is-focused .gemini-ocr-text-box:not(.is-near) { opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
             .interaction-mode-click.is-focused .gemini-ocr-text-box:not(.manual-highlight):hover { border-color: var(--ocr-border-color-hover); }
-            /* Modal, Buttons etc. */
+            /* --- NEW: Inline Chapter OCR Button --- */
+            .gemini-ocr-chapter-batch-btn {
+                font-family: "Roboto","Helvetica","Arial",sans-serif;
+                font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;
+                border: 1px solid rgba(240,153,136,0.5); color: #f09988;
+                background-color: transparent; cursor: pointer; margin-right: 4px;
+                transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); }
+            .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; background-color: transparent; }
+            /* Global UI Components */
             #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; }
             #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
             #gemini-ocr-global-anki-export-btn:hover { background-color: #27ae60; transform: scale(1.1); } #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; }
             #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
+            /* Modal Styles */
             .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 15px; z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); width: 600px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
             .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); }
             .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
@@ -421,7 +449,12 @@
                     <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div>
                     <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div>
                 </div>
-                <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
+                <div class="gemini-ocr-modal-footer">
+                    <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db; margin-right: auto;" title="Processes the entire chapter based on the page URL, probing for pages until it finds the end.">Pre-process Chapter</button>
+                    <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button>
+                    <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button>
+                    <button id="gemini-ocr-save-btn">Save & Reload</button>
+                </div>
             </div>
             <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div>
         `);
@@ -441,6 +474,7 @@
             statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
             saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'),
             debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
+            batchChapterBtn: document.getElementById('gemini-ocr-batch-chapter-btn'),
         });
 
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
@@ -452,6 +486,7 @@
         UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; });
         UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
         UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
+        UI.batchChapterBtn.addEventListener('click', batchProcessCurrentChapterFromURL);
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
                 ocrServerUrl: UI.serverUrlInput.value.trim(),
@@ -473,6 +508,138 @@
             catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); }
         });
         document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
+    }
+
+    // --- BATCH PROCESSING & INLINE UI ---
+
+    /**
+     * Shared logic for probing a chapter's pages sequentially until errors are met.
+     * @param {string} baseUrl - The base API URL for the chapter pages (e.g., ".../page/").
+     * @param {HTMLElement} btn - The button that was clicked, used for updating its text content.
+     */
+    async function runProbingProcess(baseUrl, btn) {
+        logDebug(`Starting sequential batch probe from: ${baseUrl}`);
+        let successCount = 0;
+        let consecutiveErrors = 0;
+        let currentPage = 0;
+        const CONSECUTIVE_ERROR_THRESHOLD = 3; // Stop after 3 failures in a row
+        const originalText = btn.textContent;
+
+        while (consecutiveErrors < CONSECUTIVE_ERROR_THRESHOLD) {
+            const url = `${baseUrl}${currentPage}`;
+            btn.textContent = `P:${currentPage}`;
+
+            const success = await new Promise(resolve => {
+                let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
+                if (settings.imageServerUser) {
+                    ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
+                }
+
+                GM_xmlhttpRequest({
+                    method: 'GET', url: ocrRequestUrl, timeout: 45000,
+                    onload: (res) => {
+                        try {
+                            const data = JSON.parse(res.responseText);
+                            if (data.error) throw new Error(data.error);
+                            PersistentCache.set(url, data);
+                            logDebug(`Probe Success: Page ${currentPage}`);
+                            resolve(true);
+                        } catch (e) {
+                            logDebug(`Probe Failed (Server Error): Page ${currentPage} - ${e.message}`);
+                            resolve(false);
+                        }
+                    },
+                    onerror: () => { logDebug(`Probe Failed (Connection Error): Page ${currentPage}`); resolve(false); },
+                    ontimeout: () => { logDebug(`Probe Failed (Timeout): Page ${currentPage}`); resolve(false); }
+                });
+            });
+
+            if (success) {
+                successCount++;
+                consecutiveErrors = 0;
+            } else {
+                consecutiveErrors++;
+            }
+            currentPage++;
+        }
+
+        const pagesFound = currentPage - CONSECUTIVE_ERROR_THRESHOLD;
+        logDebug(`Batch probe finished. Detected end of chapter after page ${pagesFound - 1}. Total successful: ${successCount}.`);
+
+        btn.textContent = 'Done!';
+        btn.style.borderColor = '#27ae60'; // Green border for success
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.style.borderColor = ''; // Revert border color
+        }, 2500);
+
+        if (btn.id === 'gemini-ocr-batch-chapter-btn') {
+            alert(`Chapter pre-processing complete!\n\nDetected approximately ${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
+        }
+    }
+
+    /**
+     * Handler for the "Pre-process Chapter" button in the settings modal.
+     */
+    async function batchProcessCurrentChapterFromURL() {
+        const btn = UI.batchChapterBtn;
+        btn.disabled = true;
+        btn.textContent = "Checking...";
+
+        const urlPath = window.location.pathname;
+        const urlMatch = urlPath.match(/\/manga\/\d+\/chapter\/\d+/);
+
+        if (!urlMatch) {
+            alert(`Error: The current page URL does not match the expected format '.../manga/ID/chapter/ID'.`);
+            btn.disabled = false;
+            btn.textContent = "Pre-process Chapter";
+            return;
+        }
+
+        const baseUrl = `${window.location.origin}/api/v1${urlMatch[0]}/page/`;
+        await runProbingProcess(baseUrl, btn);
+        btn.disabled = false;
+    }
+
+    /**
+     * Handler for the new inline "OCR" button next to each chapter.
+     */
+    async function handleChapterBatchClick(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const btn = event.currentTarget;
+        const chapterLinkElement = btn.closest('a[href*="/manga/"][href*="/chapter/"]');
+        if (!chapterLinkElement || !chapterLinkElement.href) return;
+
+        logDebug(`Inline batch processing requested for: ${chapterLinkElement.href}`);
+        const urlPath = new URL(chapterLinkElement.href).pathname;
+        const baseUrl = `${window.location.origin}/api/v1${urlPath}/page/`;
+
+        btn.disabled = true;
+        await runProbingProcess(baseUrl, btn);
+        btn.disabled = false;
+    }
+
+    /**
+     * Injects the OCR button into a chapter list item if it doesn't already have one.
+     */
+    function addOcrButtonToChapter(chapterLinkElement) {
+        // Stably find the "more" button by its accessibility label.
+        const moreButton = chapterLinkElement.querySelector('button[aria-label="more"]');
+        if (!moreButton) return;
+
+        const actionContainer = moreButton.parentElement;
+        if (!actionContainer || actionContainer.querySelector('.gemini-ocr-chapter-batch-btn')) return;
+
+        const ocrButton = document.createElement('button');
+        ocrButton.textContent = 'OCR';
+        ocrButton.className = 'gemini-ocr-chapter-batch-btn';
+        ocrButton.title = 'Pre-process this chapter';
+        ocrButton.addEventListener('click', handleChapterBatchClick);
+
+        // Insert the OCR button right before the "more" (three-dots) button.
+        actionContainer.insertBefore(ocrButton, moreButton);
     }
 
     function checkServerStatus() {
@@ -504,9 +671,9 @@
             } catch(e) { logDebug("Could not parse saved settings. Using defaults."); }
         }
         createUI();
-        await PersistentCache.load(); // Load the persistent cache
+        await PersistentCache.load();
         bindUIEvents();
-        applyDynamicStyles(); // Apply theme and dynamic styles
+        applyDynamicStyles();
         createMeasurementSpan();
 
         // Populate UI with settings
@@ -528,6 +695,7 @@
         setInterval(manageScrollFix, 500);
 
         activateScanner();
+        observeChapters(); // Start watching for the chapter list
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
     init().catch(e => console.error(`[OCR Hybrid] Fatal Initialization Error: ${e.message}`));
