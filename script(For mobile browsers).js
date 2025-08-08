@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.13 - Aggressive Context Menu Capture Fix)
+// @name         Automatic Content OCR (v22.M.14 - Final Context Menu Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.13.0
-// @description  A more aggressive fix for the long-press context menu issue on mobile by using event capturing.
+// @version      22.M.14.0
+// @description  Uses a direct CSS approach (-webkit-touch-callout) to definitively disable the browser's context menu on long press.
 // @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -59,7 +59,7 @@
     const LONG_PRESS_DURATION = 500;
     let tapTracker = new WeakMap();
     const DOUBLE_TAP_THRESHOLD = 300;
-    let longPressTriggered = false; // Flag to prevent context menu
+    let longPressTriggered = false;
 
     // --- Color Themes ---
     const COLOR_THEMES = {
@@ -73,7 +73,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.13.0] ${logEntry}`);
+        console.log(`[OCR v22.M.14.0] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -124,6 +124,8 @@
         if (longPressTimer) {
             clearTimeout(longPressTimer);
         }
+        // Reset the flag shortly after the touch ends, just in case.
+        setTimeout(() => { longPressTriggered = false; }, 50);
     }
 
     function handleGlobalTap(event) {
@@ -362,6 +364,11 @@
 
     function createUI() {
         GM_addStyle(`
+            /* --- FIX: THE DEFINITIVE CONTEXT MENU FIX --- */
+            /* This tells WebKit-based browsers (Chrome, Safari) to not display the default menu on long-press. */
+            body {
+                -webkit-touch-callout: none !important;
+            }
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
                 pointer-events: none;
@@ -533,15 +540,14 @@
         document.body.addEventListener('touchend', handleTouchEnd);
         document.body.addEventListener('click', handleGlobalTap, true);
 
-        // --- FIX: Use CAPTURE phase to intercept the contextmenu event early. ---
+        // Keep this as a backup, but the CSS fix should be the primary solution.
         window.addEventListener('contextmenu', (e) => {
             if (longPressTriggered) {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                longPressTriggered = false; // Reset after use
             }
-        }, true); // The 'true' is crucial - it enables capture phase.
+        }, true);
 
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
         UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("No active image selected for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
