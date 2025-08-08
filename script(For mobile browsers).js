@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.11 - Mobile Readability & UI Enhancements)
+// @name         Automatic Content OCR (v22.M.12 - Long Press Context Menu Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.11.0
-// @description  Restores pinch-to-zoom and text selection on mobile devices with a vastly improved mobile UI and font rendering.
-// @author       1Selxo (Mobile port by Gemini, Fixes by Gemini, Enhancements by Gemini)
+// @version      22.M.12.0
+// @description  Fixes long-press activating the browser's context menu instead of the script's UI on mobile devices.
+// @author       1Selxo 
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -36,13 +36,13 @@
         interactionMode: 'hover',
         activationMode: 'longPress',
         proximityRadius: 150,
-        dimmedOpacity: 0.25, // Slightly more transparent for a cleaner look
+        dimmedOpacity: 0.25,
         fontMultiplierHorizontal: 1.0,
         fontMultiplierVertical: 1.0,
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix_enhanced'; // New key for the updated settings
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix_enhanced';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -59,6 +59,7 @@
     const LONG_PRESS_DURATION = 500;
     let tapTracker = new WeakMap();
     const DOUBLE_TAP_THRESHOLD = 300;
+    let longPressTriggered = false; // FIX: Flag to prevent context menu
 
     // --- Color Themes ---
     const COLOR_THEMES = {
@@ -72,12 +73,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.11.0] ${logEntry}`);
+        console.log(`[OCR v22.M.12.0] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- TOUCH INTERACTION LOGIC ---
+    // --- TOUCH INTERACTION LOGIC (with context menu fix) ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
         if (overlayState && overlayState.overlay) {
@@ -110,8 +111,10 @@
             }
         } else { // 'longPress'
             if (longPressTimer) clearTimeout(longPressTimer);
+            longPressTriggered = false; // FIX: Reset flag on each new touch
             longPressTimer = setTimeout(() => {
-                event.preventDefault();
+                // No event.preventDefault() here; it's handled by the contextmenu listener
+                longPressTriggered = true; // FIX: Indicate that our long press has fired
                 triggerOverlayToggle(targetImg);
                 longPressTimer = null;
             }, LONG_PRESS_DURATION);
@@ -248,14 +251,12 @@
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
-    // --- ENHANCEMENT: Mobile-first font size calculation ---
     function calculateAndApplyFontSizes(overlay, imgRect) {
         if (!measurementSpan) return;
         const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box');
         if (textBoxes.length === 0) return;
 
-        // --- IMPROVEMENT: Set a minimum readable font size for mobile ---
-        const MIN_FONT_SIZE = 10; // px
+        const MIN_FONT_SIZE = 10;
 
         const baseStyle = getComputedStyle(textBoxes[0]);
         Object.assign(measurementSpan.style, {
@@ -269,8 +270,7 @@
             const text = box.textContent || '';
             if (!text) return;
 
-            // --- IMPROVEMENT: More generous padding calculation ---
-            const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 6; // Reduced padding from 8 to 6
+            const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 6;
             const availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 6;
             if (availableWidth <= 0 || availableHeight <= 0) return;
 
@@ -281,7 +281,7 @@
             if (box.classList.contains('gemini-ocr-text-vertical')) {
                 measurementSpan.style.writingMode = 'vertical-rl';
                 measurementSpan.style.textOrientation = 'upright';
-                let low = MIN_FONT_SIZE, high = 150; // Start binary search from min font size
+                let low = MIN_FONT_SIZE, high = 150;
                 while (low <= high) {
                     const mid = Math.floor((low + high) / 2);
                     if (mid <= 0) break;
@@ -298,7 +298,7 @@
                 multiplier = settings.fontMultiplierVertical;
             } else {
                 box.style.whiteSpace = 'nowrap';
-                let low = MIN_FONT_SIZE, high = 150; // Start binary search from min font size
+                let low = MIN_FONT_SIZE, high = 150;
                 while (low <= high) {
                     const mid = Math.floor((low + high) / 2);
                     if (mid <= 0) break;
@@ -362,14 +362,12 @@
     function applyStyles() { const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.deepblue; const cssVars = `:root { --ocr-bg-color: rgba(10,25,40,0.85); --ocr-border-color: ${theme.main}0.6); --ocr-border-color-dim: ${theme.main}0.3); --ocr-border-color-hover: ${theme.main}0.8); --ocr-text-color: ${theme.text}; --ocr-highlight-bg-color: ${theme.main}0.9); --ocr-highlight-border-color: rgba(255,255,255,0.9); --ocr-highlight-text-color: ${theme.highlightText}; --ocr-highlight-shadow: 0 0 10px ${theme.main}0.5); --ocr-highlight-inset-shadow: inset 0 0 0 2px white; --modal-header-color: ${theme.main}1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; }`; let styleTag = document.getElementById('gemini-ocr-dynamic-styles'); if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); } styleTag.textContent = cssVars; logDebug(`Applied theme ${settings.colorTheme} and styles (Dim Opacity: ${settings.dimmedOpacity})`); }
 
     function createUI() {
-        // --- ENHANCEMENT: All CSS is now more mobile-friendly and responsive. ---
         GM_addStyle(`
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
                 pointer-events: none;
                 touch-action: manipulation;
                 transition: opacity 0.15s, visibility 0.15s;
-                /* IMPROVEMENT: Add a subtle background when focused for better context on mobile */
                 background-color: rgba(0, 0, 0, 0);
             }
             .gemini-ocr-decoupled-overlay.is-focused {
@@ -380,20 +378,17 @@
                 display: flex; justify-content: center; align-items: center; text-align: center; position: absolute;
                 box-sizing: border-box; border-radius: 4px;
                 user-select: text !important;
-                -webkit-user-select: text !important; /* For older iOS browsers */
+                -webkit-user-select: text !important;
                 touch-action: auto !important;
                 cursor: pointer;
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
                 color: var(--ocr-text-color);
-                /* IMPROVEMENT: Cleaner text shadow for better readability on various backgrounds */
                 text-shadow: 0px 1px 3px rgba(0,0,0,0.9);
                 backdrop-filter: blur(3px);
                 transition: all 0.2s ease-in-out;
                 pointer-events: auto;
                 overflow: hidden;
-                /* IMPROVEMENT: Increased padding for more breathing room for text */
                 padding: 6px;
-                /* IMPROVEMENT: Better font rendering */
                 -webkit-font-smoothing: antialiased;
                 -moz-osx-font-smoothing: grayscale;
                 text-rendering: optimizeLegibility;
@@ -412,14 +407,13 @@
             .interaction-mode-proximity.is-focused .gemini-ocr-text-box:not(.is-near) {
                 opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim);
             }
-            /* --- ENHANCEMENT: Fully responsive floating action buttons using clamp() --- */
             #gemini-ocr-settings-button, #gemini-ocr-global-anki-export-btn {
                 position: fixed;
                 right: clamp(15px, 4vw, 30px);
                 z-index: 2147483647;
                 border: 1px solid rgba(255,255,255,0.3);
                 border-radius: 50%;
-                width: clamp(48px, 12vw, 60px); /* Slightly larger minimum size */
+                width: clamp(48px, 12vw, 60px);
                 height: clamp(48px, 12vw, 60px);
                 font-size: clamp(26px, 6vw, 32px);
                 cursor: pointer;
@@ -436,14 +430,12 @@
                 color: #EAEAEA;
             }
             #gemini-ocr-global-anki-export-btn {
-                bottom: clamp(75px, 18vw, 100px); /* Adjusted spacing */
+                bottom: clamp(75px, 18vw, 100px);
                 background-color: rgba(46, 204, 113, 0.9);
                 color: white;
                 line-height: clamp(48px, 12vw, 60px);
             }
             #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
-
-            /* --- ENHANCEMENT: Fully responsive settings modal --- */
             .gemini-ocr-modal {
                 position: fixed; top: 0; left: 0; width: 100%; height: 100%;
                 background-color: rgba(20, 20, 25, 0.6);
@@ -477,7 +469,6 @@
             #gemini-ocr-server-status.status-error { background-color: #c0392b; }
             #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
-        // --- ENHANCEMENT: Modal HTML now uses a container for better centering and responsiveness ---
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button>
             <button id="gemini-ocr-settings-button" title="OCR Settings">⚙️</button>
@@ -542,6 +533,14 @@
         document.body.addEventListener('touchstart', handleActivationGesture, { passive: false });
         document.body.addEventListener('touchend', handleTouchEnd);
         document.body.addEventListener('click', handleGlobalTap, true);
+
+        // --- FIX: Prevent context menu on long press ---
+        document.body.addEventListener('contextmenu', (e) => {
+            if (longPressTriggered) {
+                e.preventDefault();
+                longPressTriggered = false;
+            }
+        });
 
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
         UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("No active image selected for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
