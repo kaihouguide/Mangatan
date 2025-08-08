@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.10 - Mobile Interaction Fix)
+// @name         Automatic Content OCR (v22.M.11 - Mobile Readability & UI Enhancements)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.10.0
-// @description  Restores pinch-to-zoom and text selection on mobile devices.
-// @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
+// @version      22.M.11.0
+// @description  Restores pinch-to-zoom and text selection on mobile devices with a vastly improved mobile UI and font rendering.
+// @author       1Selxo (Mobile port by Gemini, Fixes by Gemini, Enhancements by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -16,7 +16,7 @@
 (function() {
     'use strict';
 
-    // --- Global State and Settings (from original script) ---
+    // --- Global State and Settings ---
     let settings = {
         ocrServerUrl: 'http://127.0.0.1:3000',
         imageServerUser: '',
@@ -36,13 +36,13 @@
         interactionMode: 'hover',
         activationMode: 'longPress',
         proximityRadius: 150,
-        dimmedOpacity: 0.3,
+        dimmedOpacity: 0.25, // Slightly more transparent for a cleaner look
         fontMultiplierHorizontal: 1.0,
         fontMultiplierVertical: 1.0,
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_final_fix_enhanced'; // New key for the updated settings
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -54,30 +54,30 @@
     let activeImageForExport = null;
     let activeOverlay = null;
 
-    // --- Interaction Timers & Trackers (from original script) ---
+    // --- Interaction Timers & Trackers ---
     let longPressTimer = null;
     const LONG_PRESS_DURATION = 500;
     let tapTracker = new WeakMap();
     const DOUBLE_TAP_THRESHOLD = 300;
 
-    // --- Color Themes (from original script) ---
+    // --- Color Themes ---
     const COLOR_THEMES = {
         deepblue: { main: 'rgba(0,191,255,',  text: '#FFFFFF', highlightText: '#000000' },
         red:      { main: 'rgba(255, 71, 87,',   text: '#FFFFFF', highlightText: '#000000' },
         green:    { main: 'rgba(46, 204, 113,',  text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging (from original script) ---
+    // --- Logging ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.10.0] ${logEntry}`);
+        console.log(`[OCR v22.M.11.0] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- TOUCH INTERACTION LOGIC (with fixes) ---
+    // --- TOUCH INTERACTION LOGIC ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
         if (overlayState && overlayState.overlay) {
@@ -90,11 +90,8 @@
     }
 
     function handleActivationGesture(event) {
-        // --- FIX: Allow multi-touch gestures (like pinch-zoom) to pass through ---
         if (event.touches.length > 1) {
-            // If more than one finger is on the screen, do nothing.
-            // This allows the browser's native pinch-to-zoom to function.
-            if (longPressTimer) clearTimeout(longPressTimer); // Also cancel any pending long press
+            if (longPressTimer) clearTimeout(longPressTimer);
             return;
         }
 
@@ -153,7 +150,7 @@
         }
     }
 
-    // --- Core Observation & Processing (with minimal fixes) ---
+    // --- Core Observation & Processing ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -193,7 +190,7 @@
         GM_xmlhttpRequest({ method: 'GET', url: ocrRequestUrl, timeout: 30000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); ocrDataCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); } catch (e) { logDebug(`OCR Error: ${e.message}`); ocrDataCache.delete(img); } }, onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); }, ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); } });
     }
 
-    // --- OVERLAY & UPDATE ENGINE (with minimal fixes) ---
+    // --- OVERLAY & UPDATE ENGINE ---
     function showOverlay(overlay, image) {
         if (activeOverlay && activeOverlay !== overlay) {
             hideActiveOverlay();
@@ -251,7 +248,75 @@
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
-    function calculateAndApplyFontSizes(overlay, imgRect) { if (!measurementSpan) return; const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box'); if (textBoxes.length === 0) return; const baseStyle = getComputedStyle(textBoxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, lineHeight: '1', }); textBoxes.forEach(box => { const text = box.textContent || ''; if (!text) return; const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 8, availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 8; if (availableWidth <= 0 || availableHeight <= 0) return; let bestSize = 8, multiplier; measurementSpan.textContent = text; if (box.classList.contains('gemini-ocr-text-vertical')) { measurementSpan.style.writingMode = 'vertical-rl'; measurementSpan.style.textOrientation = 'upright'; let low = 8, high = 150; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; multiplier = settings.fontMultiplierVertical; } else { let low = 8, high = 150; box.style.whiteSpace = 'nowrap'; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } box.style.whiteSpace = 'normal'; multiplier = settings.fontMultiplierHorizontal; } box.style.fontSize = `${bestSize * multiplier}px`; }); }
+    // --- ENHANCEMENT: Mobile-first font size calculation ---
+    function calculateAndApplyFontSizes(overlay, imgRect) {
+        if (!measurementSpan) return;
+        const textBoxes = overlay.querySelectorAll('.gemini-ocr-text-box');
+        if (textBoxes.length === 0) return;
+
+        // --- IMPROVEMENT: Set a minimum readable font size for mobile ---
+        const MIN_FONT_SIZE = 10; // px
+
+        const baseStyle = getComputedStyle(textBoxes[0]);
+        Object.assign(measurementSpan.style, {
+            fontFamily: baseStyle.fontFamily,
+            fontWeight: baseStyle.fontWeight,
+            letterSpacing: baseStyle.letterSpacing,
+            lineHeight: '1',
+        });
+
+        textBoxes.forEach(box => {
+            const text = box.textContent || '';
+            if (!text) return;
+
+            // --- IMPROVEMENT: More generous padding calculation ---
+            const availableWidth = parseFloat(box.dataset.ocrWidth) * imgRect.width - 6; // Reduced padding from 8 to 6
+            const availableHeight = parseFloat(box.dataset.ocrHeight) * imgRect.height - 6;
+            if (availableWidth <= 0 || availableHeight <= 0) return;
+
+            let bestSize = MIN_FONT_SIZE;
+            let multiplier;
+            measurementSpan.textContent = text;
+
+            if (box.classList.contains('gemini-ocr-text-vertical')) {
+                measurementSpan.style.writingMode = 'vertical-rl';
+                measurementSpan.style.textOrientation = 'upright';
+                let low = MIN_FONT_SIZE, high = 150; // Start binary search from min font size
+                while (low <= high) {
+                    const mid = Math.floor((low + high) / 2);
+                    if (mid <= 0) break;
+                    measurementSpan.style.fontSize = `${mid}px`;
+                    if ((measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth)) {
+                        bestSize = mid;
+                        low = mid + 1;
+                    } else {
+                        high = mid - 1;
+                    }
+                }
+                measurementSpan.style.writingMode = '';
+                measurementSpan.style.textOrientation = '';
+                multiplier = settings.fontMultiplierVertical;
+            } else {
+                box.style.whiteSpace = 'nowrap';
+                let low = MIN_FONT_SIZE, high = 150; // Start binary search from min font size
+                while (low <= high) {
+                    const mid = Math.floor((low + high) / 2);
+                    if (mid <= 0) break;
+                    measurementSpan.style.fontSize = `${mid}px`;
+                    if ((measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight)) {
+                        bestSize = mid;
+                        low = mid + 1;
+                    } else {
+                        high = mid - 1;
+                    }
+                }
+                box.style.whiteSpace = 'normal';
+                multiplier = settings.fontMultiplierHorizontal;
+            }
+            box.style.fontSize = `${Math.max(bestSize, MIN_FONT_SIZE) * multiplier}px`;
+        });
+    }
+
 
     function updateAllOverlays() {
         overlayUpdateRunning = true;
@@ -290,34 +355,48 @@
         }
     }
 
-    // --- ANKI, UI, AND INITIALIZATION (with CSS fix) ---
+    // --- ANKI, UI, AND INITIALIZATION ---
     async function ankiConnectRequest(action, params = {}) { logDebug(`Anki-Connect: Firing action '${action}'`); return new Promise((resolve, reject) => GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) })); }
     async function exportImageToAnki(targetImg) { logDebug(`Anki Export: Starting screenshot...`); if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; } if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: The selected image is not valid or fully loaded.'); return false; } try { const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed."); const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); logDebug(`Anki Export: Image stored as '${filename}'`); const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; logDebug(`Anki Export: Found last card with ID ${lastNoteId}`); await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); logDebug(`Anki Export: Successfully updated note ${lastNoteId}.`); return true; } catch (error) { logDebug(`Anki Export Error: ${error.message}`); if (error.message.includes("SecurityError") || error.message.includes("tainted")) { alert(`Anki Export Failed: Canvas security error due to CORS policy.`); } else { alert(`Anki Export Failed: ${error.message}`); } return false; } }
 
     function applyStyles() { const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.deepblue; const cssVars = `:root { --ocr-bg-color: rgba(10,25,40,0.85); --ocr-border-color: ${theme.main}0.6); --ocr-border-color-dim: ${theme.main}0.3); --ocr-border-color-hover: ${theme.main}0.8); --ocr-text-color: ${theme.text}; --ocr-highlight-bg-color: ${theme.main}0.9); --ocr-highlight-border-color: rgba(255,255,255,0.9); --ocr-highlight-text-color: ${theme.highlightText}; --ocr-highlight-shadow: 0 0 10px ${theme.main}0.5); --ocr-highlight-inset-shadow: inset 0 0 0 2px white; --modal-header-color: ${theme.main}1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; }`; let styleTag = document.getElementById('gemini-ocr-dynamic-styles'); if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); } styleTag.textContent = cssVars; logDebug(`Applied theme ${settings.colorTheme} and styles (Dim Opacity: ${settings.dimmedOpacity})`); }
 
     function createUI() {
+        // --- ENHANCEMENT: All CSS is now more mobile-friendly and responsive. ---
         GM_addStyle(`
             .gemini-ocr-decoupled-overlay {
                 position: absolute; z-index: 9998;
                 pointer-events: none;
-                /* This touch-action helps with panning/zooming on the page level */
                 touch-action: manipulation;
                 transition: opacity 0.15s, visibility 0.15s;
+                /* IMPROVEMENT: Add a subtle background when focused for better context on mobile */
+                background-color: rgba(0, 0, 0, 0);
+            }
+            .gemini-ocr-decoupled-overlay.is-focused {
+                background-color: rgba(0, 0, 0, 0.2);
             }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box {
                 display: flex; justify-content: center; align-items: center; text-align: center; position: absolute;
                 box-sizing: border-box; border-radius: 4px;
-                /* --- FIX: Enable native text selection and touch behaviors (like long press) --- */
                 user-select: text !important;
+                -webkit-user-select: text !important; /* For older iOS browsers */
                 touch-action: auto !important;
                 cursor: pointer;
                 background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color);
-                color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-                backdrop-filter: blur(2px); transition: all 0.2s ease-in-out;
+                color: var(--ocr-text-color);
+                /* IMPROVEMENT: Cleaner text shadow for better readability on various backgrounds */
+                text-shadow: 0px 1px 3px rgba(0,0,0,0.9);
+                backdrop-filter: blur(3px);
+                transition: all 0.2s ease-in-out;
                 pointer-events: auto;
-                overflow: hidden; padding: 4px;
+                overflow: hidden;
+                /* IMPROVEMENT: Increased padding for more breathing room for text */
+                padding: 6px;
+                /* IMPROVEMENT: Better font rendering */
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+                text-rendering: optimizeLegibility;
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; }
             .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
@@ -333,66 +412,77 @@
             .interaction-mode-proximity.is-focused .gemini-ocr-text-box:not(.is-near) {
                 opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim);
             }
+            /* --- ENHANCEMENT: Fully responsive floating action buttons using clamp() --- */
             #gemini-ocr-settings-button, #gemini-ocr-global-anki-export-btn {
                 position: fixed;
                 right: clamp(15px, 4vw, 30px);
                 z-index: 2147483647;
-                border: 1px solid rgba(255,255,255,0.5);
+                border: 1px solid rgba(255,255,255,0.3);
                 border-radius: 50%;
-                width: clamp(45px, 12vw, 60px);
-                height: clamp(45px, 12vw, 60px);
-                font-size: clamp(24px, 6vw, 32px);
+                width: clamp(48px, 12vw, 60px); /* Slightly larger minimum size */
+                height: clamp(48px, 12vw, 60px);
+                font-size: clamp(26px, 6vw, 32px);
                 cursor: pointer;
                 display: flex; align-items: center; justify-content: center;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                box-shadow: 0 4px 15px rgba(0,0,0,0.3);
                 user-select: none;
+                -webkit-user-select: none;
                 transition: all 0.2s ease-in-out;
+                backdrop-filter: blur(5px);
             }
             #gemini-ocr-settings-button {
                 bottom: clamp(15px, 4vw, 30px);
-                background: #1A1D21;
+                background: rgba(26, 29, 33, 0.8);
                 color: #EAEAEA;
             }
             #gemini-ocr-global-anki-export-btn {
-                bottom: clamp(70px, 18vw, 100px);
-                background-color: #2ecc71;
+                bottom: clamp(75px, 18vw, 100px); /* Adjusted spacing */
+                background-color: rgba(46, 204, 113, 0.9);
                 color: white;
-                line-height: clamp(45px, 12vw, 60px);
+                line-height: clamp(48px, 12vw, 60px);
             }
             #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
+
+            /* --- ENHANCEMENT: Fully responsive settings modal --- */
             .gemini-ocr-modal {
-                position: fixed; top: 50%; left: 50%;
-                transform: translate(-50%, -50%);
-                background-color: #1A1D21;
-                border: 1px solid var(--modal-header-color);
-                border-radius: 15px;
-                z-index: 2147483647;
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background-color: rgba(20, 20, 25, 0.6);
+                backdrop-filter: blur(8px) saturate(1.2);
+                z-index: 2147483646;
                 color: #EAEAEA;
-                font-family: sans-serif;
-                box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5);
-                width: clamp(320px, 92vw, 700px);
-                max-height: 85vh;
-                display: flex; flex-direction: column;
+                display: flex; align-items: center; justify-content: center;
             }
             .gemini-ocr-modal.is-hidden { display: none; }
+            .gemini-ocr-modal-container {
+                width: clamp(320px, 95vw, 700px);
+                max-height: 90vh;
+                background-color: #1A1D21;
+                border: 1px solid var(--modal-header-color);
+                border-radius: 16px;
+                box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5);
+                display: flex; flex-direction: column;
+                overflow: hidden;
+            }
             .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; }
-            .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: 1.2em; }
+            .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); }
             .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; }
-            .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
-            .gemini-ocr-modal h3 { font-size: 1.1em; margin: 20px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; color: var(--modal-header-color); }
-            .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 12px 15px; align-items: center; }
+            .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); }
+            .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: 20px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); }
+            .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 12px 15px; align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); }
             .full-width { grid-column: 1 / -1; }
-            .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 10px; box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 5px; color: #EAEAEA; }
-            .gemini-ocr-modal button { padding: 10px 18px; background-color: var(--modal-header-color); border: none; border-radius: 5px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: 0.9rem; }
-            #gemini-ocr-server-status { padding: 10px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
+            .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 12px; box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; }
+            .gemini-ocr-modal button { padding: 10px 18px; background-color: var(--modal-header-color); border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); }
+            #gemini-ocr-server-status { padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; }
             #gemini-ocr-server-status.status-error { background-color: #c0392b; }
             #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
+        // --- ENHANCEMENT: Modal HTML now uses a container for better centering and responsiveness ---
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button>
             <button id="gemini-ocr-settings-button" title="OCR Settings">⚙️</button>
             <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden">
+              <div class="gemini-ocr-modal-container">
                 <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings</h2></div>
                 <div class="gemini-ocr-modal-content">
                     <h3>OCR & Image Source</h3><div class="gemini-ocr-settings-grid full-width">
@@ -419,10 +509,18 @@
                     <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1;.container1;.container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-debug-btn" style="background-color: #777; margin-right: auto;">Debug</button><button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button><button id="gemini-ocr-save-btn">Save & Reload</button></div>
+              </div>
             </div>
-            <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div>
+            <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden">
+                <div class="gemini-ocr-modal-container">
+                    <div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div>
+                    <div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div>
+                    <div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div>
+                </div>
+            </div>
         `);
     }
+
 
     function bindUIEvents() {
         Object.assign(UI, {
