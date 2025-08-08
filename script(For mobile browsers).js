@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.12 - Long Press Context Menu Fix)
+// @name         Automatic Content OCR (v22.M.13 - Aggressive Context Menu Capture Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.M.12.0
-// @description  Fixes long-press activating the browser's context menu instead of the script's UI on mobile devices.
-// @author       1Selxo 
+// @version      22.M.13.0
+// @description  A more aggressive fix for the long-press context menu issue on mobile by using event capturing.
+// @author       1Selxo (Mobile port by Gemini, Fixes by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -59,7 +59,7 @@
     const LONG_PRESS_DURATION = 500;
     let tapTracker = new WeakMap();
     const DOUBLE_TAP_THRESHOLD = 300;
-    let longPressTriggered = false; // FIX: Flag to prevent context menu
+    let longPressTriggered = false; // Flag to prevent context menu
 
     // --- Color Themes ---
     const COLOR_THEMES = {
@@ -73,12 +73,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.12.0] ${logEntry}`);
+        console.log(`[OCR v22.M.13.0] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- TOUCH INTERACTION LOGIC (with context menu fix) ---
+    // --- TOUCH INTERACTION LOGIC ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
         if (overlayState && overlayState.overlay) {
@@ -111,10 +111,9 @@
             }
         } else { // 'longPress'
             if (longPressTimer) clearTimeout(longPressTimer);
-            longPressTriggered = false; // FIX: Reset flag on each new touch
+            longPressTriggered = false;
             longPressTimer = setTimeout(() => {
-                // No event.preventDefault() here; it's handled by the contextmenu listener
-                longPressTriggered = true; // FIX: Indicate that our long press has fired
+                longPressTriggered = true;
                 triggerOverlayToggle(targetImg);
                 longPressTimer = null;
             }, LONG_PRESS_DURATION);
@@ -534,13 +533,15 @@
         document.body.addEventListener('touchend', handleTouchEnd);
         document.body.addEventListener('click', handleGlobalTap, true);
 
-        // --- FIX: Prevent context menu on long press ---
-        document.body.addEventListener('contextmenu', (e) => {
+        // --- FIX: Use CAPTURE phase to intercept the contextmenu event early. ---
+        window.addEventListener('contextmenu', (e) => {
             if (longPressTriggered) {
                 e.preventDefault();
-                longPressTriggered = false;
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                longPressTriggered = false; // Reset after use
             }
-        });
+        }, true); // The 'true' is crucial - it enables capture phase.
 
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
         UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("No active image selected for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); });
