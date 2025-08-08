@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (v22.M.17 - Themed & Refactored + Batch)
 // @namespace    http://tampermonkey.net/
-// @version      22.17.1
+// @version      22.17.2
 // @description  Adds all PC color themes and refactors core logic for significant performance improvements, and adds PC batch processing features.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
