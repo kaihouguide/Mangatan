@@ -1,0 +1,7 @@
+node_modules
+*.dist/
+*.build/
+ocr-cache.json
+*.exe
+*.pyc
+ocr-server/nuitka-crash-report.xml

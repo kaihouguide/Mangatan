@@ -44,7 +44,7 @@ You'll need a few things before you start. Please install them in the following 
 
 Now, from inside the project folder in your terminal:
 
-1.  Copy this command then paste (Ctrl+V) then press Enter inside the ocr-server folder in terminal 
+1.  Copy this command then paste (Ctrl+V) then press Enter inside the ocr-server-legacy folder in terminal 
 :
     > ```sh
     > npm install express chrome-lens-ocr multer node-fetch
@@ -164,7 +164,7 @@ For Android users, you'll need **Termux**.
     *   In **another Termux session**, run the single command below. It has been revised to be more stable and will download the server, install all dependencies by correctly forcing the platform compatibility for Termux, and create a handy `mangatan` startup command.
     *   Copy the entire command block and paste it into your Termux terminal, then press Enter.
     > ```sh
-    > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/Ocr-Server && npm install express chrome-lens-ocr multer node-fetch --force && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/Ocr-Server && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
+    > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/ocr-server-legacy && npm install express chrome-lens-ocr multer node-fetch --force && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/ocr-server-legacy && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
     > ```
     *   After the command above finishes, run these next commands **one-by-one** to finalize the installation.
         > ```sh
@@ -187,11 +187,28 @@ For Android users, you'll need **Termux**.
 *   **Tap-to-Focus**: Once the overlay is visible, **tap** on any specific text box to highlight it.
 *   **Configuration**: Tap the **`⚙️`** (gear) icon to open the settings panel. From here you can change the color theme, text orientation, Anki settings, and more.
 *   **Anki Export**: After long-pressing an image to make the overlay visible, a **`✚`** button will appear. Tapping this button will export a screenshot of the image to the last created card in Anki.
-*   **Note**: The persistent cache file (`ocr-cache.json`) will be stored in the `~/Mangatan/Ocr-Server` directory.
+*   **Note**: The persistent cache file (`ocr-cache.json`) will be stored in the `~/Mangatan/ocr-server-legacy` directory.
 
 <br>
 
 ---
+
+## Combined Server
+1. Install Python 3.13.5
+2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+3. Run the following commands in the `ocr-server` folder:
+    > ```
+    > # Install dependencies
+    > uv sync
+    > uv sync --group dev
+    >
+    > # Run with Google Lens
+    > uv run server.py
+    >
+    > # Run with OneOCR
+    > uv run server.py -e=oneocr
+    > ```
+
 
 ## 🎉 All Done!
 
