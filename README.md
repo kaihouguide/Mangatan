@@ -149,9 +149,8 @@ For Android users, you'll need **Termux**.
 
 
 ## Combined Server
-1. Install Python 3.13.5
-2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-3. Run one of the following commands in the `ocr-server` folder:
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+2. Run one of the following commands in the `ocr-server` folder:
     > ```
     > # Run with Google Lens
     > uv run server.py
