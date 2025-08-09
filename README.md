@@ -1,15 +1,12 @@
 
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
----
-
 ## Choose Your Platform:
 
 *   [**💻 For PC/Desktop (Node.js)**](#for-pc-desktop)
 *   [**🐍 For PC - Local OCR (Alternative Python Server)**](#for-pc-local-ocr)
 *   [**📱 For Android**](#for-android)
 
-<br>
 
 ## <a id="for-pc-desktop"></a>💻 For PC/Desktop (Node.js)
 
@@ -34,77 +31,44 @@ You'll need a few things before you start. Please install them in the following 
         > npm -v
         > ```
 
-### 📦 Step 2: Get the OCR Server Source Code
+### 📦 Step 2: Get the OCR Server Legacy Source Code
 
-1.  Download the OCR Server project files as a **ZIP** and unzip the folder.
-2.  Open your terminal or Command Prompt and navigate into the unzipped OCR Server folder.
+1.  Download the `ocr-server-legacy` project files as a **ZIP** and unzip the folder.
+2.  Open your terminal or Command Prompt and navigate into the unzipped `ocr-server-legacy` folder.
 3.  ![showcase](https://raw.githubusercontent.com/kaihouguide/Mangatan/refs/heads/main/kaihouguide%20mangatan/For%20PC%20Desktop%20(Windows%E7%89%88)/Step%202%20Get%20the%20OCR%20Server%20Source%20Code/1.%20downloading%20ocr%20server.gif)
 
 ### ⚙️ Step 3: Install Dependencies & Configure
 
-Now, from inside the project folder in your terminal:
+Now, from inside the `ocr-server-legacy` project folder in your terminal:
 
-1.  Copy this command then paste (Ctrl+V) then press Enter inside the ocr-server-legacy folder in terminal 
-:
-    > ```sh
-    > npm install express chrome-lens-ocr multer node-fetch
+1.  Copy this command then paste (Ctrl+V) then press enter:
+    > ```bash
+    > npm ci
     > ```
-    > This command downloads all required libraries into a `node_modules` folder.
+    *   This command downloads all required libraries into a `node_modules` folder.
 
-2.  Next, configure the `package.json` file:
-    *   After the installation is finished, check if a `package.json` file was created.
-    *   If it **was created**, open it and **replace its entire content** with the code block below.
-    *   If it **was not created**, you must **make a new file** named `package.json` and paste the code block below into it. This version includes the new `multer` dependency and the `"type": "module"` fix to prevent warnings.
-
-    <details>
-    <summary>Click to view package.json content</summary>
-
-    ```json
-    {
-      "name": "my-ocr-server",
-      "version": "1.0.0",
-      "description": "",
-      "main": "server(googlelens).js",
-      "type": "module",
-      "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
-        "start": "node server(googlens).js"
-      },
-      "keywords": [],
-      "author": "",
-      "license": "ISC",
-      "dependencies": {
-        "express": "^5.1.0",
-        "chrome-lens-ocr": "^4.1.0",
-        "multer": "^2.0.2"
-      }
-    }
-    ```
-    </details>
 
 ### ▶️ Step 4: Start the Server
 
-With all dependencies installed, you're ready to start the OCR server.
+With all dependencies installed, you're ready to start the server.
 
 *   Run the following command in your terminal:
     > ```sh
     > node server.js
     > ```
-    > **On Windows:** You can also run the `Runme.bat` file if it's available.
+*  **On Windows:** You can also run the `Runme.bat` file if it's available.
 
 ### 💡 Usage & New Features
 
 *   **View Translations**: Simply move your mouse cursor over any image or manga panel. The OCR overlay will appear automatically.
 *   **Focus on Text**: To make a specific text box clearer, just hover your mouse over it.
 *   **Configuration**: Click the **`⚙️`** (gear) icon at the bottom-right to open the settings panel.
-*   **NEW: Persistent Caching**: The server now automatically saves all OCR results to a file named `ocr-cache.json`. Your cache will be reloaded the next time you start the server.
-*   **NEW: Cache Management**:
+*   **Persistent Caching**: The server now automatically saves all OCR results to a file named `ocr-cache.json`. Your cache will be reloaded the next time you start the server.
+*   **Cache Management**:
     *   **To Export**: Open a new browser tab to `http://127.0.0.1:3000/export-cache` to download your cache file.
     *   **To Import**: Use the settings panel in the userscript to upload a previously saved `ocr-cache.json` file.
 *   **Anki Export**: After hovering on an image to make the overlay visible, a **`✚`** button will appear. Tapping this button will export a screenshot of the image to the last created card in Anki.
-<br>
 
----
 
 ## <a id="for-pc-local-ocr"></a>🐍 For PC - Local OCR (Alternative Python Server)
 
@@ -114,11 +78,12 @@ This is a high-performance, alternative local OCR server written in Python. It d
 
 *   You must have **Python** installed. You can download it from the official **[Python website](https://www.python.org/downloads/)**.
 *   Ensure you have the Tampermonkey extension and the project's userscript installed in your browser, as described in the PC/Desktop section.
-#   install [oneocr](https://github.com/AuroraWright/oneocr) (get the dlls after running the following pip command)
+*   Install [OneOCR](https://github.com/AuroraWright/oneocr)
+
 ### ⚙️ Step 2: Install Dependencies
 
 1.  Open your terminal or Command Prompt.
-2.  Navigate into the folder where you saved `server.py`.
+2.  Navigate into the `ocr-server-legacy` folder.
 3.  Run the following command to install the required Python libraries:
     > ```sh
     > pip install oneocr waitress flask aiohttp Pillow "Flask[async]"
@@ -131,15 +96,13 @@ This is a high-performance, alternative local OCR server written in Python. It d
     > python local_server.py
     > ```
 *   The server will start on `http://127.0.0.1:3000`.
-* or run the runme(local-server).bat 
+*   Optionally, run `runme(local-server).bat` 
 ### 💡 Usage
 
 *   Once the server is running, make sure the **OCR Server URL** in the userscript settings (`⚙️` icon) is set to `http://127.0.0.1:3000`.
 *   The server will automatically create and manage an `ocr-cache.json` file in its folder.
 
-<br>
 
----
 
 ## <a id="for-android"></a>📱 For Android
 
@@ -158,7 +121,7 @@ For Android users, you'll need **Termux**.
     > ```sh
     > pkg update -y && pkg install -y openjdk-21 wget && mkdir -p ~/suwayomi/bin && wget -O ~/suwayomi/SuwayomiServer.jar https://github.com/Suwayomi/Suwayomi-Server/releases/download/v2.0.1727/Suwayomi-Server-v2.0.1727.jar && echo -e '#!/data/data/com.termux/files/usr/bin/bash\njava -jar ~/suwayomi/SuwayomiServer.jar' > ~/suwayomi/bin/suwayomi && chmod +x ~/suwayomi/bin/suwayomi && echo 'export PATH="$HOME/suwayomi/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
     > ```
-    > From now on, you can always run Suwayomi by just typing `suwayomi` in Termux.
+    *   From now on, you can always run Suwayomi by just typing `suwayomi` in Termux.
 
 3.  **Set up Mangatan OCR Server in Termux:**
     *   In **another Termux session**, run the single command below. It has been revised to be more stable and will download the server, install all dependencies by correctly forcing the platform compatibility for Termux, and create a handy `mangatan` startup command.
@@ -169,14 +132,8 @@ For Android users, you'll need **Termux**.
     *   After the command above finishes, run these next commands **one-by-one** to finalize the installation.
         > ```sh
         > npm install --cpu=wasm32 sharp
-        > ```
-        > ```sh
         > npm install @img/sharp-wasm32 --force
-        > ```
-        > ```sh
         > rm -rf node_modules package-lock.json
-        > ```
-        > ```sh
         > npm install --force
         > ```
     > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
@@ -189,9 +146,7 @@ For Android users, you'll need **Termux**.
 *   **Anki Export**: After long-pressing an image to make the overlay visible, a **`✚`** button will appear. Tapping this button will export a screenshot of the image to the last created card in Anki.
 *   **Note**: The persistent cache file (`ocr-cache.json`) will be stored in the `~/Mangatan/ocr-server-legacy` directory.
 
-<br>
 
----
 
 ## Combined Server
 1. Install Python 3.13.5
@@ -200,7 +155,6 @@ For Android users, you'll need **Termux**.
     > ```
     > # Install dependencies
     > uv sync
-    > uv sync --group dev
     >
     > # Run with Google Lens
     > uv run server.py
