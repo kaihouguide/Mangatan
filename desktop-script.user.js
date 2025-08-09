@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      21.6.49
 // @description  Adds a stable, inline OCR button to each chapter for targeted pre-processing, designed for dynamic web apps like Suwayomi.
-// @author       1Selxo 
+// @author       1Selxo
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -386,7 +386,7 @@
             /* OCR Overlay */
             .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9998; pointer-events: none !important; transition: opacity 0.15s, visibility 0.15s; }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
-            .gemini-ocr-text-box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; border-radius: 4px; user-select: text; cursor: pointer; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.8); backdrop-filter: blur(2px); transition: all 0.2s ease-in-out; pointer-events: auto !important; overflow: hidden; padding: 4px; }
+            .gemini-ocr-text-box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; border-radius: 4px; user-select: text; cursor: pointer; transition: all 0.2s ease-in-out; pointer-events: auto !important; overflow: hidden; padding: 4px; color: rgba(0, 0, 0, 0); }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
             /* Highlighted Box State */
             .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
