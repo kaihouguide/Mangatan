@@ -17,7 +17,7 @@ if system() == "win32" or system() == "cygwin":
         print(f"[Warning] OneOCR import failed: {e}")
         ONEOCR_AVAILABLE = False
     except Exception as e:
-        print(f"[Warning] If you get this error please spam the Mangatan thread {e}")
+        print(f"[Warning] If you get this error please spam the Mangatan thread: {e}")
         ONEOCR_AVAILABLE = False
 else:
     ONEOCR_AVAILABLE = False
