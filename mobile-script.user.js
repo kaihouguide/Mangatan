@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (v22.M.23 - True Barrage Engine)
 // @namespace    http://tampermonkey.net/
-// @version      22.23.0
+// @version      22.23.1
 // @description  The final pre-processor. Dispatches all requests in a single, synchronous barrage for maximum possible speed. End-of-chapter is determined as results arrive. No more sequential dispatch.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
@@ -386,12 +386,13 @@
         logDebug(`Starting TRUE BARRAGE ENGINE probe from: ${baseUrl}`);
         const originalText = btn.textContent;
 
-        const CONSECUTIVE_ERROR_THRESHOLD = 3;
+        const CONSECUTIVE_ERROR_THRESHOLD = 3; // This will now be used
         const REQUEST_TIMEOUT = 30000;
-        const BARRAGE_SIZE = 200; // Defines how many pages to request in the initial wave.
+        const BARRAGE_SIZE = 200;
 
         let activeRequests = 0;
         const pageStatus = new Map();
+        let promiseResolved = false; // Gate to prevent stopping multiple times
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
@@ -405,8 +406,39 @@
                 return;
             }
 
-            // The Barrage: A single, synchronous for-loop to dispatch everything at once.
+            const checkTerminationCondition = () => {
+                if (promiseResolved) return; // Already stopped.
+
+                // Scan from page 0 upwards for consecutive failures.
+                let consecutiveErrors = 0;
+                let probeIndex = 0;
+                while (pageStatus.has(probeIndex)) {
+                    if (pageStatus.get(probeIndex) === 'error') {
+                        consecutiveErrors++;
+                    } else {
+                        consecutiveErrors = 0; // A success resets the counter.
+                    }
+
+                    if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
+                        logDebug(`Stopping: Found ${consecutiveErrors} consecutive errors ending at page ${probeIndex}.`);
+                        promiseResolved = true;
+                        resolve(); // Resolve the promise to trigger the '.then()' block and stop.
+                        return;
+                    }
+                    probeIndex++;
+                }
+
+                // Normal completion: All requests finished without triggering the stop condition.
+                if (activeRequests === 0 && !promiseResolved) {
+                    logDebug("All barrage requests have completed normally.");
+                    promiseResolved = true;
+                    resolve();
+                }
+            };
+
+            // The Barrage: Dispatch all requests synchronously.
             for (let pageToProcess = 0; pageToProcess < BARRAGE_SIZE; pageToProcess++) {
+                if (promiseResolved) break; // Stop dispatching new requests if we've already decided to terminate.
                 activeRequests++;
 
                 const url = `${baseUrl}${pageToProcess}`;
@@ -430,20 +462,17 @@
                     onerror: () => { pageStatus.set(pageToProcess, 'error'); },
                     ontimeout: () => { pageStatus.set(pageToProcess, 'error'); },
                     onloadend: () => {
+                        if (promiseResolved) return; // Ignore callbacks if we have already stopped.
                         activeRequests--;
                         if (pageStatus.get(pageToProcess) === 'error') {
                             logDebug(`Probe Failed: Page ${pageToProcess}`);
                         }
                         updateButtonText();
-
-                        if (activeRequests === 0) {
-                            logDebug("All barrage requests have completed.");
-                            resolve();
-                        }
+                        checkTerminationCondition();
                     }
                 });
             }
-            logDebug(`Dispatched a barrage of ${BARRAGE_SIZE} requests.`);
+            logDebug(`Dispatched a barrage of up to ${BARRAGE_SIZE} requests.`);
             updateButtonText();
 
         }).then(() => {
