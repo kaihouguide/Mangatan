@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (v23.M.1 - Continuous Probe Engine)
 // @namespace    http://tampermonkey.net/
-// @version      23.1.1
+// @version      23.1.2
 // @description  Uses a continuous probe engine to dispatch OCR requests concurrently. Manages concurrency and stops automatically when the end of a chapter is detected.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
@@ -381,21 +381,20 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (CONTINUOUS PROBE ENGINE) ---
+    // --- BATCH PROCESSING & INLINE UI (CONTINUOUS PROBE ENGINE V2) ---
     async function runProbingProcess(baseUrl, btn) {
         logDebug(`Starting CONTINUOUS PROBE ENGINE from: ${baseUrl}`);
         const originalText = btn.textContent;
 
         // --- Configuration ---
-        const MAX_CONCURRENT_REQUESTS = 50;
-        const CONSECUTIVE_ERROR_THRESHOLD = 3; // Changed from 5 to 3 as requested
+        const CONSECUTIVE_ERROR_THRESHOLD = 3; // Stops after 3 consecutive errors.
         const REQUEST_TIMEOUT = 30000;
 
         // --- State ---
         let activeRequests = 0;
         const pageStatus = new Map(); // 'success', 'error', 'pending'
         let nextPageToDispatch = 0;
-        let highestCompletedPage = -1; // Track the highest page we've gotten a response for
+        let highestCompletedPage = -1; // Tracks the highest page number that has finished processing.
         let terminationTriggered = false;
         let promiseResolver;
 
@@ -409,26 +408,35 @@
         const checkTerminationCondition = () => {
             if (terminationTriggered) return;
 
-            // Only check for termination starting from page 3 to avoid premature termination
-            if (highestCompletedPage < 2) return;
+            // We can't determine the end of a chapter until we have enough data.
+            if (highestCompletedPage < CONSECUTIVE_ERROR_THRESHOLD - 1) return;
 
-            // Check the last 3 consecutive pages for failures
             let consecutiveErrors = 0;
-            for (let i = highestCompletedPage; i >= Math.max(0, highestCompletedPage - 2); i--) {
+            // Check the status of the last pages, starting from the highest page that completed.
+            for (let i = highestCompletedPage; i >= Math.max(0, highestCompletedPage - (CONSECUTIVE_ERROR_THRESHOLD - 1)); i--) {
                 const status = pageStatus.get(i);
-                if (status === 'error') {
-                    consecutiveErrors++;
-                } else if (status === 'success') {
-                    break; // Found a success, reset count
+                
+                // If any page in this final sequence is a success, or is still pending, or hasn't been dispatched yet,
+                // it means the error sequence is broken or it's too soon to tell.
+                if (status === 'success' || status === 'pending' || !status) {
+                    return; 
                 }
+                
+                // If we are here, the status must be 'error'.
+                consecutiveErrors++;
             }
 
+            // If we have found a consecutive block of errors at the end, trigger termination.
             if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
                 logDebug(`Termination triggered: Found ${consecutiveErrors} consecutive errors ending at page ${highestCompletedPage}.`);
                 terminationTriggered = true;
+                // If no requests are active, we can finalize immediately.
+                if (activeRequests === 0) {
+                    finalize();
+                }
             }
         };
-
+        
         const finalize = () => {
             if (!promiseResolver) return;
 
@@ -454,9 +462,14 @@
             promiseResolver = null;
         };
 
-        const dispatchRequest = (pageIndex) => {
-            if (terminationTriggered) return;
+        // This function dispatches a single request and then schedules the next one immediately.
+        const dispatchContinuously = () => {
+            // Stop sending new requests once termination is triggered.
+            if (terminationTriggered) {
+                return;
+            }
 
+            const pageIndex = nextPageToDispatch++;
             activeRequests++;
             pageStatus.set(pageIndex, 'pending');
             updateButtonText();
@@ -495,38 +508,31 @@
                     activeRequests--;
                     highestCompletedPage = Math.max(highestCompletedPage, pageIndex);
                     updateButtonText();
-
-                    // Check termination condition after each request completes
+                    
+                    // Check for the termination condition after every request completes.
                     checkTerminationCondition();
 
-                    // If termination triggered and no more active requests, finalize
+                    // If termination has been triggered and this was the last active request, finalize the process.
                     if (terminationTriggered && activeRequests === 0) {
                         logDebug("All active requests finished after termination trigger. Finalizing.");
                         finalize();
-                        return;
                     }
-
-                    // Keep dispatching new requests to maintain concurrency
-                    fillRequestPool();
                 }
             });
-        };
 
-        const fillRequestPool = () => {
-            // Keep dispatching requests until we hit our concurrency limit or termination
-            while (activeRequests < MAX_CONCURRENT_REQUESTS && !terminationTriggered) {
-                dispatchRequest(nextPageToDispatch++);
-            }
+            // Use setTimeout with a 0ms delay to schedule the next dispatch. This prevents the browser from
+            // freezing and allows UI updates to occur while sending requests as fast as possible.
+            setTimeout(dispatchContinuously, 0);
         };
 
         return new Promise(resolve => {
             promiseResolver = resolve;
-            logDebug(`Starting continuous probe with concurrency of ${MAX_CONCURRENT_REQUESTS} and error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}.`);
+            logDebug(`Starting continuous probe with error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}. Dispatching will not be throttled.`);
 
-            // Start the initial batch of concurrent requests
-            fillRequestPool();
+            // Start the non-stop dispatch loop.
+            dispatchContinuously();
 
-            // Safety timeout to prevent infinite hanging (30 minutes)
+            // A safety timeout to prevent the process from running indefinitely in case of an unexpected issue.
             setTimeout(() => {
                 if (promiseResolver) {
                     logDebug("Safety timeout reached. Forcing termination.");
