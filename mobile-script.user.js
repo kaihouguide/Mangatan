@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.23 - True Barrage Engine)
+// @name         Automatic Content OCR (v23.M.1 - Continuous Probe Engine)
 // @namespace    http://tampermonkey.net/
-// @version      22.23.1
-// @description  The final pre-processor. Dispatches all requests in a single, synchronous barrage for maximum possible speed. End-of-chapter is determined as results arrive. No more sequential dispatch.
+// @version      23.1.0
+// @description  Uses a continuous probe engine to dispatch OCR requests. Manages concurrency and stops automatically when the end of a chapter is detected by consecutive errors. No more arbitrary batch limits.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -49,7 +49,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v22_M18_synced';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M1_synced'; // Updated settings key for new version
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -83,12 +83,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.23] ${logEntry}`);
+        console.log(`[OCR v23.M.1] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
     const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v22_M_synced',
+        CACHE_KEY: 'gemini_ocr_cache_v23_M_synced', // Updated cache key
         data: null,
         async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
         async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
@@ -381,114 +381,132 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (TRUE BARRAGE ENGINE) ---
+    // --- BATCH PROCESSING & INLINE UI (CONTINUOUS PROBE ENGINE) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting TRUE BARRAGE ENGINE probe from: ${baseUrl}`);
+        logDebug(`Starting CONTINUOUS PROBE ENGINE from: ${baseUrl}`);
         const originalText = btn.textContent;
 
-        const CONSECUTIVE_ERROR_THRESHOLD = 3; // This will now be used
+        // --- Configuration ---
+        const MAX_CONCURRENT_REQUESTS = 50; // Controls how many requests are active at once.
+        const CONSECUTIVE_ERROR_THRESHOLD = 5; // How many failed pages in a row signal the end of a chapter.
         const REQUEST_TIMEOUT = 30000;
-        const BARRAGE_SIZE = 200;
 
+        // --- State ---
         let activeRequests = 0;
-        const pageStatus = new Map();
-        let promiseResolved = false; // Gate to prevent stopping multiple times
+        const pageStatus = new Map(); // Stores the status ('success', 'error', 'pending') of each page index.
+        let nextPageToProcess = 0;
+        let terminationTriggered = false; // Flag to stop dispatching new requests.
+        let promiseResolver; // To hold the 'resolve' function of the main promise.
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
             const errorCount = Array.from(pageStatus.values()).filter(v => v === 'error').length;
-            btn.textContent = `A:${activeRequests}|S:${successCount}|F:${errorCount}`;
+            const pendingCount = Array.from(pageStatus.values()).filter(v => v === 'pending').length;
+            btn.textContent = `P:${pendingCount}|S:${successCount}|F:${errorCount}`;
         };
 
-        return new Promise(resolve => {
-            if (BARRAGE_SIZE === 0) {
-                resolve();
-                return;
-            }
+        const finalize = () => {
+            if (!promiseResolver) return; // Ensure it's only called once.
 
-            const checkTerminationCondition = () => {
-                if (promiseResolved) return; // Already stopped.
-
-                // Scan from page 0 upwards for consecutive failures.
-                let consecutiveErrors = 0;
-                let probeIndex = 0;
-                while (pageStatus.has(probeIndex)) {
-                    if (pageStatus.get(probeIndex) === 'error') {
-                        consecutiveErrors++;
-                    } else {
-                        consecutiveErrors = 0; // A success resets the counter.
-                    }
-
-                    if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
-                        logDebug(`Stopping: Found ${consecutiveErrors} consecutive errors ending at page ${probeIndex}.`);
-                        promiseResolved = true;
-                        resolve(); // Resolve the promise to trigger the '.then()' block and stop.
-                        return;
-                    }
-                    probeIndex++;
-                }
-
-                // Normal completion: All requests finished without triggering the stop condition.
-                if (activeRequests === 0 && !promiseResolved) {
-                    logDebug("All barrage requests have completed normally.");
-                    promiseResolved = true;
-                    resolve();
-                }
-            };
-
-            // The Barrage: Dispatch all requests synchronously.
-            for (let pageToProcess = 0; pageToProcess < BARRAGE_SIZE; pageToProcess++) {
-                if (promiseResolved) break; // Stop dispatching new requests if we've already decided to terminate.
-                activeRequests++;
-
-                const url = `${baseUrl}${pageToProcess}`;
-                let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
-                if (settings.imageServerUser) {
-                    ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
-                }
-
-                GM_xmlhttpRequest({
-                    method: 'GET', url: ocrRequestUrl, timeout: REQUEST_TIMEOUT,
-                    onload: (res) => {
-                        try {
-                            const data = JSON.parse(res.responseText);
-                            if (data.error) throw new Error(data.error);
-                            PersistentCache.set(url, data);
-                            pageStatus.set(pageToProcess, 'success');
-                        } catch (e) {
-                            pageStatus.set(pageToProcess, 'error');
-                        }
-                    },
-                    onerror: () => { pageStatus.set(pageToProcess, 'error'); },
-                    ontimeout: () => { pageStatus.set(pageToProcess, 'error'); },
-                    onloadend: () => {
-                        if (promiseResolved) return; // Ignore callbacks if we have already stopped.
-                        activeRequests--;
-                        if (pageStatus.get(pageToProcess) === 'error') {
-                            logDebug(`Probe Failed: Page ${pageToProcess}`);
-                        }
-                        updateButtonText();
-                        checkTerminationCondition();
-                    }
-                });
-            }
-            logDebug(`Dispatched a barrage of up to ${BARRAGE_SIZE} requests.`);
-            updateButtonText();
-
-        }).then(() => {
-            // Post-analysis to find the last successful page.
             const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => {
                 return pageStatus.get(val) === 'success' ? Math.max(max, val) : max;
-            }, -1) + 1; // +1 because pages are 0-indexed.
+            }, -1) + 1;
 
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
-            logDebug(`Barrage complete. Highest successful page was ~${pagesFound-1}. Total successful: ${successCount}.`);
+            logDebug(`Probe complete. Highest successful page was ~${pagesFound-1}. Total successful: ${successCount}.`);
             btn.textContent = 'Done!';
             btn.style.borderColor = '#27ae60';
             setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 3500);
             if (btn.id === 'gemini-ocr-batch-chapter-btn') {
                 alert(`Chapter pre-processing complete!\n\nDetected ~${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
             }
+            promiseResolver();
+            promiseResolver = null; // Prevent re-resolution.
+        };
+
+        const checkTerminationAndDispatch = () => {
+            // Step 1: Check if we should stop sending *new* requests.
+            if (!terminationTriggered) {
+                // Scan backwards from the latest known page for consecutive errors.
+                let consecutiveErrors = 0;
+                let lastCheckedPage = nextPageToProcess - 1;
+                for (let i = lastCheckedPage; i >= 0; i--) {
+                    const status = pageStatus.get(i);
+                    if (status === 'error') {
+                        consecutiveErrors++;
+                    } else if (status === 'success') {
+                        // A single success breaks the chain of *consecutive* errors from the end.
+                        break;
+                    }
+                    // 'pending' status is ignored in this check.
+                    if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
+                        logDebug(`Termination triggered: Found ${consecutiveErrors} consecutive errors ending at page ${i}.`);
+                        terminationTriggered = true;
+                        break;
+                    }
+                }
+            }
+
+            // Step 2: Dispatch new requests if the pool has space and we haven't triggered termination.
+            while (activeRequests < MAX_CONCURRENT_REQUESTS && !terminationTriggered) {
+                dispatchRequest(nextPageToProcess++);
+            }
+
+            // Step 3: If termination is triggered and all active requests are finished, end the process.
+            if (terminationTriggered && activeRequests === 0) {
+                logDebug("All active requests finished after termination trigger. Finalizing.");
+                finalize();
+            }
+        };
+
+        const dispatchRequest = (pageIndex) => {
+            activeRequests++;
+            pageStatus.set(pageIndex, 'pending');
+            updateButtonText();
+
+            const url = `${baseUrl}${pageIndex}`;
+            let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
+            if (settings.imageServerUser) {
+                ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
+            }
+
+            GM_xmlhttpRequest({
+                method: 'GET', url: ocrRequestUrl, timeout: REQUEST_TIMEOUT,
+                onload: (res) => {
+                    try {
+                        const data = JSON.parse(res.responseText);
+                        if (data.error) throw new Error(data.error);
+                        PersistentCache.set(url, data);
+                        pageStatus.set(pageIndex, 'success');
+                    } catch (e) {
+                        logDebug(`Probe Error on page ${pageIndex}: ${e.message}`);
+                        pageStatus.set(pageIndex, 'error');
+                    }
+                },
+                onerror: () => {
+                    logDebug(`Probe Connection Error on page ${pageIndex}`);
+                    pageStatus.set(pageIndex, 'error');
+                },
+                ontimeout: () => {
+                    logDebug(`Probe Timeout on page ${pageIndex}`);
+                    pageStatus.set(pageIndex, 'error');
+                },
+                onloadend: () => {
+                    activeRequests--;
+                    updateButtonText();
+                    // Check status and potentially dispatch more or finalize.
+                    checkTerminationAndDispatch();
+                }
+            });
+        };
+
+        return new Promise(resolve => {
+            promiseResolver = resolve;
+            // Kick off the initial batch of requests.
+            logDebug(`Starting continuous probe with concurrency of ${MAX_CONCURRENT_REQUESTS} and error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}.`);
+            checkTerminationAndDispatch();
+        }).then(() => {
+            logDebug("runProbingProcess promise resolved.");
         });
     }
 
