@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.2 - Server-Side Processing)
+// @name         Automatic Content OCR (v22.M.18 - Synced & Refactored)
 // @namespace    http://tampermonkey.net/
-// @version      23.2.0
-// @description  Delegates chapter pre-processing to a server-side job, mirroring the PC script's functionality for improved stability and feedback.
+// @version      22.18.0
+// @description  Synchronizes core logic with the latest PC version, preserving mobile-specific interactions and performance optimizations.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -49,7 +49,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M2_synced'; // Updated settings key for new version
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_M18_synced';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -83,12 +83,12 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v23.M.2] ${logEntry}`);
+        console.log(`[OCR v22.M.18] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
     const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v23_M_synced', // Updated cache key
+        CACHE_KEY: 'gemini_ocr_cache_v22_M_synced',
         data: null,
         async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
         async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
@@ -280,6 +280,7 @@
         const data = ocrDataCache.get(targetImg);
         if (!data) return;
 
+        // Mobile-specific overlay: Attach to image's parent for better scrolling behavior.
         const parent = targetImg.parentNode;
         if (!parent) return;
         if (window.getComputedStyle(parent).position === 'static') { parent.style.position = 'relative'; }
@@ -296,10 +297,12 @@
             ocrBox.textContent = item.text;
             ocrBox.dataset.ocrX = item.tightBoundingBox.x; ocrBox.dataset.ocrY = item.tightBoundingBox.y;
             ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
+
             const pixelWidth = item.tightBoundingBox.width * targetImg.naturalWidth;
-            const pixelHeight = item.tightBoundingBox.height * targetImg.naturalWidth;
+            const pixelHeight = item.tightBoundingBox.height * targetImg.naturalHeight;
             let isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && pixelHeight > pixelWidth) || (settings.textOrientation === 'serverAngle' && item.orientation === 90);
             if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
+
             Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
             fragment.appendChild(ocrBox);
         });
@@ -341,7 +344,7 @@
             while (low <= high) {
                 const mid = Math.floor((low + high) / 2); if (mid <= 0) break;
                 measurementSpan.style.fontSize = `${mid}px`;
-                const fits = isVertical ? (measurementSpan.offsetHeight <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth) : (measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight);
+                const fits = isVertical ? (measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth) : (measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight);
                 if (fits) { bestSize = mid; low = mid + 1; } else { high = mid - 1; }
             }
              if(isVertical) { measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; }
@@ -361,6 +364,7 @@
                 const rect = img.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) { if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden'); continue; }
 
+                // Mobile-specific: Update position relative to the parent node.
                 const parentRect = state.parentNode.getBoundingClientRect();
                 Object.assign(state.overlay.style, { top: `${rect.top - parentRect.top + state.parentNode.scrollTop}px`, left: `${rect.left - parentRect.left + state.parentNode.scrollLeft}px`, width: `${rect.width}px`, height: `${rect.height}px` });
 
@@ -381,65 +385,39 @@
         }
     }
 
-    // --- BATCH PROCESSING (SERVER-SIDE DELEGATION) ---
+    // --- BATCH PROCESSING & INLINE UI (Synced with PC) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Requesting SERVER-SIDE job for: ${baseUrl}`);
+        logDebug(`Starting sequential batch probe from: ${baseUrl}`);
+        let successCount = 0, consecutiveErrors = 0, currentPage = 0;
+        const CONSECUTIVE_ERROR_THRESHOLD = 3;
         const originalText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'Starting...';
 
-        const postData = {
-            baseUrl: baseUrl,
-            user: settings.imageServerUser,
-            pass: settings.imageServerPassword
-        };
-
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `${settings.ocrServerUrl}/preprocess-chapter`,
-            headers: { 'Content-Type': 'application/json' },
-            data: JSON.stringify(postData),
-            timeout: 10000,
-            onload: (res) => {
-                try {
-                    const data = JSON.parse(res.responseText);
-                    if (res.status === 202 && data.status === 'accepted') {
-                        logDebug(`Chapter job successfully accepted by server.`);
-                        btn.textContent = 'Accepted';
-                        btn.style.borderColor = '#3498db';
-                        checkServerStatus(); // Refresh the status to show it's running
-                    } else {
-                        throw new Error(data.error || `Server responded with status ${res.status}`);
-                    }
-                } catch (e) {
-                    logDebug(`Error starting chapter job: ${e.message}`);
-                    btn.textContent = 'Error!';
-                    btn.style.borderColor = '#c0392b';
-                    alert(`Failed to start chapter job: ${e.message}`);
-                }
-            },
-            onerror: () => {
-                logDebug('Connection error while trying to start chapter job.');
-                btn.textContent = 'Conn. Error!';
-                btn.style.borderColor = '#c0392b';
-                alert('Failed to connect to the OCR server to start the job.');
-            },
-            ontimeout: () => {
-                logDebug('Timeout while trying to start chapter job.');
-                btn.textContent = 'Timeout!';
-                btn.style.borderColor = '#c0392b';
-                alert('The request to start the chapter job timed out.');
-            },
-            onloadend: () => {
-               setTimeout(() => {
-                    if (btn.isConnected) {
-                        btn.textContent = originalText;
-                        btn.style.borderColor = '';
-                        btn.disabled = false;
-                    }
-                }, 3500);
-            }
-        });
+        while (consecutiveErrors < CONSECUTIVE_ERROR_THRESHOLD) {
+            const url = `${baseUrl}${currentPage}`;
+            btn.textContent = `P:${currentPage}`;
+            const success = await new Promise(resolve => {
+                let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
+                if (settings.imageServerUser) ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
+                GM_xmlhttpRequest({
+                    method: 'GET', url: ocrRequestUrl, timeout: 45000,
+                    onload: (res) => {
+                        try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); PersistentCache.set(url, data); logDebug(`Probe Success: Page ${currentPage}`); resolve(true); }
+                        catch (e) { logDebug(`Probe Failed (Server Error): Page ${currentPage} - ${e.message}`); resolve(false); }
+                    },
+                    onerror: () => { logDebug(`Probe Failed (Connection Error): Page ${currentPage}`); resolve(false); },
+                    ontimeout: () => { logDebug(`Probe Failed (Timeout): Page ${currentPage}`); resolve(false); }
+                });
+            });
+            if (success) { successCount++; consecutiveErrors = 0; }
+            else { consecutiveErrors++; }
+            currentPage++;
+        }
+        const pagesFound = currentPage - CONSECUTIVE_ERROR_THRESHOLD;
+        logDebug(`Batch probe finished. Detected end of chapter after page ${pagesFound - 1}. Total successful: ${successCount}.`);
+        btn.textContent = 'Done!';
+        btn.style.borderColor = '#27ae60';
+        setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 2500);
+        if (btn.id === 'gemini-ocr-batch-chapter-btn') alert(`Chapter pre-processing complete!\n\nDetected approximately ${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
     }
 
     async function batchProcessCurrentChapterFromURL() {
@@ -477,7 +455,7 @@
         const ocrButton = document.createElement('button');
         ocrButton.textContent = 'OCR';
         ocrButton.className = 'gemini-ocr-chapter-batch-btn';
-        ocrButton.title = 'Queue this chapter for background pre-processing on the server';
+        ocrButton.title = 'Pre-process this chapter';
         ocrButton.addEventListener('click', handleChapterBatchClick);
         actionContainer.insertBefore(ocrButton, moreButton);
     }
@@ -492,7 +470,7 @@
     function createUI() {
         GM_addStyle(`
             /* Inline Chapter OCR Button */
-            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); min-width: 80px; text-align: center; }
+            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); }
             .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); }
             .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; background-color: transparent; }
             /* Mobile Overlay */
@@ -520,13 +498,12 @@
             .gemini-ocr-modal-container { width: clamp(320px, 95vw, 700px); max-height: 90vh; background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 16px; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; }
             .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); }
             .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; }
-            .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-start; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); }
-            .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; }
+            .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); }
             .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: 20px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); }
             .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 12px 15px; align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); }
             .full-width { grid-column: 1 / -1; }
             .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 12px; box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; }
-            .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); }
+            .gemini-ocr-modal button { padding: 10px 18px; background-color: var(--modal-header-color); border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); }
             #gemini-ocr-server-status { padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
@@ -561,8 +538,7 @@
                     <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1;.container1;.container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer">
-                    <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;" title="Deletes all entries from the server's OCR cache file.">Purge Server Cache</button>
-                    <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;" title="Queues the current chapter on the server for background pre-processing.">Pre-process Chapter</button>
+                    <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db; margin-right: auto;" title="Processes the entire chapter based on the page URL, probing for pages until it finds the end.">Pre-process Chapter</button>
                     <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button>
                     <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button>
                     <button id="gemini-ocr-save-btn">Save & Reload</button>
@@ -587,7 +563,6 @@
             textOrientationSelect: document.getElementById('ocr-text-orientation'), colorThemeSelect: document.getElementById('ocr-color-theme'), fontMultiplierHorizontalInput: document.getElementById('ocr-font-multiplier-horizontal'), fontMultiplierVerticalInput: document.getElementById('ocr-font-multiplier-vertical'),
             sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'), statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
             saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'), batchChapterBtn: document.getElementById('gemini-ocr-batch-chapter-btn'),
-            purgeCacheBtn: document.getElementById('gemini-ocr-purge-cache-btn'),
         });
 
         document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -605,7 +580,6 @@
         UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
         UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
         UI.batchChapterBtn.addEventListener('click', batchProcessCurrentChapterFromURL);
-        UI.purgeCacheBtn.addEventListener('click', purgeServerCache);
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
                 ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value,
@@ -622,46 +596,7 @@
         document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
     }
 
-    function checkServerStatus() {
-        const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return;
-        UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
-        GM_xmlhttpRequest({
-            method: 'GET', url: serverUrl, timeout: 5000,
-            onload: (res) => {
-                try {
-                    const data = JSON.parse(res.responseText);
-                    if (data.status === 'running') {
-                        UI.statusDiv.className = 'status-ok';
-                        const jobs = data.active_preprocess_jobs !== undefined ? data.active_preprocess_jobs : 'N/A';
-                        UI.statusDiv.textContent = `Connected (Cache: ${data.items_in_cache} | Active Jobs: ${jobs})`;
-                    } else {
-                         UI.statusDiv.className = 'status-error';
-                         UI.statusDiv.textContent = 'Server Unresponsive';
-                    }
-                } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; }
-            },
-            onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; },
-            ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; }
-        });
-    }
-
-    function purgeServerCache() {
-        if (!confirm("Are you sure you want to permanently delete all items from the server's OCR cache?")) return;
-        const btn = UI.purgeCacheBtn;
-        const originalText = btn.textContent;
-        btn.disabled = true; btn.textContent = 'Purging...';
-        GM_xmlhttpRequest({
-            method: 'POST', url: `${settings.ocrServerUrl}/purge-cache`, timeout: 10000,
-            onload: (res) => {
-                try { const data = JSON.parse(res.responseText); alert(data.message || data.error); checkServerStatus(); }
-                catch(e) { alert('Failed to parse server response.'); }
-            },
-            onerror: () => alert('Failed to connect to server to purge cache.'),
-            ontimeout: () => alert('Request to purge cache timed out.'),
-            onloadend: () => { btn.disabled = false; btn.textContent = originalText; }
-        });
-    }
-
+    function checkServerStatus() { const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return; UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...'; GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Cache: ${data.items_in_cache})` : 'Unresponsive'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } }); }
     function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:fixed!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;top:-9999px;left:-9999px;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
 
     // --- SCRIPT INITIALIZATION ---
