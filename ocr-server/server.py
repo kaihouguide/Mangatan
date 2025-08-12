@@ -47,6 +47,7 @@ ocr_engine: Engine
 
 # region Utility
 
+
 def load_cache():
     global ocr_cache
     if os.path.exists(CACHE_FILE_PATH):
@@ -59,6 +60,7 @@ def load_cache():
     else:
         print("[Cache] No cache file found. Starting fresh.")
 
+
 def save_cache():
     if is_debug_mode:
         print("[DEBUG] Saving OCR cache...")
@@ -67,9 +69,11 @@ def save_cache():
     if is_debug_mode:
         print("[DEBUG] OCR cache saved successfully.")
 
+
 # endregion
 
 # region Background Job
+
 
 def run_chapter_processing_job(base_url, auth_user, auth_pass):
     """
@@ -78,9 +82,11 @@ def run_chapter_processing_job(base_url, auth_user, auth_pass):
     global ACTIVE_JOB_COUNT
     with active_job_lock:
         ACTIVE_JOB_COUNT += 1
-    
-    print(f"[JobRunner] Started job for ...{base_url[-40:]}. Active jobs: {ACTIVE_JOB_COUNT}")
-    
+
+    print(
+        f"[JobRunner] Started job for ...{base_url[-40:]}. Active jobs: {ACTIVE_JOB_COUNT}"
+    )
+
     page_index = 0
     consecutive_errors = 0
     CONSECUTIVE_ERROR_THRESHOLD = 3
@@ -95,39 +101,47 @@ def run_chapter_processing_job(base_url, auth_user, auth_pass):
                 page_index += 1
                 consecutive_errors = 0
                 continue
-        
-        encoded_url = quote(image_url, safe='')
+
+        encoded_url = quote(image_url, safe="")
         target_url = f"{SERVER_URL_BASE}/ocr?url={encoded_url}"
         if auth_user:
             target_url += f"&user={auth_user}&pass={auth_pass}"
-        
+
         try:
             print(f"[JobRunner] Requesting: {image_url}")
             response = requests.get(target_url, timeout=45)
-            
+
             if response.status_code == 200:
                 consecutive_errors = 0
             else:
                 consecutive_errors += 1
-                print(f"[JobRunner] Got non-200 status ({response.status_code}) for {image_url}. Errors: {consecutive_errors}")
+                print(
+                    f"[JobRunner] Got non-200 status ({response.status_code}) for {image_url}. Errors: {consecutive_errors}"
+                )
                 if response.status_code == 404:
                     print("[JobRunner] (Page not found, likely end of chapter)")
 
         except requests.exceptions.RequestException as e:
             consecutive_errors += 1
-            print(f"[JobRunner] Request failed for {image_url}. Errors: {consecutive_errors}. Details: {e}")
-        
+            print(
+                f"[JobRunner] Request failed for {image_url}. Errors: {consecutive_errors}. Details: {e}"
+            )
+
         page_index += 1
         time.sleep(0.1)
 
-    print(f"[JobRunner] Finished job for ...{base_url[-40:]}. Reached {consecutive_errors} errors.")
+    print(
+        f"[JobRunner] Finished job for ...{base_url[-40:]}. Reached {consecutive_errors} errors."
+    )
     with active_job_lock:
         ACTIVE_JOB_COUNT -= 1
+
 
 # endregion
 
 
 # region Endpoints
+
 
 @app.route("/")
 def status_endpoint():
@@ -136,18 +150,23 @@ def status_endpoint():
         num_cache_items = len(ocr_cache)
     with active_job_lock:
         active_jobs = ACTIVE_JOB_COUNT
-    return jsonify({
-        "status": "running", "message": "Python OCR server is active.",
-        "requests_processed": num_requests, "items_in_cache": num_cache_items,
-        "active_preprocess_jobs": active_jobs
-    })
+    return jsonify(
+        {
+            "status": "running",
+            "message": "Python OCR server is active.",
+            "requests_processed": num_requests,
+            "items_in_cache": num_cache_items,
+            "active_preprocess_jobs": active_jobs,
+        }
+    )
 
 
 @app.route("/ocr")
 async def ocr_endpoint():
     global ocr_requests_processed
     image_url = request.args.get("url")
-    if not image_url: return jsonify({"error": "Image URL is required"}), 400
+    if not image_url:
+        return jsonify({"error": "Image URL is required"}), 400
 
     with cache_lock:
         if image_url in ocr_cache:
@@ -169,7 +188,7 @@ async def ocr_endpoint():
 
         pil_image = Image.open(io.BytesIO(image_bytes))
         rgb_image = pil_image.convert("RGB")
-        
+
         results = await ocr_engine.ocr(rgb_image)
 
         with cache_lock:
@@ -182,10 +201,13 @@ async def ocr_endpoint():
 
     except aiohttp.ClientResponseError as e:
         print(f"[OCR] ERROR fetching {image_url}: Status {e.status}")
-        return jsonify({"error": f"Failed to fetch image from URL, status: {e.status}"}), e.status
+        return jsonify(
+            {"error": f"Failed to fetch image from URL, status: {e.status}"}
+        ), e.status
     except Exception as e:
         print(f"[OCR] ERROR on {image_url}: {e}")
-        if is_debug_mode: traceback.print_exc()
+        if is_debug_mode:
+            traceback.print_exc()
         return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
 
 
@@ -193,17 +215,23 @@ async def ocr_endpoint():
 def preprocess_chapter_endpoint():
     data = request.json
     base_url = data.get("baseUrl")
-    if not base_url: return jsonify({"error": "baseUrl is required"}), 400
+    if not base_url:
+        return jsonify({"error": "baseUrl is required"}), 400
 
     job_thread = threading.Thread(
         target=run_chapter_processing_job,
         args=(base_url, data.get("user"), data.get("pass")),
-        daemon=True
+        daemon=True,
     )
     job_thread.start()
-    
+
     print(f"[Queue] Job started in new thread for ...{base_url[-40:]}")
-    return jsonify({"status": "accepted", "message": "Chapter pre-processing job has been started."}), 202
+    return jsonify(
+        {
+            "status": "accepted",
+            "message": "Chapter pre-processing job has been started.",
+        }
+    ), 202
 
 
 @app.route("/purge-cache", methods=["POST"])
@@ -213,45 +241,66 @@ def purge_cache_endpoint():
         ocr_cache.clear()
         save_cache()
         print(f"[Cache] Purged. Removed {count} items.")
-    return jsonify({"status": "success", "message": f"Cache purged. Removed {count} items."})
+    return jsonify(
+        {"status": "success", "message": f"Cache purged. Removed {count} items."}
+    )
 
 
 @app.route("/export-cache")
 def export_cache_endpoint():
     if not os.path.exists(CACHE_FILE_PATH):
         return jsonify({"error": "No cache file to export."}), 404
-    return send_file(CACHE_FILE_PATH, as_attachment=True, download_name="ocr-cache.json")
+    return send_file(
+        CACHE_FILE_PATH, as_attachment=True, download_name="ocr-cache.json"
+    )
 
 
 @app.route("/import-cache", methods=["POST"])
 def import_cache_endpoint():
-    if "cacheFile" not in request.files: return jsonify({"error": "No file part."}), 400
+    if "cacheFile" not in request.files:
+        return jsonify({"error": "No file part."}), 400
     file = request.files["cacheFile"]
-    if not (file.filename and file.filename.endswith(".json")): return jsonify({"error": "Invalid file."}), 400
+    if not (file.filename and file.filename.endswith(".json")):
+        return jsonify({"error": "Invalid file."}), 400
     try:
         imported_data = json.load(file)
-        if not isinstance(imported_data, dict): return jsonify({"error": "Invalid cache format."}), 400
+        if not isinstance(imported_data, dict):
+            return jsonify({"error": "Invalid cache format."}), 400
         with cache_lock:
             new_items = 0
             for key, value in imported_data.items():
                 if key not in ocr_cache:
                     ocr_cache[key] = value
                     new_items += 1
-            if new_items > 0: save_cache()
+            if new_items > 0:
+                save_cache()
             total_items = len(ocr_cache)
-        return jsonify({"message": f"Import successful. Added {new_items} new items.", "total_items_in_cache": total_items})
+        return jsonify(
+            {
+                "message": f"Import successful. Added {new_items} new items.",
+                "total_items_in_cache": total_items,
+            }
+        )
     except Exception as e:
         return jsonify({"error": f"Import failed: {e}"}), 500
+
 
 # endregion
 
 # region Main
 
+
 def main():
     global ocr_engine, is_debug_mode
     parser = argparse.ArgumentParser(description="Run the Python OCR Server.")
     parser.add_argument("-d", "--debug", action="store_true", help="enable debug mode")
-    parser.add_argument("-e", "--engine", type=str, default="lens", help="OCR engine to use ('lens', 'oneocr')")
+    parser.add_argument(
+        "-e",
+        "--engine",
+        type=str,
+        default="lens",
+        help="OCR engine to use ('lens', 'oneocr')",
+    )
     args = parser.parse_args()
     is_debug_mode = args.debug
 
@@ -260,7 +309,8 @@ def main():
         ocr_engine = initialize_engine(args.engine)
         print(f"[Engine] {args.engine} initialization complete.")
     except Exception as e:
-        print(f"[Engine] Failed to initialize {args.engine}: {e}"); raise SystemExit(1)
+        print(f"[Engine] Failed to initialize {args.engine}: {e}")
+        raise SystemExit(1)
 
     load_cache()
 
@@ -271,6 +321,7 @@ def main():
         print("--- Starting Waitress Production Server ---")
         print(f"URL: http://127.0.0.1:3000")
         serve(app, host="127.0.0.1", port=3000)
+
 
 if __name__ == "__main__":
     main()
