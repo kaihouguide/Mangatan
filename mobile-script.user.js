@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (v23.M.1 - Continuous Probe Engine)
 // @namespace    http://tampermonkey.net/
-// @version      23.1.2
+// @version      23.1.3
 // @description  Uses a continuous probe engine to dispatch OCR requests concurrently. Manages concurrency and stops automatically when the end of a chapter is detected.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
@@ -381,62 +381,52 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (CONTINUOUS PROBE ENGINE V2) ---
+    // --- BATCH PROCESSING & INLINE UI (CONTINUOUS PROBE ENGINE V3) ---
     async function runProbingProcess(baseUrl, btn) {
         logDebug(`Starting CONTINUOUS PROBE ENGINE from: ${baseUrl}`);
         const originalText = btn.textContent;
 
         // --- Configuration ---
-        const CONSECUTIVE_ERROR_THRESHOLD = 3; // Stops after 3 consecutive errors.
+        const CONSECUTIVE_ERROR_THRESHOLD = 3;
         const REQUEST_TIMEOUT = 30000;
+        const REQUEST_INTERVAL_MS = 100; // ~10 requests per second
 
         // --- State ---
         let activeRequests = 0;
         const pageStatus = new Map(); // 'success', 'error', 'pending'
         let nextPageToDispatch = 0;
-        let highestCompletedPage = -1; // Tracks the highest page number that has finished processing.
         let terminationTriggered = false;
         let promiseResolver;
+        let dispatchLoopTimer = null;
 
         const updateButtonText = () => {
+            if (!btn.isConnected) return;
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
             const errorCount = Array.from(pageStatus.values()).filter(v => v === 'error').length;
             const pendingCount = Array.from(pageStatus.values()).filter(v => v === 'pending').length;
             btn.textContent = `P:${pendingCount}|S:${successCount}|F:${errorCount}`;
         };
 
-        const checkTerminationCondition = () => {
-            if (terminationTriggered) return;
+        const checkTerminationCondition = (completedPageIndex) => {
+            if (terminationTriggered || pageStatus.get(completedPageIndex) !== 'error') return;
+            if (completedPageIndex < CONSECUTIVE_ERROR_THRESHOLD - 1) return;
 
-            // We can't determine the end of a chapter until we have enough data.
-            if (highestCompletedPage < CONSECUTIVE_ERROR_THRESHOLD - 1) return;
+            // Check if the current error and the two preceding pages were also errors
+            const isError1 = pageStatus.get(completedPageIndex - 1) === 'error';
+            const isError2 = pageStatus.get(completedPageIndex - 2) === 'error';
 
-            let consecutiveErrors = 0;
-            // Check the status of the last pages, starting from the highest page that completed.
-            for (let i = highestCompletedPage; i >= Math.max(0, highestCompletedPage - (CONSECUTIVE_ERROR_THRESHOLD - 1)); i--) {
-                const status = pageStatus.get(i);
-                
-                // If any page in this final sequence is a success, or is still pending, or hasn't been dispatched yet,
-                // it means the error sequence is broken or it's too soon to tell.
-                if (status === 'success' || status === 'pending' || !status) {
-                    return; 
-                }
-                
-                // If we are here, the status must be 'error'.
-                consecutiveErrors++;
-            }
-
-            // If we have found a consecutive block of errors at the end, trigger termination.
-            if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
-                logDebug(`Termination triggered: Found ${consecutiveErrors} consecutive errors ending at page ${highestCompletedPage}.`);
+            if (isError1 && isError2) {
+                logDebug(`Termination triggered: 3 consecutive errors ending at page ${completedPageIndex}.`);
                 terminationTriggered = true;
-                // If no requests are active, we can finalize immediately.
+                if (dispatchLoopTimer) clearTimeout(dispatchLoopTimer); // Stop dispatching new requests
+
+                // If no more requests are pending, we can finalize now
                 if (activeRequests === 0) {
                     finalize();
                 }
             }
         };
-        
+
         const finalize = () => {
             if (!promiseResolver) return;
 
@@ -447,12 +437,16 @@
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
             logDebug(`Probe complete. Highest successful page was ${pagesFound - 1}. Total successful: ${successCount}.`);
 
-            btn.textContent = 'Done!';
-            btn.style.borderColor = '#27ae60';
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.style.borderColor = '';
-            }, 3500);
+            if (btn.isConnected) {
+                btn.textContent = 'Done!';
+                btn.style.borderColor = '#27ae60';
+                setTimeout(() => {
+                    if (btn.isConnected) {
+                        btn.textContent = originalText;
+                        btn.style.borderColor = '';
+                    }
+                }, 3500);
+            }
 
             if (btn.id === 'gemini-ocr-batch-chapter-btn') {
                 alert(`Chapter pre-processing complete!\n\nDetected ~${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
@@ -462,14 +456,7 @@
             promiseResolver = null;
         };
 
-        // This function dispatches a single request and then schedules the next one immediately.
-        const dispatchContinuously = () => {
-            // Stop sending new requests once termination is triggered.
-            if (terminationTriggered) {
-                return;
-            }
-
-            const pageIndex = nextPageToDispatch++;
+        const dispatchRequest = (pageIndex) => {
             activeRequests++;
             pageStatus.set(pageIndex, 'pending');
             updateButtonText();
@@ -506,37 +493,33 @@
                 },
                 onloadend: () => {
                     activeRequests--;
-                    highestCompletedPage = Math.max(highestCompletedPage, pageIndex);
                     updateButtonText();
-                    
-                    // Check for the termination condition after every request completes.
-                    checkTerminationCondition();
+                    checkTerminationCondition(pageIndex);
 
-                    // If termination has been triggered and this was the last active request, finalize the process.
                     if (terminationTriggered && activeRequests === 0) {
                         logDebug("All active requests finished after termination trigger. Finalizing.");
                         finalize();
                     }
                 }
             });
+        };
 
-            // Use setTimeout with a 0ms delay to schedule the next dispatch. This prevents the browser from
-            // freezing and allows UI updates to occur while sending requests as fast as possible.
-            setTimeout(dispatchContinuously, 0);
+        const dispatchLoop = () => {
+            if (terminationTriggered) return;
+            dispatchRequest(nextPageToDispatch++);
+            dispatchLoopTimer = setTimeout(dispatchLoop, REQUEST_INTERVAL_MS);
         };
 
         return new Promise(resolve => {
             promiseResolver = resolve;
-            logDebug(`Starting continuous probe with error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}. Dispatching will not be throttled.`);
+            logDebug(`Starting continuous probe at ~10 req/s with error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}.`);
+            dispatchLoop();
 
-            // Start the non-stop dispatch loop.
-            dispatchContinuously();
-
-            // A safety timeout to prevent the process from running indefinitely in case of an unexpected issue.
             setTimeout(() => {
                 if (promiseResolver) {
-                    logDebug("Safety timeout reached. Forcing termination.");
+                    logDebug("Safety timeout (30 min) reached. Forcing termination.");
                     terminationTriggered = true;
+                    if (dispatchLoopTimer) clearTimeout(dispatchLoopTimer);
                     if (activeRequests === 0) {
                         finalize();
                     }
