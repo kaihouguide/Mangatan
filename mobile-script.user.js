@@ -735,3 +735,40 @@
     }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
 })();
+
+
+    // --- Continuous Sender Engine ---
+    let consecutiveProbeErrors = 0;
+    let sendInterval = null;
+    let linkQueue = []; // fill with links to process
+
+    function startContinuousSending() {
+        if (sendInterval) return;
+        sendInterval = setInterval(() => {
+            if (consecutiveProbeErrors >= 3) {
+                clearInterval(sendInterval);
+                console.log("Stopped sending after 3 consecutive probe errors.");
+                return;
+            }
+            if (linkQueue.length === 0) return;
+
+            let link = linkQueue.shift();
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: link,
+                onload: function(response) {
+                    if (response.status === 404) {
+                        consecutiveProbeErrors++;
+                        console.warn("Probe error (404). Consecutive errors:", consecutiveProbeErrors);
+                    } else {
+                        consecutiveProbeErrors = 0;
+                        console.log("Success:", link);
+                    }
+                },
+                onerror: function() {
+                    consecutiveProbeErrors++;
+                    console.warn("Probe error (network). Consecutive errors:", consecutiveProbeErrors);
+                }
+            });
+        }, 100); // 100ms = 10 per second
+    }
