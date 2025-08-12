@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (v22.M.18 - Synced & Refactored)
 // @namespace    http://tampermonkey.net/
-// @version      22.18.0
-// @description  Synchronizes core logic with the latest PC version, preserving mobile-specific interactions and performance optimizations.
+// @version      22.18.1
+// @description  Synchronizes core logic with the latest PC version, preserving mobile-specific interactions and performance optimizations. Features a new high-speed concurrent pre-processing engine.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -385,39 +385,124 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (Synced with PC) ---
+    // --- BATCH PROCESSING & INLINE UI (RECKLESS REFACTOR) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting sequential batch probe from: ${baseUrl}`);
-        let successCount = 0, consecutiveErrors = 0, currentPage = 0;
-        const CONSECUTIVE_ERROR_THRESHOLD = 3;
+        logDebug(`Starting reckless batch probe from: ${baseUrl}`);
         const originalText = btn.textContent;
 
-        while (consecutiveErrors < CONSECUTIVE_ERROR_THRESHOLD) {
-            const url = `${baseUrl}${currentPage}`;
-            btn.textContent = `P:${currentPage}`;
-            const success = await new Promise(resolve => {
-                let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
-                if (settings.imageServerUser) ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
-                GM_xmlhttpRequest({
-                    method: 'GET', url: ocrRequestUrl, timeout: 45000,
-                    onload: (res) => {
-                        try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); PersistentCache.set(url, data); logDebug(`Probe Success: Page ${currentPage}`); resolve(true); }
-                        catch (e) { logDebug(`Probe Failed (Server Error): Page ${currentPage} - ${e.message}`); resolve(false); }
-                    },
-                    onerror: () => { logDebug(`Probe Failed (Connection Error): Page ${currentPage}`); resolve(false); },
-                    ontimeout: () => { logDebug(`Probe Failed (Timeout): Page ${currentPage}`); resolve(false); }
-                });
-            });
-            if (success) { successCount++; consecutiveErrors = 0; }
-            else { consecutiveErrors++; }
-            currentPage++;
-        }
-        const pagesFound = currentPage - CONSECUTIVE_ERROR_THRESHOLD;
-        logDebug(`Batch probe finished. Detected end of chapter after page ${pagesFound - 1}. Total successful: ${successCount}.`);
-        btn.textContent = 'Done!';
-        btn.style.borderColor = '#27ae60';
-        setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 2500);
-        if (btn.id === 'gemini-ocr-batch-chapter-btn') alert(`Chapter pre-processing complete!\n\nDetected approximately ${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
+        // --- Configuration ---
+        const MAX_CONCURRENT_REQUESTS = 8;    // How many requests to run in parallel.
+        const CONSECUTIVE_ERROR_THRESHOLD = 5;  // Stop after this many consecutive failures.
+        const REQUEST_TIMEOUT = 30000;          // Timeout for each individual request.
+
+        // --- State ---
+        let activeRequests = 0;
+        let currentPage = 0;
+        let stopDispatching = false;
+        const pageStatus = new Map(); // pageNumber -> 'success' | 'error'
+
+        const updateButtonText = () => {
+            const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
+            const errorCount = Array.from(pageStatus.values()).filter(v => v === 'error').length;
+            btn.textContent = `P:${currentPage}|S:${successCount}|F:${errorCount}`;
+        };
+
+        // This function is the key. It checks if we have found the end of the chapter.
+        const hasFoundEnd = () => {
+            if (stopDispatching) return true; // Already decided to stop.
+
+            // Find the lowest page number 'i' that starts a sequence of CONSECUTIVE_ERROR_THRESHOLD failures.
+            for (let i = 0; i < currentPage; i++) {
+                let isFailureSequence = true;
+                for (let j = 0; j < CONSECUTIVE_ERROR_THRESHOLD; j++) {
+                    // If any page in the sequence has not *explicitly* failed yet,
+                    // then we cannot confirm this is a failure sequence.
+                    if (pageStatus.get(i + j) !== 'error') {
+                        isFailureSequence = false;
+                        break;
+                    }
+                }
+
+                if (isFailureSequence) {
+                    logDebug(`Found end condition: ${CONSECUTIVE_ERROR_THRESHOLD} failures starting at page ${i}.`);
+                    stopDispatching = true;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        return new Promise(resolve => {
+            const dispatchNext = () => {
+                // Stop dispatching new requests if we've hit the end or are at the concurrent limit.
+                while (activeRequests < MAX_CONCURRENT_REQUESTS && !hasFoundEnd()) {
+                    const pageToProcess = currentPage++;
+                    activeRequests++;
+
+                    const url = `${baseUrl}${pageToProcess}`;
+                    let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
+                    if (settings.imageServerUser) {
+                        ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
+                    }
+
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: ocrRequestUrl,
+                        timeout: REQUEST_TIMEOUT,
+                        onload: (res) => {
+                            try {
+                                const data = JSON.parse(res.responseText);
+                                if (data.error) throw new Error(data.error);
+                                PersistentCache.set(url, data);
+                                pageStatus.set(pageToProcess, 'success');
+                                logDebug(`Probe Success: Page ${pageToProcess}`);
+                            } catch (e) {
+                                pageStatus.set(pageToProcess, 'error');
+                                logDebug(`Probe Failed (Server Error): Page ${pageToProcess} - ${e.message}`);
+                            }
+                        },
+                        onerror: () => {
+                            pageStatus.set(pageToProcess, 'error');
+                            logDebug(`Probe Failed (Connection Error): Page ${pageToProcess}`);
+                        },
+                        ontimeout: () => {
+                            pageStatus.set(pageToProcess, 'error');
+                            logDebug(`Probe Failed (Timeout): Page ${pageToProcess}`);
+                        },
+                        onloadend: () => {
+                            activeRequests--;
+                            updateButtonText();
+                            // Check if we are all done.
+                            if (hasFoundEnd() && activeRequests === 0) {
+                                resolve();
+                            } else {
+                                // Dispatch another request to take the place of the one that just finished.
+                                dispatchNext();
+                            }
+                        }
+                    });
+                }
+                // If we stopped dispatching because of the end condition, and there are no active requests, we must be done.
+                if (stopDispatching && activeRequests === 0) {
+                    resolve();
+                }
+            };
+
+            // Start the process by dispatching the initial batch of requests.
+            updateButtonText();
+            dispatchNext();
+        }).then(() => {
+            // This code runs after the main promise resolves.
+            const pagesFound = currentPage - CONSECUTIVE_ERROR_THRESHOLD;
+            const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
+            logDebug(`Batch probe finished. Detected end of chapter after page ${pagesFound - 1}. Total successful: ${successCount}.`);
+            btn.textContent = 'Done!';
+            btn.style.borderColor = '#27ae60';
+            setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 3000);
+            if (btn.id === 'gemini-ocr-batch-chapter-btn') {
+                alert(`Chapter pre-processing complete!\n\nDetected approximately ${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
+            }
+        });
     }
 
     async function batchProcessCurrentChapterFromURL() {
