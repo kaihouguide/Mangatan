@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.1 - Continuous Probe Engine)
+// @name         Automatic Content OCR (v23.M.2 - Server-Side Processing)
 // @namespace    http://tampermonkey.net/
-// @version      23.1.3
-// @description  Uses a continuous probe engine to dispatch OCR requests concurrently. Manages concurrency and stops automatically when the end of a chapter is detected.
+// @version      23.2.0
+// @description  Delegates chapter pre-processing to a server-side job, mirroring the PC script's functionality for improved stability and feedback.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -49,7 +49,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M1_synced'; // Updated settings key for new version
+    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M2_synced'; // Updated settings key for new version
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -83,7 +83,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v23.M.1] ${logEntry}`);
+        console.log(`[OCR v23.M.2] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -381,152 +381,64 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (CONTINUOUS PROBE ENGINE V3) ---
+    // --- BATCH PROCESSING (SERVER-SIDE DELEGATION) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting CONTINUOUS PROBE ENGINE from: ${baseUrl}`);
+        logDebug(`Requesting SERVER-SIDE job for: ${baseUrl}`);
         const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Starting...';
 
-        // --- Configuration ---
-        const CONSECUTIVE_ERROR_THRESHOLD = 3;
-        const REQUEST_TIMEOUT = 30000;
-        const REQUEST_INTERVAL_MS = 100; // ~10 requests per second
-
-        // --- State ---
-        let activeRequests = 0;
-        const pageStatus = new Map(); // 'success', 'error', 'pending'
-        let nextPageToDispatch = 0;
-        let terminationTriggered = false;
-        let promiseResolver;
-        let dispatchLoopTimer = null;
-
-        const updateButtonText = () => {
-            if (!btn.isConnected) return;
-            const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
-            const errorCount = Array.from(pageStatus.values()).filter(v => v === 'error').length;
-            const pendingCount = Array.from(pageStatus.values()).filter(v => v === 'pending').length;
-            btn.textContent = `P:${pendingCount}|S:${successCount}|F:${errorCount}`;
+        const postData = {
+            baseUrl: baseUrl,
+            user: settings.imageServerUser,
+            pass: settings.imageServerPassword
         };
 
-        const checkTerminationCondition = (completedPageIndex) => {
-            if (terminationTriggered || pageStatus.get(completedPageIndex) !== 'error') return;
-            if (completedPageIndex < CONSECUTIVE_ERROR_THRESHOLD - 1) return;
-
-            // Check if the current error and the two preceding pages were also errors
-            const isError1 = pageStatus.get(completedPageIndex - 1) === 'error';
-            const isError2 = pageStatus.get(completedPageIndex - 2) === 'error';
-
-            if (isError1 && isError2) {
-                logDebug(`Termination triggered: 3 consecutive errors ending at page ${completedPageIndex}.`);
-                terminationTriggered = true;
-                if (dispatchLoopTimer) clearTimeout(dispatchLoopTimer); // Stop dispatching new requests
-
-                // If no more requests are pending, we can finalize now
-                if (activeRequests === 0) {
-                    finalize();
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${settings.ocrServerUrl}/preprocess-chapter`,
+            headers: { 'Content-Type': 'application/json' },
+            data: JSON.stringify(postData),
+            timeout: 10000,
+            onload: (res) => {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (res.status === 202 && data.status === 'accepted') {
+                        logDebug(`Chapter job successfully accepted by server.`);
+                        btn.textContent = 'Accepted';
+                        btn.style.borderColor = '#3498db';
+                        checkServerStatus(); // Refresh the status to show it's running
+                    } else {
+                        throw new Error(data.error || `Server responded with status ${res.status}`);
+                    }
+                } catch (e) {
+                    logDebug(`Error starting chapter job: ${e.message}`);
+                    btn.textContent = 'Error!';
+                    btn.style.borderColor = '#c0392b';
+                    alert(`Failed to start chapter job: ${e.message}`);
                 }
-            }
-        };
-
-        const finalize = () => {
-            if (!promiseResolver) return;
-
-            const pagesFound = Array.from(pageStatus.entries())
-                .filter(([_, status]) => status === 'success')
-                .reduce((max, [page, _]) => Math.max(max, page), -1) + 1;
-
-            const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
-            logDebug(`Probe complete. Highest successful page was ${pagesFound - 1}. Total successful: ${successCount}.`);
-
-            if (btn.isConnected) {
-                btn.textContent = 'Done!';
-                btn.style.borderColor = '#27ae60';
-                setTimeout(() => {
+            },
+            onerror: () => {
+                logDebug('Connection error while trying to start chapter job.');
+                btn.textContent = 'Conn. Error!';
+                btn.style.borderColor = '#c0392b';
+                alert('Failed to connect to the OCR server to start the job.');
+            },
+            ontimeout: () => {
+                logDebug('Timeout while trying to start chapter job.');
+                btn.textContent = 'Timeout!';
+                btn.style.borderColor = '#c0392b';
+                alert('The request to start the chapter job timed out.');
+            },
+            onloadend: () => {
+               setTimeout(() => {
                     if (btn.isConnected) {
                         btn.textContent = originalText;
                         btn.style.borderColor = '';
+                        btn.disabled = false;
                     }
                 }, 3500);
             }
-
-            if (btn.id === 'gemini-ocr-batch-chapter-btn') {
-                alert(`Chapter pre-processing complete!\n\nDetected ~${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
-            }
-
-            promiseResolver();
-            promiseResolver = null;
-        };
-
-        const dispatchRequest = (pageIndex) => {
-            activeRequests++;
-            pageStatus.set(pageIndex, 'pending');
-            updateButtonText();
-
-            const url = `${baseUrl}${pageIndex}`;
-            let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
-            if (settings.imageServerUser) {
-                ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
-            }
-
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: ocrRequestUrl,
-                timeout: REQUEST_TIMEOUT,
-                onload: (res) => {
-                    try {
-                        const data = JSON.parse(res.responseText);
-                        if (data.error) throw new Error(data.error);
-                        PersistentCache.set(url, data);
-                        pageStatus.set(pageIndex, 'success');
-                        logDebug(`OCR success for page ${pageIndex}`);
-                    } catch (e) {
-                        logDebug(`Probe Error on page ${pageIndex}: ${e.message}`);
-                        pageStatus.set(pageIndex, 'error');
-                    }
-                },
-                onerror: () => {
-                    logDebug(`Probe Connection Error on page ${pageIndex}`);
-                    pageStatus.set(pageIndex, 'error');
-                },
-                ontimeout: () => {
-                    logDebug(`Probe Timeout on page ${pageIndex}`);
-                    pageStatus.set(pageIndex, 'error');
-                },
-                onloadend: () => {
-                    activeRequests--;
-                    updateButtonText();
-                    checkTerminationCondition(pageIndex);
-
-                    if (terminationTriggered && activeRequests === 0) {
-                        logDebug("All active requests finished after termination trigger. Finalizing.");
-                        finalize();
-                    }
-                }
-            });
-        };
-
-        const dispatchLoop = () => {
-            if (terminationTriggered) return;
-            dispatchRequest(nextPageToDispatch++);
-            dispatchLoopTimer = setTimeout(dispatchLoop, REQUEST_INTERVAL_MS);
-        };
-
-        return new Promise(resolve => {
-            promiseResolver = resolve;
-            logDebug(`Starting continuous probe at ~10 req/s with error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}.`);
-            dispatchLoop();
-
-            setTimeout(() => {
-                if (promiseResolver) {
-                    logDebug("Safety timeout (30 min) reached. Forcing termination.");
-                    terminationTriggered = true;
-                    if (dispatchLoopTimer) clearTimeout(dispatchLoopTimer);
-                    if (activeRequests === 0) {
-                        finalize();
-                    }
-                }
-            }, 30 * 60 * 1000);
-        }).then(() => {
-            logDebug("runProbingProcess promise resolved.");
         });
     }
 
@@ -565,7 +477,7 @@
         const ocrButton = document.createElement('button');
         ocrButton.textContent = 'OCR';
         ocrButton.className = 'gemini-ocr-chapter-batch-btn';
-        ocrButton.title = 'Pre-process this chapter';
+        ocrButton.title = 'Queue this chapter for background pre-processing on the server';
         ocrButton.addEventListener('click', handleChapterBatchClick);
         actionContainer.insertBefore(ocrButton, moreButton);
     }
@@ -580,7 +492,7 @@
     function createUI() {
         GM_addStyle(`
             /* Inline Chapter OCR Button */
-            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); min-width: 110px; text-align: center; }
+            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); min-width: 80px; text-align: center; }
             .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); }
             .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; background-color: transparent; }
             /* Mobile Overlay */
@@ -608,12 +520,13 @@
             .gemini-ocr-modal-container { width: clamp(320px, 95vw, 700px); max-height: 90vh; background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 16px; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; }
             .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); }
             .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; }
-            .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-end; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); }
+            .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-start; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); }
+            .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; }
             .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: 20px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); }
             .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 12px 15px; align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); }
             .full-width { grid-column: 1 / -1; }
             .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 12px; box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; }
-            .gemini-ocr-modal button { padding: 10px 18px; background-color: var(--modal-header-color); border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); }
+            .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); }
             #gemini-ocr-server-status { padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
@@ -648,7 +561,8 @@
                     <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1;.container1;.container2\n"></textarea></div>
                 </div>
                 <div class="gemini-ocr-modal-footer">
-                    <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db; margin-right: auto;" title="Processes the entire chapter based on the page URL, probing for pages until it finds the end.">Pre-process Chapter</button>
+                    <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;" title="Deletes all entries from the server's OCR cache file.">Purge Server Cache</button>
+                    <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;" title="Queues the current chapter on the server for background pre-processing.">Pre-process Chapter</button>
                     <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button>
                     <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button>
                     <button id="gemini-ocr-save-btn">Save & Reload</button>
@@ -673,6 +587,7 @@
             textOrientationSelect: document.getElementById('ocr-text-orientation'), colorThemeSelect: document.getElementById('ocr-color-theme'), fontMultiplierHorizontalInput: document.getElementById('ocr-font-multiplier-horizontal'), fontMultiplierVerticalInput: document.getElementById('ocr-font-multiplier-vertical'),
             sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'), statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
             saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'), batchChapterBtn: document.getElementById('gemini-ocr-batch-chapter-btn'),
+            purgeCacheBtn: document.getElementById('gemini-ocr-purge-cache-btn'),
         });
 
         document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -690,6 +605,7 @@
         UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
         UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
         UI.batchChapterBtn.addEventListener('click', batchProcessCurrentChapterFromURL);
+        UI.purgeCacheBtn.addEventListener('click', purgeServerCache);
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
                 ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value,
@@ -706,7 +622,46 @@
         document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
     }
 
-    function checkServerStatus() { const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return; UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...'; GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); UI.statusDiv.className = data.status === 'running' ? 'status-ok' : 'status-error'; UI.statusDiv.textContent = data.status === 'running' ? `Connected (Cache: ${data.items_in_cache})` : 'Unresponsive'; } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } }); }
+    function checkServerStatus() {
+        const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return;
+        UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
+        GM_xmlhttpRequest({
+            method: 'GET', url: serverUrl, timeout: 5000,
+            onload: (res) => {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data.status === 'running') {
+                        UI.statusDiv.className = 'status-ok';
+                        const jobs = data.active_preprocess_jobs !== undefined ? data.active_preprocess_jobs : 'N/A';
+                        UI.statusDiv.textContent = `Connected (Cache: ${data.items_in_cache} | Active Jobs: ${jobs})`;
+                    } else {
+                         UI.statusDiv.className = 'status-error';
+                         UI.statusDiv.textContent = 'Server Unresponsive';
+                    }
+                } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; }
+            },
+            onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; },
+            ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; }
+        });
+    }
+
+    function purgeServerCache() {
+        if (!confirm("Are you sure you want to permanently delete all items from the server's OCR cache?")) return;
+        const btn = UI.purgeCacheBtn;
+        const originalText = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Purging...';
+        GM_xmlhttpRequest({
+            method: 'POST', url: `${settings.ocrServerUrl}/purge-cache`, timeout: 10000,
+            onload: (res) => {
+                try { const data = JSON.parse(res.responseText); alert(data.message || data.error); checkServerStatus(); }
+                catch(e) { alert('Failed to parse server response.'); }
+            },
+            onerror: () => alert('Failed to connect to server to purge cache.'),
+            ontimeout: () => alert('Request to purge cache timed out.'),
+            onloadend: () => { btn.disabled = false; btn.textContent = originalText; }
+        });
+    }
+
     function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:fixed!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;top:-9999px;left:-9999px;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
 
     // --- SCRIPT INITIALIZATION ---
@@ -735,40 +690,3 @@
     }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
 })();
-
-
-    // --- Continuous Sender Engine ---
-    let consecutiveProbeErrors = 0;
-    let sendInterval = null;
-    let linkQueue = []; // fill with links to process
-
-    function startContinuousSending() {
-        if (sendInterval) return;
-        sendInterval = setInterval(() => {
-            if (consecutiveProbeErrors >= 3) {
-                clearInterval(sendInterval);
-                console.log("Stopped sending after 3 consecutive probe errors.");
-                return;
-            }
-            if (linkQueue.length === 0) return;
-
-            let link = linkQueue.shift();
-            GM_xmlhttpRequest({
-                method: "GET",
-                url: link,
-                onload: function(response) {
-                    if (response.status === 404) {
-                        consecutiveProbeErrors++;
-                        console.warn("Probe error (404). Consecutive errors:", consecutiveProbeErrors);
-                    } else {
-                        consecutiveProbeErrors = 0;
-                        console.log("Success:", link);
-                    }
-                },
-                onerror: function() {
-                    consecutiveProbeErrors++;
-                    console.warn("Probe error (network). Consecutive errors:", consecutiveProbeErrors);
-                }
-            });
-        }, 100); // 100ms = 10 per second
-    }
