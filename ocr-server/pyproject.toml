@@ -10,6 +10,7 @@ dependencies = [
     "chrome-lens-py>=3.1.0",
     "flask[async]>=3.1.1",
     "oneocr>=1.0.9",
+    "requests>=2.32.4",
     "waitress>=3.0.2",
 ]
 
