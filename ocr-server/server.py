@@ -214,6 +214,10 @@ async def ocr_endpoint():
 @app.route("/preprocess-chapter", methods=["POST"])
 def preprocess_chapter_endpoint():
     data = request.json
+
+    if data is None:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
     base_url = data.get("baseUrl")
     if not base_url:
         return jsonify({"error": "baseUrl is required"}), 400
