@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.20 - Refined Reckless Engine)
+// @name         Automatic Content OCR (v22.M.22.1 - Dynamic Dispatch Engine)
 // @namespace    http://tampermonkey.net/
-// @version      22.20.0
-// @description  The definitive reckless engine: Dispatches OCR requests at maximum speed while using a refined, asynchronous check to reliably detect the chapter's end.
+// @version      22.22.1
+// @description  The definitive pre-processor: Uses a non-blocking loop to dispatch requests at maximum speed, now with a more sensitive 3-failure threshold for end-of-chapter detection.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -83,7 +83,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.20] ${logEntry}`);
+        console.log(`[OCR v22.M.22.1] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -341,7 +341,7 @@
             while (low <= high) {
                 const mid = Math.floor((low + high) / 2); if (mid <= 0) break;
                 measurementSpan.style.fontSize = `${mid}px`;
-                const fits = isVertical ? (measurementSpan.offsetWidth <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth) : (measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight);
+                const fits = isVertical ? (measurementSpan.offsetHeight <= availableHeight) && (measurementSpan.offsetHeight <= availableWidth) : (measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight);
                 if (fits) { bestSize = mid; low = mid + 1; } else { high = mid - 1; }
             }
              if(isVertical) { measurementSpan.style.writingMode = ''; measurementSpan.style.textOrientation = ''; }
@@ -381,32 +381,33 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (REFINED RECKLESS ENGINE) ---
+    // --- BATCH PROCESSING & INLINE UI (DYNAMIC DISPATCH ENGINE) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting Refined Reckless batch probe from: ${baseUrl}`);
+        logDebug(`Starting DYNAMIC DISPATCH ENGINE probe from: ${baseUrl}`);
         const originalText = btn.textContent;
 
-        const CONSECUTIVE_ERROR_THRESHOLD = 5;
+        const CONSECUTIVE_ERROR_THRESHOLD = 3; // <-- SENSITIVITY ADJUSTED
         const REQUEST_TIMEOUT = 25000;
-        const MAX_PAGES_TO_PROBE = 300;
+        const MAX_PAGES_SAFETY_LIMIT = 400;
 
         let activeRequests = 0;
-        let highestDispatchedPage = -1;
+        let currentPage = 0;
         let stopDispatching = false;
         const pageStatus = new Map();
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
             const errorCount = Array.from(pageStatus.values()).filter(v => v === 'error').length;
-            btn.textContent = `D:${highestDispatchedPage+1}|S:${successCount}|F:${errorCount}`;
+            btn.textContent = `D:${currentPage}|A:${activeRequests}|S:${successCount}|F:${errorCount}`;
         };
 
         return new Promise(resolve => {
-            let resolvePromise = resolve;
+            const resolvePromise = resolve;
 
             const checkForEndCondition = () => {
                 if (stopDispatching) return;
-                for (let i = 0; i <= highestDispatchedPage - CONSECUTIVE_ERROR_THRESHOLD; i++) {
+                // Start checking for a failure sequence from page 0.
+                for (let i = 0; i <= currentPage - CONSECUTIVE_ERROR_THRESHOLD; i++) {
                     let isFailureSequence = true;
                     for (let j = 0; j < CONSECUTIVE_ERROR_THRESHOLD; j++) {
                         if (pageStatus.get(i + j) !== 'error') {
@@ -417,18 +418,22 @@
                     if (isFailureSequence) {
                         logDebug(`End condition met: ${CONSECUTIVE_ERROR_THRESHOLD} failures starting at page ${i}. Halting dispatch.`);
                         stopDispatching = true;
-                        if (activeRequests === 0) resolvePromise();
                         return;
                     }
                 }
             };
 
             const dispatchLoop = () => {
-                if (stopDispatching || highestDispatchedPage >= MAX_PAGES_TO_PROBE - 1) {
+                // Halt condition: Stop signal received OR safety limit hit.
+                if (stopDispatching || currentPage >= MAX_PAGES_SAFETY_LIMIT) {
+                    // If we stopped and no requests are left, the process is over.
+                    if (activeRequests === 0) {
+                        resolvePromise();
+                    }
                     return;
                 }
 
-                const pageToProcess = ++highestDispatchedPage;
+                const pageToProcess = currentPage++;
                 activeRequests++;
                 updateButtonText();
 
@@ -456,16 +461,20 @@
                     onloadend: () => {
                         activeRequests--;
                         updateButtonText();
-                        if (pageStatus.get(pageToProcess) === 'error') {
-                            checkForEndCondition();
-                        }
+                        // CRITICAL: Check for the end condition AFTER this request's status has been set.
+                        checkForEndCondition();
+                        // If the stop flag has been set AND this was the very last pending request, we are done.
                         if (stopDispatching && activeRequests === 0) {
                             resolvePromise();
                         }
                     }
                 });
+
+                // Immediately fire the next iteration of the loop without blocking.
                 setTimeout(dispatchLoop, 0);
             };
+
+            // Start the non-blocking dispatch loop.
             dispatchLoop();
         }).then(() => {
             const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => pageStatus.get(val) === 'success' ? Math.max(max, val) : max, -1) + 1;
@@ -530,7 +539,7 @@
     function createUI() {
         GM_addStyle(`
             /* Inline Chapter OCR Button */
-            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); min-width: 90px; text-align: center; }
+            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); min-width: 110px; text-align: center; }
             .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); }
             .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; background-color: transparent; }
             /* Mobile Overlay */
