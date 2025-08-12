@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.19 - Reckless Mode)
+// @name         Automatic Content OCR (v22.M.19.1 - Reckless Fix)
 // @namespace    http://tampermonkey.net/
-// @version      22.19.0
-// @description  Radical Pre-processing Overhaul: Dispatches OCR requests as fast as possible without concurrency limits for maximum speed, while intelligently detecting the chapter's end.
+// @version      22.19.1
+// @description  Radical Pre-processing Overhaul: Dispatches OCR requests as fast as possible for maximum speed. Now with corrected end-of-chapter detection logic.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -83,7 +83,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.19] ${logEntry}`);
+        console.log(`[OCR v22.M.19.1] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -385,21 +385,21 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (RECKLESS ENGINE V2) ---
+    // --- BATCH PROCESSING & INLINE UI (RECKLESS ENGINE V3 - CORRECTED) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting RECKLESS batch probe from: ${baseUrl}`);
+        logDebug(`Starting RECKLESS V3 (Corrected) batch probe from: ${baseUrl}`);
         const originalText = btn.textContent;
 
         // --- Configuration ---
-        const CONSECUTIVE_ERROR_THRESHOLD = 5;  // Stop after this many consecutive failures.
-        const REQUEST_TIMEOUT = 20000;          // Timeout for each individual request.
-        const MAX_PAGES_TO_PROBE = 300;         // Safety break to prevent infinite loops.
+        const CONSECUTIVE_ERROR_THRESHOLD = 5;
+        const REQUEST_TIMEOUT = 25000;
+        const MAX_PAGES_TO_PROBE = 300; // Safety break.
 
         // --- State ---
         let activeRequests = 0;
         let highestDispatchedPage = -1;
         let stopDispatching = false;
-        const pageStatus = new Map(); // pageNumber -> 'success' | 'error'
+        const pageStatus = new Map();
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
@@ -407,48 +407,43 @@
             btn.textContent = `D:${highestDispatchedPage+1}|S:${successCount}|F:${errorCount}`;
         };
 
-        const hasFoundEnd = () => {
-            if (stopDispatching) return true;
-
-            // Find the lowest page 'i' that starts a sequence of CONSECUTIVE_ERROR_THRESHOLD failures.
-            for (let i = 0; i <= highestDispatchedPage; i++) {
-                let isFailureSequence = true;
-                for (let j = 0; j < CONSECUTIVE_ERROR_THRESHOLD; j++) {
-                    if (pageStatus.get(i + j) !== 'error') {
-                        isFailureSequence = false;
-                        break;
-                    }
-                }
-                if (isFailureSequence) {
-                    logDebug(`Found end condition: ${CONSECUTIVE_ERROR_THRESHOLD} failures starting at page ${i}.`);
-                    stopDispatching = true;
-                    return true;
-                }
-            }
-            return false;
-        };
-
         return new Promise(resolve => {
-            const dispatchLoop = () => {
-                // Stop dispatching new requests?
-                if (hasFoundEnd() || highestDispatchedPage >= MAX_PAGES_TO_PROBE - 1) {
-                    if (activeRequests === 0) {
-                        resolve(); // All done.
+            const checkForEndCondition = () => {
+                if (stopDispatching) return; // Already stopped, no need to check again.
+                // Start checking for a failure sequence from page 0 up to where a full sequence could have formed.
+                for (let i = 0; i <= highestDispatchedPage - CONSECUTIVE_ERROR_THRESHOLD; i++) {
+                    let isFailureSequence = true;
+                    for (let j = 0; j < CONSECUTIVE_ERROR_THRESHOLD; j++) {
+                        if (pageStatus.get(i + j) !== 'error') {
+                            isFailureSequence = false;
+                            break;
+                        }
                     }
-                    // otherwise, wait for pending requests to finish
+                    if (isFailureSequence) {
+                        logDebug(`End condition met: ${CONSECUTIVE_ERROR_THRESHOLD} failures starting at page ${i}. Halting dispatch.`);
+                        stopDispatching = true;
+                        // If there are no more active requests, we can resolve immediately.
+                        if (activeRequests === 0) resolve();
+                        return; // Exit the check
+                    }
+                }
+            };
+
+            const dispatchLoop = () => {
+                // This loop's only job is to fire requests until told to stop.
+                if (stopDispatching || highestDispatchedPage >= MAX_PAGES_TO_PROBE - 1) {
                     return;
                 }
 
-                // Fire off a new request
                 const pageToProcess = ++highestDispatchedPage;
                 activeRequests++;
+                updateButtonText();
 
                 const url = `${baseUrl}${pageToProcess}`;
                 let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
                 if (settings.imageServerUser) {
                     ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
                 }
-                 updateButtonText(); // Update UI immediately
 
                 GM_xmlhttpRequest({
                     method: 'GET', url: ocrRequestUrl, timeout: REQUEST_TIMEOUT,
@@ -458,7 +453,6 @@
                             if (data.error) throw new Error(data.error);
                             PersistentCache.set(url, data);
                             pageStatus.set(pageToProcess, 'success');
-                            logDebug(`Probe Success: Page ${pageToProcess}`);
                         } catch (e) {
                             pageStatus.set(pageToProcess, 'error');
                             logDebug(`Probe Failed (Server Error): Page ${pageToProcess} - ${e.message}`);
@@ -469,29 +463,30 @@
                     onloadend: () => {
                         activeRequests--;
                         updateButtonText();
-                        // If we already decided to stop, check if this was the last pending request.
+                        // CRITICAL: Check for the end condition AFTER this request's status has been set.
+                        checkForEndCondition();
+                        // If the stop flag has been set AND this was the very last pending request, we are done.
                         if (stopDispatching && activeRequests === 0) {
                             resolve();
                         }
                     }
                 });
 
-                // Use setTimeout to avoid freezing the browser UI thread completely.
+                // Use a non-blocking timeout to fire the next iteration of the loop.
                 setTimeout(dispatchLoop, 0);
             };
 
             // Start the dispatch loop.
             dispatchLoop();
         }).then(() => {
-            // This code runs after the main promise resolves.
-            const pagesFound = (stopDispatching ? highestDispatchedPage - CONSECUTIVE_ERROR_THRESHOLD + 1 : highestDispatchedPage + 1);
+            const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => pageStatus.get(val) === 'success' ? Math.max(max, val) : max, -1) + 1;
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
-            logDebug(`Batch probe finished. Detected end of chapter around page ${pagesFound}. Total successful: ${successCount}.`);
+            logDebug(`Batch probe finished. Highest successful page was ~${pagesFound-1}. Total successful: ${successCount}.`);
             btn.textContent = 'Done!';
             btn.style.borderColor = '#27ae60';
-            setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 3000);
+            setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 3500);
             if (btn.id === 'gemini-ocr-batch-chapter-btn') {
-                alert(`Chapter pre-processing complete!\n\nDetected approximately ${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
+                alert(`Chapter pre-processing complete!\n\nDetected ~${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
             }
         });
     }
