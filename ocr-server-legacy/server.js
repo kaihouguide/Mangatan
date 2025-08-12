@@ -1,10 +1,10 @@
-// server.js - V2.5 with Conditional Authentication
+// server.js - V3.0 with Ported Python Features
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
-import fetch from 'node-fetch'; // Required for the auth path
+import fetch from 'node-fetch';
 
 const app = express();
 const port = 3000;
@@ -14,6 +14,9 @@ const CACHE_FILE_PATH = path.join(process.cwd(), 'ocr-cache.json');
 const upload = multer({ dest: 'uploads/' });
 let ocrCache = new Map();
 let ocrRequestsProcessed = 0;
+let activeJobCount = 0; // NEW: Counter for active background jobs
+
+// --- Utility Functions ---
 
 function loadCacheFromFile() {
     try {
@@ -39,6 +42,84 @@ function saveCacheToFile() {
     }
 }
 
+function transformOcrData(lensResult) {
+    if (!lensResult || !lensResult.segments) {
+        return [];
+    }
+    return lensResult.segments.map(segment => {
+        const { text, boundingBox } = segment;
+        return {
+            text: text,
+            tightBoundingBox: {
+                x: boundingBox.centerPerX - (boundingBox.perWidth / 2),
+                y: boundingBox.centerPerY - (boundingBox.perHeight / 2),
+                width: boundingBox.perWidth,
+                height: boundingBox.perHeight,
+            },
+            orientation: 'HORIZONTAL',
+            fontSize: 0.04,
+            confidence: 0.98
+        };
+    });
+}
+
+// --- NEW: Background Job for Chapter Pre-processing ---
+
+async function runChapterProcessingJob(baseUrl, authUser, authPass) {
+    activeJobCount++;
+    console.log(`[JobRunner] Started job for ...${baseUrl.slice(-40)}. Active jobs: ${activeJobCount}`);
+
+    let pageIndex = 0;
+    let consecutiveErrors = 0;
+    const CONSECUTIVE_ERROR_THRESHOLD = 3;
+    const SERVER_URL_BASE = `http://127.0.0.1:${port}`;
+
+    while (consecutiveErrors < CONSECUTIVE_ERROR_THRESHOLD) {
+        const imageUrl = `${baseUrl}${pageIndex}`;
+
+        if (ocrCache.has(imageUrl)) {
+            console.log(`[JobRunner] Skip (in cache): ${imageUrl}`);
+            pageIndex++;
+            consecutiveErrors = 0;
+            continue;
+        }
+
+        const encodedUrl = encodeURIComponent(imageUrl);
+        let targetUrl = `${SERVER_URL_BASE}/ocr?url=${encodedUrl}`;
+        if (authUser) {
+            targetUrl += `&user=${authUser}&pass=${authPass || ''}`;
+        }
+
+        try {
+            console.log(`[JobRunner] Requesting: ${imageUrl}`);
+            const response = await fetch(targetUrl, { timeout: 45000 });
+
+            if (response.ok) {
+                consecutiveErrors = 0;
+            } else {
+                consecutiveErrors++;
+                console.log(`[JobRunner] Got non-200 status (${response.status}) for ${imageUrl}. Errors: ${consecutiveErrors}`);
+                if (response.status === 404) {
+                    console.log("[JobRunner] (Page not found, likely end of chapter)");
+                }
+            }
+        } catch (e) {
+            consecutiveErrors++;
+            console.error(`[JobRunner] Request failed for ${imageUrl}. Errors: ${consecutiveErrors}. Details: ${e.message}`);
+        }
+
+        pageIndex++;
+        await new Promise(resolve => setTimeout(resolve, 100)); // Sleep for 100ms
+    }
+
+    console.log(`[JobRunner] Finished job for ...${baseUrl.slice(-40)}. Reached ${consecutiveErrors} errors.`);
+    activeJobCount--;
+}
+
+
+// --- Middleware & Endpoints ---
+
+app.use(express.json()); // Middleware to parse JSON bodies
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
@@ -51,10 +132,10 @@ app.get('/', (req, res) => {
         message: 'Local OCR server is active.',
         requests_processed: ocrRequestsProcessed,
         items_in_cache: ocrCache.size,
+        active_preprocess_jobs: activeJobCount, // NEW: Added active job count
     });
 });
 
-// The main OCR endpoint
 app.get('/ocr', async (req, res) => {
     const imageUrl = req.query.url;
     const authUser = req.query.user;
@@ -72,49 +153,27 @@ app.get('/ocr', async (req, res) => {
     console.log(`[Cache MISS] Processing new image: ...${imageUrl.slice(-40)}`);
 
     try {
-        let ocrResult; // This will hold the result from either path
-
-        // --- NEW: Conditional Logic ---
+        let ocrResult;
         if (authUser) {
-            // --- AUTHENTICATION PATH ---
             console.log(`[Auth] Credentials detected for user '${authUser}'. Using manual fetch method.`);
-            
-            const fetchOptions = {
-                headers: {
-                    'Authorization': 'Basic ' + Buffer.from(authUser + ":" + authPass).toString('base64')
-                }
-            };
-
+            const fetchOptions = { headers: { 'Authorization': 'Basic ' + Buffer.from(authUser + ":" + (authPass || '')).toString('base64') } };
             const response = await fetch(imageUrl, fetchOptions);
-            if (!response.ok) {
-                throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
-            }
-
+            if (!response.ok) throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
             const imageArrayBuffer = await response.arrayBuffer();
             const imageBuffer = Buffer.from(imageArrayBuffer);
             const mimeType = response.headers.get('content-type');
-            
-            if (!mimeType || !mimeType.startsWith('image/')) {
-                throw new Error(`Invalid content type received: ${mimeType || 'None'}`);
-            }
-            
-            const base64String = imageBuffer.toString('base64');
-            const dataUrl = `data:${mimeType};base64,${base64String}`;
-            
-            console.log(`Image downloaded (${(imageBuffer.length / 1024).toFixed(2)} KB). Performing OCR via Data URL.`);
+            if (!mimeType || !mimeType.startsWith('image/')) throw new Error(`Invalid content type: ${mimeType || 'None'}`);
+            const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
             ocrResult = await lens.scanByURL(dataUrl);
-
         } else {
-            // --- ORIGINAL NON-AUTHENTICATION PATH ---
             console.log("[Auth] No credentials detected. Using direct URL method.");
             ocrResult = await lens.scanByURL(imageUrl);
         }
 
-        // --- Common processing for both paths ---
         console.log(`OCR successful for ...${imageUrl.slice(-40)}. Transforming and caching result.`);
         ocrRequestsProcessed++;
         const transformedResult = transformOcrData(ocrResult);
-        
+
         ocrCache.set(imageUrl, transformedResult);
         saveCacheToFile();
         res.json(transformedResult);
@@ -125,6 +184,28 @@ app.get('/ocr', async (req, res) => {
     }
 });
 
+// NEW: Endpoint to start a chapter pre-processing job
+app.post("/preprocess-chapter", (req, res) => {
+    const { baseUrl, user, pass } = req.body;
+    if (!baseUrl) {
+        return res.status(400).json({ error: "baseUrl is required" });
+    }
+
+    // Run the job in the background without waiting for it to complete
+    runChapterProcessingJob(baseUrl, user, pass);
+
+    console.log(`[Queue] Job started in background for ...${baseUrl.slice(-40)}`);
+    return res.status(202).json({ status: "accepted", message: "Chapter pre-processing job has been started." });
+});
+
+// NEW: Endpoint to purge the cache
+app.post("/purge-cache", (req, res) => {
+    const count = ocrCache.size;
+    ocrCache.clear();
+    saveCacheToFile(); // Persist the empty cache
+    console.log(`[Cache] Purged. Removed ${count} items.`);
+    res.json({ status: "success", message: `Cache purged. Removed ${count} items.` });
+});
 
 app.get('/export-cache', (req, res) => {
     if (fs.existsSync(CACHE_FILE_PATH)) {
@@ -153,36 +234,20 @@ app.post('/import-cache', upload.single('cacheFile'), (req, res) => {
         if (newItemsCount > 0) {
             saveCacheToFile();
         }
-        fs.unlinkSync(uploadedFilePath);
+        fs.unlinkSync(uploadedFilePath); // Clean up uploaded file
         res.json({
             message: `Import successful. Added ${newItemsCount} new items.`,
             total_items_in_cache: ocrCache.size
         });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to import cache.' });
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        res.status(500).json({ error: `Failed to import cache: ${error.message}` });
     }
 });
 
-function transformOcrData(lensResult) {
-    if (!lensResult || !lensResult.segments) {
-        return [];
-    }
-    return lensResult.segments.map(segment => {
-        const { text, boundingBox } = segment;
-        return {
-            text: text,
-            tightBoundingBox: {
-                x: boundingBox.centerPerX - (boundingBox.perWidth / 2),
-                y: boundingBox.centerPerY - (boundingBox.perHeight / 2),
-                width: boundingBox.perWidth,
-                height: boundingBox.perHeight,
-            },
-            orientation: 'HORIZONTAL',
-            fontSize: 0.04,
-            confidence: 0.98
-        };
-    });
-}
+// --- Server Initialization ---
 
 app.listen(port, (err) => {
     if (err) {
@@ -190,7 +255,7 @@ app.listen(port, (err) => {
         console.error(err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V2.5 listening at http://127.0.0.1:${port}`);
-        console.log('Features: Persistent Caching, Import/Export, Conditional Auth Forwarding');
+        console.log(`Local OCR Server V3.0 listening at http://127.0.0.1:${port}`);
+        console.log('Features: Persistent Caching, Import/Export, Conditional Auth, Chapter Pre-processing');
     }
 });
