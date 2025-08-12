@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.19.1 - Reckless Fix)
+// @name         Automatic Content OCR (v22.M.20 - Refined Reckless Engine)
 // @namespace    http://tampermonkey.net/
-// @version      22.19.1
-// @description  Radical Pre-processing Overhaul: Dispatches OCR requests as fast as possible for maximum speed. Now with corrected end-of-chapter detection logic.
+// @version      22.20.0
+// @description  The definitive reckless engine: Dispatches OCR requests at maximum speed while using a refined, asynchronous check to reliably detect the chapter's end.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -83,7 +83,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.19.1] ${logEntry}`);
+        console.log(`[OCR v22.M.20] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -280,7 +280,6 @@
         const data = ocrDataCache.get(targetImg);
         if (!data) return;
 
-        // Mobile-specific overlay: Attach to image's parent for better scrolling behavior.
         const parent = targetImg.parentNode;
         if (!parent) return;
         if (window.getComputedStyle(parent).position === 'static') { parent.style.position = 'relative'; }
@@ -297,12 +296,10 @@
             ocrBox.textContent = item.text;
             ocrBox.dataset.ocrX = item.tightBoundingBox.x; ocrBox.dataset.ocrY = item.tightBoundingBox.y;
             ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
-
             const pixelWidth = item.tightBoundingBox.width * targetImg.naturalWidth;
             const pixelHeight = item.tightBoundingBox.height * targetImg.naturalHeight;
             let isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && pixelHeight > pixelWidth) || (settings.textOrientation === 'serverAngle' && item.orientation === 90);
             if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
-
             Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
             fragment.appendChild(ocrBox);
         });
@@ -364,7 +361,6 @@
                 const rect = img.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) { if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden'); continue; }
 
-                // Mobile-specific: Update position relative to the parent node.
                 const parentRect = state.parentNode.getBoundingClientRect();
                 Object.assign(state.overlay.style, { top: `${rect.top - parentRect.top + state.parentNode.scrollTop}px`, left: `${rect.left - parentRect.left + state.parentNode.scrollLeft}px`, width: `${rect.width}px`, height: `${rect.height}px` });
 
@@ -385,17 +381,15 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (RECKLESS ENGINE V3 - CORRECTED) ---
+    // --- BATCH PROCESSING & INLINE UI (REFINED RECKLESS ENGINE) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting RECKLESS V3 (Corrected) batch probe from: ${baseUrl}`);
+        logDebug(`Starting Refined Reckless batch probe from: ${baseUrl}`);
         const originalText = btn.textContent;
 
-        // --- Configuration ---
         const CONSECUTIVE_ERROR_THRESHOLD = 5;
         const REQUEST_TIMEOUT = 25000;
-        const MAX_PAGES_TO_PROBE = 300; // Safety break.
+        const MAX_PAGES_TO_PROBE = 300;
 
-        // --- State ---
         let activeRequests = 0;
         let highestDispatchedPage = -1;
         let stopDispatching = false;
@@ -408,9 +402,10 @@
         };
 
         return new Promise(resolve => {
+            let resolvePromise = resolve;
+
             const checkForEndCondition = () => {
-                if (stopDispatching) return; // Already stopped, no need to check again.
-                // Start checking for a failure sequence from page 0 up to where a full sequence could have formed.
+                if (stopDispatching) return;
                 for (let i = 0; i <= highestDispatchedPage - CONSECUTIVE_ERROR_THRESHOLD; i++) {
                     let isFailureSequence = true;
                     for (let j = 0; j < CONSECUTIVE_ERROR_THRESHOLD; j++) {
@@ -422,15 +417,13 @@
                     if (isFailureSequence) {
                         logDebug(`End condition met: ${CONSECUTIVE_ERROR_THRESHOLD} failures starting at page ${i}. Halting dispatch.`);
                         stopDispatching = true;
-                        // If there are no more active requests, we can resolve immediately.
-                        if (activeRequests === 0) resolve();
-                        return; // Exit the check
+                        if (activeRequests === 0) resolvePromise();
+                        return;
                     }
                 }
             };
 
             const dispatchLoop = () => {
-                // This loop's only job is to fire requests until told to stop.
                 if (stopDispatching || highestDispatchedPage >= MAX_PAGES_TO_PROBE - 1) {
                     return;
                 }
@@ -463,20 +456,16 @@
                     onloadend: () => {
                         activeRequests--;
                         updateButtonText();
-                        // CRITICAL: Check for the end condition AFTER this request's status has been set.
-                        checkForEndCondition();
-                        // If the stop flag has been set AND this was the very last pending request, we are done.
+                        if (pageStatus.get(pageToProcess) === 'error') {
+                            checkForEndCondition();
+                        }
                         if (stopDispatching && activeRequests === 0) {
-                            resolve();
+                            resolvePromise();
                         }
                     }
                 });
-
-                // Use a non-blocking timeout to fire the next iteration of the loop.
                 setTimeout(dispatchLoop, 0);
             };
-
-            // Start the dispatch loop.
             dispatchLoop();
         }).then(() => {
             const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => pageStatus.get(val) === 'success' ? Math.max(max, val) : max, -1) + 1;
