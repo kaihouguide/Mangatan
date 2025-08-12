@@ -267,7 +267,9 @@ def import_cache_endpoint():
     if not (file.filename and file.filename.endswith(".json")):
         return jsonify({"error": "Invalid file."}), 400
     try:
-        imported_data = json.load(file)
+        # read() method exists but might not get recognized by Pylance
+        imported_data = json.loads(file.read().decode("utf-8"))
+
         if not isinstance(imported_data, dict):
             return jsonify({"error": "Invalid cache format."}), 400
         with cache_lock:
@@ -297,13 +299,18 @@ def import_cache_endpoint():
 def main():
     global ocr_engine, is_debug_mode
     parser = argparse.ArgumentParser(description="Run the Python OCR Server.")
-    parser.add_argument("-d", "--debug", action="store_true", help="enable debug mode")
+    parser.add_argument(
+        "-d",
+        "--debug",
+        action="store_true",
+        help="enable debug mode for more verbose output",
+    )
     parser.add_argument(
         "-e",
         "--engine",
         type=str,
         default="lens",
-        help="OCR engine to use ('lens', 'oneocr')",
+        help="OCR engine to use. Default is lens. Available: 'lens', 'oneocr'",
     )
     args = parser.parse_args()
     is_debug_mode = args.debug
