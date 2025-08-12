@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.18 - Synced & Refactored)
+// @name         Automatic Content OCR (v22.M.19 - Reckless Mode)
 // @namespace    http://tampermonkey.net/
-// @version      22.18.1
-// @description  Synchronizes core logic with the latest PC version, preserving mobile-specific interactions and performance optimizations. Features a new high-speed concurrent pre-processing engine.
+// @version      22.19.0
+// @description  Radical Pre-processing Overhaul: Dispatches OCR requests as fast as possible without concurrency limits for maximum speed, while intelligently detecting the chapter's end.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -83,7 +83,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.18] ${logEntry}`);
+        console.log(`[OCR v22.M.19] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -385,44 +385,40 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (RECKLESS REFACTOR) ---
+    // --- BATCH PROCESSING & INLINE UI (RECKLESS ENGINE V2) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting reckless batch probe from: ${baseUrl}`);
+        logDebug(`Starting RECKLESS batch probe from: ${baseUrl}`);
         const originalText = btn.textContent;
 
         // --- Configuration ---
-        const MAX_CONCURRENT_REQUESTS = 8;    // How many requests to run in parallel.
         const CONSECUTIVE_ERROR_THRESHOLD = 5;  // Stop after this many consecutive failures.
-        const REQUEST_TIMEOUT = 30000;          // Timeout for each individual request.
+        const REQUEST_TIMEOUT = 20000;          // Timeout for each individual request.
+        const MAX_PAGES_TO_PROBE = 300;         // Safety break to prevent infinite loops.
 
         // --- State ---
         let activeRequests = 0;
-        let currentPage = 0;
+        let highestDispatchedPage = -1;
         let stopDispatching = false;
         const pageStatus = new Map(); // pageNumber -> 'success' | 'error'
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
             const errorCount = Array.from(pageStatus.values()).filter(v => v === 'error').length;
-            btn.textContent = `P:${currentPage}|S:${successCount}|F:${errorCount}`;
+            btn.textContent = `D:${highestDispatchedPage+1}|S:${successCount}|F:${errorCount}`;
         };
 
-        // This function is the key. It checks if we have found the end of the chapter.
         const hasFoundEnd = () => {
-            if (stopDispatching) return true; // Already decided to stop.
+            if (stopDispatching) return true;
 
-            // Find the lowest page number 'i' that starts a sequence of CONSECUTIVE_ERROR_THRESHOLD failures.
-            for (let i = 0; i < currentPage; i++) {
+            // Find the lowest page 'i' that starts a sequence of CONSECUTIVE_ERROR_THRESHOLD failures.
+            for (let i = 0; i <= highestDispatchedPage; i++) {
                 let isFailureSequence = true;
                 for (let j = 0; j < CONSECUTIVE_ERROR_THRESHOLD; j++) {
-                    // If any page in the sequence has not *explicitly* failed yet,
-                    // then we cannot confirm this is a failure sequence.
                     if (pageStatus.get(i + j) !== 'error') {
                         isFailureSequence = false;
                         break;
                     }
                 }
-
                 if (isFailureSequence) {
                     logDebug(`Found end condition: ${CONSECUTIVE_ERROR_THRESHOLD} failures starting at page ${i}.`);
                     stopDispatching = true;
@@ -433,69 +429,64 @@
         };
 
         return new Promise(resolve => {
-            const dispatchNext = () => {
-                // Stop dispatching new requests if we've hit the end or are at the concurrent limit.
-                while (activeRequests < MAX_CONCURRENT_REQUESTS && !hasFoundEnd()) {
-                    const pageToProcess = currentPage++;
-                    activeRequests++;
-
-                    const url = `${baseUrl}${pageToProcess}`;
-                    let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
-                    if (settings.imageServerUser) {
-                        ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
+            const dispatchLoop = () => {
+                // Stop dispatching new requests?
+                if (hasFoundEnd() || highestDispatchedPage >= MAX_PAGES_TO_PROBE - 1) {
+                    if (activeRequests === 0) {
+                        resolve(); // All done.
                     }
+                    // otherwise, wait for pending requests to finish
+                    return;
+                }
 
-                    GM_xmlhttpRequest({
-                        method: 'GET',
-                        url: ocrRequestUrl,
-                        timeout: REQUEST_TIMEOUT,
-                        onload: (res) => {
-                            try {
-                                const data = JSON.parse(res.responseText);
-                                if (data.error) throw new Error(data.error);
-                                PersistentCache.set(url, data);
-                                pageStatus.set(pageToProcess, 'success');
-                                logDebug(`Probe Success: Page ${pageToProcess}`);
-                            } catch (e) {
-                                pageStatus.set(pageToProcess, 'error');
-                                logDebug(`Probe Failed (Server Error): Page ${pageToProcess} - ${e.message}`);
-                            }
-                        },
-                        onerror: () => {
+                // Fire off a new request
+                const pageToProcess = ++highestDispatchedPage;
+                activeRequests++;
+
+                const url = `${baseUrl}${pageToProcess}`;
+                let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
+                if (settings.imageServerUser) {
+                    ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
+                }
+                 updateButtonText(); // Update UI immediately
+
+                GM_xmlhttpRequest({
+                    method: 'GET', url: ocrRequestUrl, timeout: REQUEST_TIMEOUT,
+                    onload: (res) => {
+                        try {
+                            const data = JSON.parse(res.responseText);
+                            if (data.error) throw new Error(data.error);
+                            PersistentCache.set(url, data);
+                            pageStatus.set(pageToProcess, 'success');
+                            logDebug(`Probe Success: Page ${pageToProcess}`);
+                        } catch (e) {
                             pageStatus.set(pageToProcess, 'error');
-                            logDebug(`Probe Failed (Connection Error): Page ${pageToProcess}`);
-                        },
-                        ontimeout: () => {
-                            pageStatus.set(pageToProcess, 'error');
-                            logDebug(`Probe Failed (Timeout): Page ${pageToProcess}`);
-                        },
-                        onloadend: () => {
-                            activeRequests--;
-                            updateButtonText();
-                            // Check if we are all done.
-                            if (hasFoundEnd() && activeRequests === 0) {
-                                resolve();
-                            } else {
-                                // Dispatch another request to take the place of the one that just finished.
-                                dispatchNext();
-                            }
+                            logDebug(`Probe Failed (Server Error): Page ${pageToProcess} - ${e.message}`);
                         }
-                    });
-                }
-                // If we stopped dispatching because of the end condition, and there are no active requests, we must be done.
-                if (stopDispatching && activeRequests === 0) {
-                    resolve();
-                }
+                    },
+                    onerror: () => { pageStatus.set(pageToProcess, 'error'); logDebug(`Probe Failed (Connection Error): Page ${pageToProcess}`); },
+                    ontimeout: () => { pageStatus.set(pageToProcess, 'error'); logDebug(`Probe Failed (Timeout): Page ${pageToProcess}`); },
+                    onloadend: () => {
+                        activeRequests--;
+                        updateButtonText();
+                        // If we already decided to stop, check if this was the last pending request.
+                        if (stopDispatching && activeRequests === 0) {
+                            resolve();
+                        }
+                    }
+                });
+
+                // Use setTimeout to avoid freezing the browser UI thread completely.
+                setTimeout(dispatchLoop, 0);
             };
 
-            // Start the process by dispatching the initial batch of requests.
-            updateButtonText();
-            dispatchNext();
+            // Start the dispatch loop.
+            dispatchLoop();
         }).then(() => {
             // This code runs after the main promise resolves.
-            const pagesFound = currentPage - CONSECUTIVE_ERROR_THRESHOLD;
+            const pagesFound = (stopDispatching ? highestDispatchedPage - CONSECUTIVE_ERROR_THRESHOLD + 1 : highestDispatchedPage + 1);
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
-            logDebug(`Batch probe finished. Detected end of chapter after page ${pagesFound - 1}. Total successful: ${successCount}.`);
+            logDebug(`Batch probe finished. Detected end of chapter around page ${pagesFound}. Total successful: ${successCount}.`);
             btn.textContent = 'Done!';
             btn.style.borderColor = '#27ae60';
             setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 3000);
@@ -555,7 +546,7 @@
     function createUI() {
         GM_addStyle(`
             /* Inline Chapter OCR Button */
-            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); }
+            .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); min-width: 90px; text-align: center; }
             .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); }
             .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; background-color: transparent; }
             /* Mobile Overlay */
