@@ -127,8 +127,16 @@ For Android users, you'll need **Termux**.
     *   In **another Termux session**, run the single command below. It has been revised to be more stable and will download the server, install all dependencies by correctly forcing the platform compatibility for Termux, and create a handy `mangatan` startup command.
     *   Copy the entire command block and paste it into your Termux terminal, then press Enter.
     > ```sh
-    > pkg update && pkg upgrade -y && rm -rf ~/Mangatan && pkg install -y git uv && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/ocr-server && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/ocr-server && uv run server.py' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
-    
+    > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/ocr-server-legacy && npm install express chrome-lens-ocr multer node-fetch --force && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/ocr-server-legacy && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
+    > ```
+    *   After the command above finishes, run these next commands **one-by-one** to finalize the installation.
+        > ```sh
+        > npm install --cpu=wasm32 sharp
+        > npm install @img/sharp-wasm32 --force
+        > rm -rf node_modules package-lock.json
+        > npm install --force
+        > ```
+    > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
 
 ### 💡 Usage
 *   Open Termux and write `suwayomi`, swipe right to open a new session, and write `mangatan`. Then go to `127.0.0.1:4567` and start reading.
