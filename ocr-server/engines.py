@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from math import pi
-from typing import TypedDict
+from typing import TypedDict, Literal
 from platform import system
 
 import chrome_lens_py
@@ -44,7 +44,9 @@ class Engine(ABC):
     """
 
     @abstractmethod
-    async def ocr(self, img: Image) -> list[Bubble]:
+    async def ocr(
+        self, img: Image, output_format: Literal["paragraphs", "lines"]
+    ) -> list[Bubble]:
         pass
 
 
@@ -57,7 +59,7 @@ class OneOCR(Engine):
         # The pixel overlap between chunks to prevent cutting text in half.
         self.OVERLAP = 150
 
-    async def ocr(self, img):
+    async def ocr(self, img, output_format: str = "lines"):
         chunk_image = self.process_image(img)
         return chunk_image
 
@@ -150,52 +152,91 @@ class GoogleLens(Engine):
     def __init__(self):
         self.engine = chrome_lens_py.LensAPI()
 
-    async def ocr(self, img):
-        result = await self.engine.process_image(image_path=img, ocr_language="ja")
-        return self.transform(result)
+    async def ocr(self, img, output_format: str = "lines"):
+        # Done like this or else pylance will complain
+        api_output_format: str
+        if output_format == "paragraphs":
+            api_output_format = "blocks"
+        else:
+            api_output_format = "full_text"
+
+        result = await self.engine.process_image(
+            image_path=img, ocr_language="ja", output_format=api_output_format
+        )
+        return self.transform(result, output_format)
 
     # TODO: Refactor when chrome_lens_py supports lines output_format
-    def transform(self, result: dict) -> list[Bubble]:
-        if result["ocr_text"] == "":
+    def transform(self, result: dict, output_format) -> list[Bubble]:
+        if result["word_data"] == "":
             return []
 
         output_json: list[Bubble] = []
-        response: LensOverlayObjectsResponse = result["raw_response_objects"]
 
-        # The library has parsed fields for us, but we'll have to manually parse
-        # the raw response for individual line geometry for now
-        for paragraph in response.text.text_layout.paragraphs:
-            for line in paragraph.lines:
-                line_text = (
-                    "".join(
-                        word.plain_text + (word.text_separator or "")
-                        for word in line.words
+        if output_format == "lines":
+            response: LensOverlayObjectsResponse = result["raw_response_objects"]
+
+            # The library has parsed fields for us, but we'll have to manually parse
+            # the raw response for individual line geometry for now
+            for paragraph in response.text.text_layout.paragraphs:
+                for line in paragraph.lines:
+                    line_text = (
+                        "".join(
+                            word.plain_text + (word.text_separator or "")
+                            for word in line.words
+                        )
+                        .strip()
+                        .replace("･･･", "…")
                     )
-                    .strip()
-                    .replace("･･･", "…")
-                )
-                geometry = line.geometry
+                    geometry = line.geometry
 
-                bounding_box = geometry.bounding_box
-                center_x = bounding_box.center_x
-                center_y = bounding_box.center_y
-                width = bounding_box.width
-                height = bounding_box.height
-                rotation_z = bounding_box.rotation_z
+                    bounding_box = geometry.bounding_box
+                    center_x = bounding_box.center_x
+                    center_y = bounding_box.center_y
+                    width = bounding_box.width
+                    height = bounding_box.height
+                    rotation_z = bounding_box.rotation_z
+
+                    bubble = Bubble(
+                        text=line_text,
+                        tightBoundingBox=BoundingBox(
+                            x=center_x - width / 2,
+                            y=center_y - height / 2,
+                            width=width,
+                            height=height,
+                        ),
+                        orientation=round(rotation_z * (180 / pi), 1),
+                        font_size=0.04,
+                        confidence=0.98,
+                    )
+                    output_json.append(bubble)
+
+        elif output_format == "paragraphs":
+            paragraphs = result["text_blocks"]
+            print(paragraphs)
+            for paragraph in paragraphs:
+                text = paragraph["text"]
+                geometry = paragraph["geometry"]
+
+                center_x = geometry["center_x"]
+                center_y = geometry["center_y"]
+                width = geometry["width"]
+                height = geometry["height"]
+                angle_deg = geometry["angle_deg"]
 
                 bubble = Bubble(
-                    text=line_text,
+                    text=text,
                     tightBoundingBox=BoundingBox(
                         x=center_x - width / 2,
                         y=center_y - height / 2,
                         width=width,
                         height=height,
                     ),
-                    orientation=round(rotation_z * (180 / pi), 1),
+                    orientation=round(angle_deg, 1),
                     font_size=0.04,
                     confidence=0.98,
                 )
                 output_json.append(bubble)
+                # print(bubble)
 
         return output_json
 
@@ -206,7 +247,7 @@ class AppleVision(Engine):
         print("AppleVision is not implemented yet")
         self.engine = object()
 
-    async def ocr(self, img: Image) -> list[Bubble]:
+    async def ocr(self, img: Image, output_format: str) -> list[Bubble]:
         print("AppleVision is not implemented yet")
         return []
 
