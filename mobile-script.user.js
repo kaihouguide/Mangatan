@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (v23.M.1 - Continuous Probe Engine)
 // @namespace    http://tampermonkey.net/
-// @version      23.1.0
-// @description  Uses a continuous probe engine to dispatch OCR requests. Manages concurrency and stops automatically when the end of a chapter is detected by consecutive errors. No more arbitrary batch limits.
+// @version      23.1.1
+// @description  Uses a continuous probe engine to dispatch OCR requests concurrently. Manages concurrency and stops automatically when the end of a chapter is detected.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -390,6 +390,7 @@
         const MAX_CONCURRENT_REQUESTS = 50; // Controls how many requests are active at once.
         const CONSECUTIVE_ERROR_THRESHOLD = 5; // How many failed pages in a row signal the end of a chapter.
         const REQUEST_TIMEOUT = 30000;
+        const DISPATCH_INTERVAL = 50; // How often (in ms) the manager checks to dispatch new requests.
 
         // --- State ---
         let activeRequests = 0;
@@ -397,6 +398,7 @@
         let nextPageToProcess = 0;
         let terminationTriggered = false; // Flag to stop dispatching new requests.
         let promiseResolver; // To hold the 'resolve' function of the main promise.
+        let managerIntervalId = null;
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
@@ -407,6 +409,10 @@
 
         const finalize = () => {
             if (!promiseResolver) return; // Ensure it's only called once.
+            if (managerIntervalId) {
+                clearInterval(managerIntervalId);
+                managerIntervalId = null;
+            }
 
             const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => {
                 return pageStatus.get(val) === 'success' ? Math.max(max, val) : max;
@@ -422,41 +428,6 @@
             }
             promiseResolver();
             promiseResolver = null; // Prevent re-resolution.
-        };
-
-        const checkTerminationAndDispatch = () => {
-            // Step 1: Check if we should stop sending *new* requests.
-            if (!terminationTriggered) {
-                // Scan backwards from the latest known page for consecutive errors.
-                let consecutiveErrors = 0;
-                let lastCheckedPage = nextPageToProcess - 1;
-                for (let i = lastCheckedPage; i >= 0; i--) {
-                    const status = pageStatus.get(i);
-                    if (status === 'error') {
-                        consecutiveErrors++;
-                    } else if (status === 'success') {
-                        // A single success breaks the chain of *consecutive* errors from the end.
-                        break;
-                    }
-                    // 'pending' status is ignored in this check.
-                    if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
-                        logDebug(`Termination triggered: Found ${consecutiveErrors} consecutive errors ending at page ${i}.`);
-                        terminationTriggered = true;
-                        break;
-                    }
-                }
-            }
-
-            // Step 2: Dispatch new requests if the pool has space and we haven't triggered termination.
-            while (activeRequests < MAX_CONCURRENT_REQUESTS && !terminationTriggered) {
-                dispatchRequest(nextPageToProcess++);
-            }
-
-            // Step 3: If termination is triggered and all active requests are finished, end the process.
-            if (terminationTriggered && activeRequests === 0) {
-                logDebug("All active requests finished after termination trigger. Finalizing.");
-                finalize();
-            }
         };
 
         const dispatchRequest = (pageIndex) => {
@@ -494,17 +465,47 @@
                 onloadend: () => {
                     activeRequests--;
                     updateButtonText();
-                    // Check status and potentially dispatch more or finalize.
-                    checkTerminationAndDispatch();
+                    // The manager interval will handle dispatching new work.
                 }
             });
         };
 
+        const managerLoop = () => {
+            // Step 1: Check if we should stop sending *new* requests.
+            if (!terminationTriggered) {
+                let consecutiveErrors = 0;
+                let lastCheckedPage = nextPageToProcess - 1;
+                for (let i = lastCheckedPage; i >= 0; i--) {
+                    const status = pageStatus.get(i);
+                    if (status === 'error') {
+                        consecutiveErrors++;
+                    } else if (status === 'success') {
+                        break;
+                    }
+                    if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
+                        logDebug(`Termination triggered: Found ${consecutiveErrors} consecutive errors ending at page ${i}.`);
+                        terminationTriggered = true;
+                        break;
+                    }
+                }
+            }
+
+            // Step 2: Dispatch new requests if the pool has space and we haven't triggered termination.
+            while (activeRequests < MAX_CONCURRENT_REQUESTS && !terminationTriggered) {
+                dispatchRequest(nextPageToProcess++);
+            }
+
+            // Step 3: If termination is triggered and all active requests are finished, end the process.
+            if (terminationTriggered && activeRequests === 0) {
+                logDebug("All active requests finished after termination trigger. Finalizing.");
+                finalize();
+            }
+        };
+
         return new Promise(resolve => {
             promiseResolver = resolve;
-            // Kick off the initial batch of requests.
             logDebug(`Starting continuous probe with concurrency of ${MAX_CONCURRENT_REQUESTS} and error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}.`);
-            checkTerminationAndDispatch();
+            managerIntervalId = setInterval(managerLoop, DISPATCH_INTERVAL);
         }).then(() => {
             logDebug("runProbingProcess promise resolved.");
         });
