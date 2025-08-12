@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v22.M.22.1 - Dynamic Dispatch Engine)
+// @name         Automatic Content OCR (v22.M.23 - True Barrage Engine)
 // @namespace    http://tampermonkey.net/
-// @version      22.22.1
-// @description  The definitive pre-processor: Uses a non-blocking loop to dispatch requests at maximum speed, now with a more sensitive 3-failure threshold for end-of-chapter detection.
+// @version      22.23.0
+// @description  The final pre-processor. Dispatches all requests in a single, synchronous barrage for maximum possible speed. End-of-chapter is determined as results arrive. No more sequential dispatch.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -83,7 +83,7 @@
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v22.M.22.1] ${logEntry}`);
+        console.log(`[OCR v22.M.23] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
@@ -381,61 +381,33 @@
         }
     }
 
-    // --- BATCH PROCESSING & INLINE UI (DYNAMIC DISPATCH ENGINE) ---
+    // --- BATCH PROCESSING & INLINE UI (TRUE BARRAGE ENGINE) ---
     async function runProbingProcess(baseUrl, btn) {
-        logDebug(`Starting DYNAMIC DISPATCH ENGINE probe from: ${baseUrl}`);
+        logDebug(`Starting TRUE BARRAGE ENGINE probe from: ${baseUrl}`);
         const originalText = btn.textContent;
 
-        const CONSECUTIVE_ERROR_THRESHOLD = 3; // <-- SENSITIVITY ADJUSTED
-        const REQUEST_TIMEOUT = 25000;
-        const MAX_PAGES_SAFETY_LIMIT = 400;
+        const CONSECUTIVE_ERROR_THRESHOLD = 3;
+        const REQUEST_TIMEOUT = 30000;
+        const BARRAGE_SIZE = 200; // Defines how many pages to request in the initial wave.
 
         let activeRequests = 0;
-        let currentPage = 0;
-        let stopDispatching = false;
         const pageStatus = new Map();
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
             const errorCount = Array.from(pageStatus.values()).filter(v => v === 'error').length;
-            btn.textContent = `D:${currentPage}|A:${activeRequests}|S:${successCount}|F:${errorCount}`;
+            btn.textContent = `A:${activeRequests}|S:${successCount}|F:${errorCount}`;
         };
 
         return new Promise(resolve => {
-            const resolvePromise = resolve;
+            if (BARRAGE_SIZE === 0) {
+                resolve();
+                return;
+            }
 
-            const checkForEndCondition = () => {
-                if (stopDispatching) return;
-                // Start checking for a failure sequence from page 0.
-                for (let i = 0; i <= currentPage - CONSECUTIVE_ERROR_THRESHOLD; i++) {
-                    let isFailureSequence = true;
-                    for (let j = 0; j < CONSECUTIVE_ERROR_THRESHOLD; j++) {
-                        if (pageStatus.get(i + j) !== 'error') {
-                            isFailureSequence = false;
-                            break;
-                        }
-                    }
-                    if (isFailureSequence) {
-                        logDebug(`End condition met: ${CONSECUTIVE_ERROR_THRESHOLD} failures starting at page ${i}. Halting dispatch.`);
-                        stopDispatching = true;
-                        return;
-                    }
-                }
-            };
-
-            const dispatchLoop = () => {
-                // Halt condition: Stop signal received OR safety limit hit.
-                if (stopDispatching || currentPage >= MAX_PAGES_SAFETY_LIMIT) {
-                    // If we stopped and no requests are left, the process is over.
-                    if (activeRequests === 0) {
-                        resolvePromise();
-                    }
-                    return;
-                }
-
-                const pageToProcess = currentPage++;
+            // The Barrage: A single, synchronous for-loop to dispatch everything at once.
+            for (let pageToProcess = 0; pageToProcess < BARRAGE_SIZE; pageToProcess++) {
                 activeRequests++;
-                updateButtonText();
 
                 const url = `${baseUrl}${pageToProcess}`;
                 let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(url)}`;
@@ -453,33 +425,35 @@
                             pageStatus.set(pageToProcess, 'success');
                         } catch (e) {
                             pageStatus.set(pageToProcess, 'error');
-                            logDebug(`Probe Failed (Server Error): Page ${pageToProcess} - ${e.message}`);
                         }
                     },
-                    onerror: () => { pageStatus.set(pageToProcess, 'error'); logDebug(`Probe Failed (Connection Error): Page ${pageToProcess}`); },
-                    ontimeout: () => { pageStatus.set(pageToProcess, 'error'); logDebug(`Probe Failed (Timeout): Page ${pageToProcess}`); },
+                    onerror: () => { pageStatus.set(pageToProcess, 'error'); },
+                    ontimeout: () => { pageStatus.set(pageToProcess, 'error'); },
                     onloadend: () => {
                         activeRequests--;
+                        if (pageStatus.get(pageToProcess) === 'error') {
+                            logDebug(`Probe Failed: Page ${pageToProcess}`);
+                        }
                         updateButtonText();
-                        // CRITICAL: Check for the end condition AFTER this request's status has been set.
-                        checkForEndCondition();
-                        // If the stop flag has been set AND this was the very last pending request, we are done.
-                        if (stopDispatching && activeRequests === 0) {
-                            resolvePromise();
+
+                        if (activeRequests === 0) {
+                            logDebug("All barrage requests have completed.");
+                            resolve();
                         }
                     }
                 });
+            }
+            logDebug(`Dispatched a barrage of ${BARRAGE_SIZE} requests.`);
+            updateButtonText();
 
-                // Immediately fire the next iteration of the loop without blocking.
-                setTimeout(dispatchLoop, 0);
-            };
-
-            // Start the non-blocking dispatch loop.
-            dispatchLoop();
         }).then(() => {
-            const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => pageStatus.get(val) === 'success' ? Math.max(max, val) : max, -1) + 1;
+            // Post-analysis to find the last successful page.
+            const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => {
+                return pageStatus.get(val) === 'success' ? Math.max(max, val) : max;
+            }, -1) + 1; // +1 because pages are 0-indexed.
+
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
-            logDebug(`Batch probe finished. Highest successful page was ~${pagesFound-1}. Total successful: ${successCount}.`);
+            logDebug(`Barrage complete. Highest successful page was ~${pagesFound-1}. Total successful: ${successCount}.`);
             btn.textContent = 'Done!';
             btn.style.borderColor = '#27ae60';
             setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 3500);
