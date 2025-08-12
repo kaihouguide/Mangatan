@@ -297,7 +297,7 @@
             ocrBox.dataset.ocrX = item.tightBoundingBox.x; ocrBox.dataset.ocrY = item.tightBoundingBox.y;
             ocrBox.dataset.ocrWidth = item.tightBoundingBox.width; ocrBox.dataset.ocrHeight = item.tightBoundingBox.height;
             const pixelWidth = item.tightBoundingBox.width * targetImg.naturalWidth;
-            const pixelHeight = item.tightBoundingBox.height * targetImg.naturalHeight;
+            const pixelHeight = item.tightBoundingBox.height * targetImg.naturalWidth;
             let isVertical = (settings.textOrientation === 'forceVertical') || (settings.textOrientation === 'smart' && pixelHeight > pixelWidth) || (settings.textOrientation === 'serverAngle' && item.orientation === 90);
             if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
             Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
@@ -387,18 +387,17 @@
         const originalText = btn.textContent;
 
         // --- Configuration ---
-        const MAX_CONCURRENT_REQUESTS = 50; // Controls how many requests are active at once.
-        const CONSECUTIVE_ERROR_THRESHOLD = 5; // How many failed pages in a row signal the end of a chapter.
+        const MAX_CONCURRENT_REQUESTS = 50;
+        const CONSECUTIVE_ERROR_THRESHOLD = 3; // Changed from 5 to 3 as requested
         const REQUEST_TIMEOUT = 30000;
-        const DISPATCH_INTERVAL = 50; // How often (in ms) the manager checks to dispatch new requests.
 
         // --- State ---
         let activeRequests = 0;
-        const pageStatus = new Map(); // Stores the status ('success', 'error', 'pending') of each page index.
-        let nextPageToProcess = 0;
-        let terminationTriggered = false; // Flag to stop dispatching new requests.
-        let promiseResolver; // To hold the 'resolve' function of the main promise.
-        let managerIntervalId = null;
+        const pageStatus = new Map(); // 'success', 'error', 'pending'
+        let nextPageToDispatch = 0;
+        let highestCompletedPage = -1; // Track the highest page we've gotten a response for
+        let terminationTriggered = false;
+        let promiseResolver;
 
         const updateButtonText = () => {
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
@@ -407,30 +406,57 @@
             btn.textContent = `P:${pendingCount}|S:${successCount}|F:${errorCount}`;
         };
 
-        const finalize = () => {
-            if (!promiseResolver) return; // Ensure it's only called once.
-            if (managerIntervalId) {
-                clearInterval(managerIntervalId);
-                managerIntervalId = null;
+        const checkTerminationCondition = () => {
+            if (terminationTriggered) return;
+
+            // Only check for termination starting from page 3 to avoid premature termination
+            if (highestCompletedPage < 2) return;
+
+            // Check the last 3 consecutive pages for failures
+            let consecutiveErrors = 0;
+            for (let i = highestCompletedPage; i >= Math.max(0, highestCompletedPage - 2); i--) {
+                const status = pageStatus.get(i);
+                if (status === 'error') {
+                    consecutiveErrors++;
+                } else if (status === 'success') {
+                    break; // Found a success, reset count
+                }
             }
 
-            const pagesFound = Array.from(pageStatus.keys()).reduce((max, val) => {
-                return pageStatus.get(val) === 'success' ? Math.max(max, val) : max;
-            }, -1) + 1;
+            if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
+                logDebug(`Termination triggered: Found ${consecutiveErrors} consecutive errors ending at page ${highestCompletedPage}.`);
+                terminationTriggered = true;
+            }
+        };
+
+        const finalize = () => {
+            if (!promiseResolver) return;
+
+            const pagesFound = Array.from(pageStatus.entries())
+                .filter(([_, status]) => status === 'success')
+                .reduce((max, [page, _]) => Math.max(max, page), -1) + 1;
 
             const successCount = Array.from(pageStatus.values()).filter(v => v === 'success').length;
-            logDebug(`Probe complete. Highest successful page was ~${pagesFound-1}. Total successful: ${successCount}.`);
+            logDebug(`Probe complete. Highest successful page was ${pagesFound - 1}. Total successful: ${successCount}.`);
+
             btn.textContent = 'Done!';
             btn.style.borderColor = '#27ae60';
-            setTimeout(() => { btn.textContent = originalText; btn.style.borderColor = ''; }, 3500);
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.borderColor = '';
+            }, 3500);
+
             if (btn.id === 'gemini-ocr-batch-chapter-btn') {
                 alert(`Chapter pre-processing complete!\n\nDetected ~${pagesFound} pages.\nSuccessfully processed: ${successCount}`);
             }
+
             promiseResolver();
-            promiseResolver = null; // Prevent re-resolution.
+            promiseResolver = null;
         };
 
         const dispatchRequest = (pageIndex) => {
+            if (terminationTriggered) return;
+
             activeRequests++;
             pageStatus.set(pageIndex, 'pending');
             updateButtonText();
@@ -442,13 +468,16 @@
             }
 
             GM_xmlhttpRequest({
-                method: 'GET', url: ocrRequestUrl, timeout: REQUEST_TIMEOUT,
+                method: 'GET',
+                url: ocrRequestUrl,
+                timeout: REQUEST_TIMEOUT,
                 onload: (res) => {
                     try {
                         const data = JSON.parse(res.responseText);
                         if (data.error) throw new Error(data.error);
                         PersistentCache.set(url, data);
                         pageStatus.set(pageIndex, 'success');
+                        logDebug(`OCR success for page ${pageIndex}`);
                     } catch (e) {
                         logDebug(`Probe Error on page ${pageIndex}: ${e.message}`);
                         pageStatus.set(pageIndex, 'error');
@@ -464,48 +493,49 @@
                 },
                 onloadend: () => {
                     activeRequests--;
+                    highestCompletedPage = Math.max(highestCompletedPage, pageIndex);
                     updateButtonText();
-                    // The manager interval will handle dispatching new work.
+
+                    // Check termination condition after each request completes
+                    checkTerminationCondition();
+
+                    // If termination triggered and no more active requests, finalize
+                    if (terminationTriggered && activeRequests === 0) {
+                        logDebug("All active requests finished after termination trigger. Finalizing.");
+                        finalize();
+                        return;
+                    }
+
+                    // Keep dispatching new requests to maintain concurrency
+                    fillRequestPool();
                 }
             });
         };
 
-        const managerLoop = () => {
-            // Step 1: Check if we should stop sending *new* requests.
-            if (!terminationTriggered) {
-                let consecutiveErrors = 0;
-                let lastCheckedPage = nextPageToProcess - 1;
-                for (let i = lastCheckedPage; i >= 0; i--) {
-                    const status = pageStatus.get(i);
-                    if (status === 'error') {
-                        consecutiveErrors++;
-                    } else if (status === 'success') {
-                        break;
-                    }
-                    if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
-                        logDebug(`Termination triggered: Found ${consecutiveErrors} consecutive errors ending at page ${i}.`);
-                        terminationTriggered = true;
-                        break;
-                    }
-                }
-            }
-
-            // Step 2: Dispatch new requests if the pool has space and we haven't triggered termination.
+        const fillRequestPool = () => {
+            // Keep dispatching requests until we hit our concurrency limit or termination
             while (activeRequests < MAX_CONCURRENT_REQUESTS && !terminationTriggered) {
-                dispatchRequest(nextPageToProcess++);
-            }
-
-            // Step 3: If termination is triggered and all active requests are finished, end the process.
-            if (terminationTriggered && activeRequests === 0) {
-                logDebug("All active requests finished after termination trigger. Finalizing.");
-                finalize();
+                dispatchRequest(nextPageToDispatch++);
             }
         };
 
         return new Promise(resolve => {
             promiseResolver = resolve;
             logDebug(`Starting continuous probe with concurrency of ${MAX_CONCURRENT_REQUESTS} and error threshold of ${CONSECUTIVE_ERROR_THRESHOLD}.`);
-            managerIntervalId = setInterval(managerLoop, DISPATCH_INTERVAL);
+
+            // Start the initial batch of concurrent requests
+            fillRequestPool();
+
+            // Safety timeout to prevent infinite hanging (30 minutes)
+            setTimeout(() => {
+                if (promiseResolver) {
+                    logDebug("Safety timeout reached. Forcing termination.");
+                    terminationTriggered = true;
+                    if (activeRequests === 0) {
+                        finalize();
+                    }
+                }
+            }, 30 * 60 * 1000);
         }).then(() => {
             logDebug("runProbingProcess promise resolved.");
         });
