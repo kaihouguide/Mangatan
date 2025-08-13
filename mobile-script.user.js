@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.2 - Server-Side Processing)
+// @name         Automatic Content OCR (v23.M.3 - Server-Side NoCache)
 // @namespace    http://tampermonkey.net/
-// @version      23.2.0
-// @description  Delegates chapter pre-processing to a server-side job, mirroring the PC script's functionality for improved stability and feedback.
+// @version      23.3.0
+// @description  Delegates chapter pre-processing to a server-side job and always re-requests OCR data. UI is optimized for mobile.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -49,7 +49,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M2_synced'; // Updated settings key for new version
+    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M3_synced'; // Updated settings key for new version
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -78,24 +78,16 @@
         grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging & Persistence ---
+    // --- Logging ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
         const logEntry = `[${timestamp}] ${message}`;
-        console.log(`[OCR v23.M.2] ${logEntry}`);
+        console.log(`[OCR v23.M.3-NoCache] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
-    const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v23_M_synced', // Updated cache key
-        data: null,
-        async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
-        async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
-        get(key) { return this.data?.get(key); },
-        has(key) { return this.data?.has(key) ?? false; },
-        async set(key, value) { if(this.data) { this.data.set(key, value); await this.save(); } },
-    };
+    // --- PersistentCache object has been removed to ensure server re-request ---
 
 
     // --- TOUCH INTERACTION LOGIC (Mobile Specific) ---
@@ -229,8 +221,8 @@
             if (ocrDataCache.get(img) === 'pending') return;
             img.crossOrigin = "anonymous";
             const realSrc = img.src;
-            if (PersistentCache.has(realSrc)) { logDebug(`Cache HIT for: ...${realSrc.slice(-30)}`); ocrDataCache.set(img, PersistentCache.get(realSrc)); displayOcrResults(img); }
-            else { processImage(img, realSrc); }
+            // MODIFIED: PersistentCache check is removed. Always request from server.
+            processImage(img, realSrc);
         };
         if (img.complete && img.naturalHeight > 0) process();
         else img.addEventListener('load', process, { once: true });
@@ -247,7 +239,14 @@
         GM_xmlhttpRequest({
             method: 'GET', url: ocrRequestUrl, timeout: 30000,
             onload: (res) => {
-                try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); PersistentCache.set(sourceUrl, data); ocrDataCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); }
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data.error) throw new Error(data.error);
+                    // MODIFIED: PersistentCache.set() is removed.
+                    ocrDataCache.set(img, data);
+                    logDebug(`OCR success for ...${sourceUrl.slice(-30)}`);
+                    displayOcrResults(img);
+                }
                 catch (e) { logDebug(`OCR Error: ${e.message}`); ocrDataCache.delete(img); }
             },
             onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); },
@@ -514,18 +513,18 @@
             #gemini-ocr-settings-button { bottom: clamp(15px, 4vw, 30px); background: rgba(26, 29, 33, 0.8); color: #EAEAEA; }
             #gemini-ocr-global-anki-export-btn { bottom: clamp(75px, 18vw, 100px); background-color: rgba(46, 204, 113, 0.9); color: white; line-height: clamp(48px, 12vw, 60px); }
             #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
-            /* Mobile Modal */
+            /* MODIFIED Mobile Modal for better phone layout */
             .gemini-ocr-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(20, 20, 25, 0.6); backdrop-filter: blur(8px) saturate(1.2); z-index: 2147483646; color: #EAEAEA; display: flex; align-items: center; justify-content: center; }
             .gemini-ocr-modal.is-hidden { display: none; }
             .gemini-ocr-modal-container { width: clamp(320px, 95vw, 700px); max-height: 90vh; background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 16px; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; }
-            .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); }
-            .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; }
-            .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-start; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); }
+            .gemini-ocr-modal-header { padding: clamp(15px, 4vw, 20px) clamp(15px, 5vw, 25px); border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); }
+            .gemini-ocr-modal-content { padding: clamp(5px, 2vw, 10px) clamp(15px, 5vw, 25px); overflow-y: auto; flex-grow: 1; }
+            .gemini-ocr-modal-footer { padding: clamp(10px, 3vw, 15px) clamp(15px, 5vw, 25px); border-top: 1px solid #444; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); }
             .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; }
-            .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: 20px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); }
-            .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 12px 15px; align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); }
+            .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: clamp(15px, 4vw, 20px) 0 clamp(8px, 2vw, 10px) 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); }
+            .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: clamp(10px, 3vw, 12px) clamp(10px, 3vw, 15px); align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); }
             .full-width { grid-column: 1 / -1; }
-            .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 12px; box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; }
+            .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: clamp(8px, 2.5vw, 12px); box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; }
             .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); }
             #gemini-ocr-server-status { padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; transition: background-color 0.3s; }
             #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
@@ -668,7 +667,7 @@
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) { try { const parsed = JSON.parse(loadedSettings); settings = { ...settings, ...parsed }; } catch(e) { logDebug("Could not parse saved settings. Using defaults."); } }
-        await PersistentCache.load();
+        // MODIFIED: PersistentCache.load() is removed.
         createUI(); bindUIEvents(); applyStyles(); createMeasurementSpan();
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.imageServerUserInput.value = settings.imageServerUser || '';
