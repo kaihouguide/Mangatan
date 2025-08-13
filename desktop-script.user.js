@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.7.6-Final-UI-Feedback)
+// @name         Automatic Content OCR (v21.7.7-NoCache-UI-Feedback)
 // @namespace    http://tampermonkey.net/
-// @version      21.7.6
-// @description  Adds a stable, inline OCR button for server-side pre-processing with improved UI feedback.
+// @version      21.7.7
+// @description  Adds a stable, inline OCR button for server-side pre-processing. Always re-requests from the server.
 // @author       1Selxo (Probe Engine Port by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -47,7 +47,7 @@
     };
     let debugLog = [];
     const SETTINGS_KEY = 'gemini_ocr_settings_v21_7_server';
-    const ocrCache = new WeakMap();
+    const ocrCache = new WeakMap(); // Session-level cache to prevent duplicate processing of the same element
     const managedElements = new Map();
     const managedContainers = new Map();
     const attachedAttributeObservers = new WeakMap();
@@ -70,7 +70,7 @@
         grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging & Persistence ---
+    // --- Logging ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
@@ -78,15 +78,6 @@
         console.log(`[OCR Hybrid] ${logEntry}`);
         debugLog.push(logEntry);
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
-    };
-    const PersistentCache = {
-        CACHE_KEY: 'gemini_ocr_cache_v21_5',
-        data: null,
-        async load() { try { const d = await GM_getValue(this.CACHE_KEY); this.data = d ? new Map(Object.entries(JSON.parse(d))) : new Map(); logDebug(`Loaded ${this.data.size} items from persistent cache.`); } catch (e) { this.data = new Map(); logDebug(`Error loading cache: ${e.message}`); } },
-        async save() { if (this.data) { try { await GM_setValue(this.CACHE_KEY, JSON.stringify(Object.fromEntries(this.data))); } catch (e) {} } },
-        get(key) { return this.data?.get(key); },
-        has(key) { return this.data?.has(key) ?? false; },
-        async set(key, value) { if(this.data) { this.data.set(key, value); await this.save(); } },
     };
 
     // --- CORE LOGIC & OBSERVERS ---
@@ -112,7 +103,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner vHybrid...");
+        logDebug("Activating scanner vHybrid (No-Cache)...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -156,14 +147,19 @@
             if (managedElements.has(img)) return;
             img.crossOrigin = "anonymous";
             const realSrc = img.src;
-            if (PersistentCache.has(realSrc)) { ocrCache.set(img, PersistentCache.get(realSrc)); displayOcrResults(img); }
-            else { if (ocrCache.get(img) === 'pending') return; processImage(img, realSrc); }
+            // Always re-request from server, but prevent duplicate active requests for the same image element.
+            if (ocrCache.get(img) === 'pending') return;
+            processImage(img, realSrc);
         };
         if (img.complete && img.naturalHeight > 0) process();
         else img.addEventListener('load', process, { once: true });
     }
     function processImage(img, sourceUrl) {
-        if (ocrCache.has(img)) return;
+        if (ocrCache.has(img) && ocrCache.get(img) !== 'pending') {
+             // If we already have data in the session, just display it.
+            displayOcrResults(img);
+            return;
+        }
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
         ocrCache.set(img, 'pending');
         let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`;
@@ -173,7 +169,13 @@
         GM_xmlhttpRequest({
             method: 'GET', url: ocrRequestUrl, timeout: 45000,
             onload: (res) => {
-                try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); PersistentCache.set(sourceUrl, data); ocrCache.set(img, data); displayOcrResults(img); }
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data.error) throw new Error(data.error);
+                    // NOTE: No longer setting to PersistentCache
+                    ocrCache.set(img, data);
+                    displayOcrResults(img);
+                }
                 catch (e) { logDebug(`OCR Error: ${e.message}`); ocrCache.delete(img); }
             },
             onerror: () => { logDebug(`Connection error.`); ocrCache.delete(img); },
@@ -470,12 +472,10 @@
             onload: (res) => {
                 try {
                     const data = JSON.parse(res.responseText);
-                    // --- THE FIX IS HERE ---
                     if (res.status === 202 && data.status === 'accepted') {
                         logDebug(`Chapter job successfully accepted by server.`);
                         btn.textContent = 'Accepted';
                         btn.style.borderColor = '#3498db';
-                        // Refresh the status to show it's running (turns green)
                         checkServerStatus();
                     } else {
                         throw new Error(data.error || `Server responded with status ${res.status}`);
@@ -601,7 +601,7 @@
             catch(e) { logDebug("Could not parse saved settings. Using defaults."); }
         }
         createUI();
-        await PersistentCache.load();
+        // NOTE: PersistentCache.load() has been removed.
         bindUIEvents();
         applyDynamicStyles();
         createMeasurementSpan();
