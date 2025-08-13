@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.3 - Server-Side NoCache)
+// @name         Automatic Content OCR (v23.M.3 - Server-Side NoCache - Layout Fix)
 // @namespace    http://tampermonkey.net/
-// @version      23.3.0
-// @description  Delegates chapter pre-processing to a server-side job and always re-requests OCR data. UI is optimized for mobile.
+// @version      23.3.1
+// @description  Delegates chapter pre-processing to a server-side job and always re-requests OCR data. UI is optimized for mobile. (Layout fix by Gemini)
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -279,9 +279,8 @@
         const data = ocrDataCache.get(targetImg);
         if (!data) return;
 
-        const parent = targetImg.parentNode;
-        if (!parent) return;
-        if (window.getComputedStyle(parent).position === 'static') { parent.style.position = 'relative'; }
+        // FIX: The parent node is no longer needed for positioning.
+        // The old method of modifying the parent's style caused layout issues.
 
         data.sort((a, b) => { const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x, ROW_TOLERANCE = 0.05; if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x; else return a_y - b_y; });
 
@@ -304,10 +303,12 @@
         });
 
         overlay.appendChild(fragment);
-        parent.appendChild(overlay);
+        // FIX: Append to body to avoid interfering with page layout.
+        document.body.appendChild(overlay);
         overlay.addEventListener('click', handleOverlayInteraction);
 
-        const state = { overlay, lastWidth: 0, lastHeight: 0, parentNode: parent };
+        // FIX: State no longer needs parentNode.
+        const state = { overlay, lastWidth: 0, lastHeight: 0 };
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
 
@@ -360,8 +361,14 @@
                 const rect = img.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) { if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden'); continue; }
 
-                const parentRect = state.parentNode.getBoundingClientRect();
-                Object.assign(state.overlay.style, { top: `${rect.top - parentRect.top + state.parentNode.scrollTop}px`, left: `${rect.left - parentRect.left + state.parentNode.scrollLeft}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+                // FIX: New logic for position:fixed overlays.
+                // It positions the overlay relative to the viewport using the image's BoundingClientRect.
+                Object.assign(state.overlay.style, {
+                    top: `${rect.top}px`,
+                    left: `${rect.left}px`,
+                    width: `${rect.width}px`,
+                    height: `${rect.height}px`
+                });
 
                 if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
                     logDebug(`Resizing ...${img.src.slice(-30)}. Recalculating fonts.`);
@@ -495,7 +502,8 @@
             .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); }
             .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; background-color: transparent; }
             /* Mobile Overlay */
-            .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9998; pointer-events: none; touch-action: manipulation; transition: opacity 0.15s, visibility 0.15s; background-color: rgba(0, 0, 0, 0); }
+            /* FIX: Changed position to 'fixed' to prevent interference with the reader's layout. */
+            .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; touch-action: manipulation; transition: opacity 0.15s, visibility 0.15s; background-color: rgba(0, 0, 0, 0); }
             .gemini-ocr-decoupled-overlay.is-focused { background-color: rgba(0, 0, 0, 0.2); }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
             .gemini-ocr-text-box { display: flex; justify-content: center; align-items: center; text-align: center; position: absolute; box-sizing: border-box; border-radius: 4px; user-select: text !important; -webkit-user-select: text !important; touch-action: auto !important; cursor: pointer; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 0px 1px 3px rgba(0,0,0,0.9); backdrop-filter: blur(3px); transition: all 0.2s ease-in-out; pointer-events: auto; overflow: hidden; padding: 4px; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
