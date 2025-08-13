@@ -7,8 +7,7 @@ import chrome_lens_py
 from chrome_lens_py.utils.lens_betterproto import LensOverlayObjectsResponse
 from PIL.Image import Image
 
-# cygwin is one of the possible values for windows systems, but wtf is cygwin
-if system() == "win32" or system() == "cygwin":
+if system() == "Windows":
     try:
         import oneocr
 
@@ -20,6 +19,7 @@ if system() == "win32" or system() == "cygwin":
         print(f"[Warning] If you get this error please spam the Mangatan thread: {e}")
         ONEOCR_AVAILABLE = False
 else:
+    print(f"[Warning] OneOCR is not available on platform: {system()}")
     ONEOCR_AVAILABLE = False
 
 
