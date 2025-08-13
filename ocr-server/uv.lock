@@ -216,7 +216,7 @@ wheels = [
 
 [[package]]
 name = "chrome-lens-py"
-version = "3.1.0"
+version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "betterproto" },
@@ -226,9 +226,9 @@ dependencies = [
     { name = "pillow" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cb/3a/6bbb29d670c4d051df85da655e548de0035fd2146b4f050b811dada3f5ce/chrome_lens_py-3.1.0.tar.gz", hash = "sha256:afc3874aeab8c4837edc9062cc696988ff83c5b97dae9806f802de39aca8f7e4", size = 37803, upload-time = "2025-06-30T11:46:52.816Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/a7/abff53de89275bf09e7a499af9a06b359af43857233409c7cfb0fd46d66a/chrome_lens_py-3.2.0.tar.gz", hash = "sha256:4eecebeb505976475a7bbac4e6cc83446d227796184cf2d23855963dddcac14e", size = 38991, upload-time = "2025-08-12T20:11:03.16Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/1a/c9bdd90ead9de52f77b8bd4d2211646b12478d2678dfd1ab1081e4ad5431/chrome_lens_py-3.1.0-py3-none-any.whl", hash = "sha256:d94e073772cc1c4697337469a0bc69abe3fb65774b581c6c706ac8707e9df7d8", size = 37091, upload-time = "2025-06-30T11:46:51.721Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/60/377065f354263719a9ba4500b1b8e2bb39c4e5303ad7c16943e387a80cce/chrome_lens_py-3.2.0-py3-none-any.whl", hash = "sha256:2b3031b3033a5b4b10d67bec23eecaa1176e7f182249aae004373babcfd0dabb", size = 37741, upload-time = "2025-08-12T20:11:01.713Z" },
 ]
 
 [[package]]
@@ -677,7 +677,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.15" },
     { name = "betterproto", specifier = ">=2.0.0b7" },
-    { name = "chrome-lens-py", specifier = ">=3.1.0" },
+    { name = "chrome-lens-py", specifier = ">=3.2.0" },
     { name = "flask", extras = ["async"], specifier = ">=3.1.1" },
     { name = "oneocr", specifier = ">=1.0.9" },
     { name = "requests", specifier = ">=2.32.4" },

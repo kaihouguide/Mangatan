@@ -151,19 +151,48 @@ class GoogleLens(Engine):
         self.engine = chrome_lens_py.LensAPI()
 
     async def ocr(self, img):
-        result = await self.engine.process_image(image_path=img, ocr_language="ja")
+        result = await self.engine.process_image(
+            image_path=img, ocr_language="ja", output_format="lines"
+        )
         return self.transform(result)
 
-    # TODO: Refactor when chrome_lens_py supports lines output_format
     def transform(self, result: dict) -> list[Bubble]:
-        if result["ocr_text"] == "":
+        if not result.get("word_data"):
             return []
 
         output_json: list[Bubble] = []
+        lines: list[dict] = result["line_blocks"]
+
+        for line in lines:
+            text: str = line["text"]
+            geometry: dict[str, float] = line["geometry"]
+            center_x = geometry["center_x"]
+            center_y = geometry["center_y"]
+            width = geometry["width"]
+            height = geometry["height"]
+            angle_deg = geometry["angle_deg"]
+
+            bubble = Bubble(
+                text=text.replace("･･･", "…"),
+                tightBoundingBox=BoundingBox(
+                    x=center_x - width / 2,
+                    y=center_y - height / 2,
+                    width=width,
+                    height=height,
+                ),
+                orientation=round(angle_deg, 1),
+                font_size=0.04,
+                confidence=0.98,  # Assuming a default confidence value
+            )
+            output_json.append(bubble)
+
+        return output_json
+
+    # just in case we want to parse it ourselves
+    def raw_transform(self, result: dict) -> list[Bubble]:
+        output_json: list[Bubble] = []
         response: LensOverlayObjectsResponse = result["raw_response_objects"]
 
-        # The library has parsed fields for us, but we'll have to manually parse
-        # the raw response for individual line geometry for now
         for paragraph in response.text.text_layout.paragraphs:
             for line in paragraph.lines:
                 line_text = (
