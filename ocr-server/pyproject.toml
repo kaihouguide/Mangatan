@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.12.15",
     "betterproto>=2.0.0b7",
-    "chrome-lens-py>=3.1.0",
+    "chrome-lens-py>=3.2.0",
     "flask[async]>=3.1.1",
     "oneocr>=1.0.9",
     "requests>=2.32.4",
