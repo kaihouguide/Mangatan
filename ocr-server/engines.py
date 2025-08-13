@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from math import pi
 from typing import TypedDict
 from platform import system
+import json
 
 import chrome_lens_py
 from chrome_lens_py.utils.lens_betterproto import LensOverlayObjectsResponse
@@ -59,6 +60,7 @@ class OneOCR(Engine):
 
     async def ocr(self, img):
         chunk_image = self.process_image(img)
+        # print(json.dumps(chunk_image, indent=2, ensure_ascii=False))
         return chunk_image
 
     def process_image(self, img: Image) -> list[Bubble]:
@@ -170,7 +172,15 @@ class GoogleLens(Engine):
             center_y = geometry["center_y"]
             width = geometry["width"]
             height = geometry["height"]
+
+            # example: 6.5; degrees from perfect vertical or horizontal line
             angle_deg = geometry["angle_deg"]
+
+            # 90.0 is a vertical line, 0.0 is horizontal
+            snapped_angle = 90.0 if height > width else 0.0
+
+            # example: 90.0 + 6.5 = 96.5, or rotated 6.5 degrees clockwise from vertical
+            actual_angle = snapped_angle + angle_deg
 
             bubble = Bubble(
                 text=text.replace("･･･", "…"),
@@ -180,11 +190,12 @@ class GoogleLens(Engine):
                     width=width,
                     height=height,
                 ),
-                orientation=round(angle_deg, 1),
+                orientation=round(actual_angle, 1),
                 font_size=0.04,
                 confidence=0.98,  # Assuming a default confidence value
             )
             output_json.append(bubble)
+            # print(json.dumps(bubble, indent=2, ensure_ascii=False))
 
         return output_json
 
