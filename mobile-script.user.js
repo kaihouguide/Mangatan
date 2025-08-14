@@ -112,7 +112,7 @@
         if (textOrientationSetting === 'smart') {
             if (box.height > 0) {
                 // True for vertical if the box is significantly wider than it is tall.
-                return (box.width / box.height) > 1.5;
+                return (box.height / box.width) > 1.5;
             }
             return false; // Cannot determine if height is zero.
         }
