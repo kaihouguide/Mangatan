@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.6 - Smart-Mode-Fix)
+// @name         Automatic Content OCR (v23.M.9-Best-Fit-Engine)
 // @namespace    http://tampermonkey.net/
-// @version      23.6.0
-// @description  Server-side OCR with a mobile-optimized UI. Smart orientation mode is now based purely on dimensions.
+// @version      23.9.0
+// @description  Server-side OCR with a mobile-optimized UI. Features a new "best fit" engine for orientation detection.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -48,7 +48,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M6_smartfix'; // Updated settings key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M9_bestfit'; // Updated settings key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -65,7 +65,7 @@
     const DOUBLE_TAP_THRESHOLD = 300;
 
     const COLOR_THEMES = { deepblue: { main: 'rgba(0,191,255,',  text: '#FFFFFF', highlightText: '#000000' }, red: { main: 'rgba(255, 71, 87,',   text: '#FFFFFF', highlightText: '#000000' }, green: { main: 'rgba(46, 204, 113,',  text: '#FFFFFF', highlightText: '#000000' }, orange: { main: 'rgba(243, 156, 18,',  text: '#FFFFFF', highlightText: '#000000' }, purple: { main: 'rgba(155, 89, 182,',  text: '#FFFFFF', highlightText: '#000000' }, turquoise:{ main: 'rgba(26, 188, 156,', text: '#FFFFFF', highlightText: '#000000' }, pink: { main: 'rgba(232, 67, 147,',  text: '#FFFFFF', highlightText: '#000000' }, grey: { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' } };
-    const logDebug = (message) => { if (!settings.debugMode) return; const timestamp = new Date().toLocaleTimeString(); const logEntry = `[${timestamp}] ${message}`; console.log(`[OCR v23.M.6-SmartFix] ${logEntry}`); debugLog.push(logEntry); document.dispatchEvent(new CustomEvent('ocr-log-update')); };
+    const logDebug = (message) => { if (!settings.debugMode) return; const timestamp = new Date().toLocaleTimeString(); const logEntry = `[${timestamp}] ${message}`; console.log(`[OCR v23.M.9-BestFit] ${logEntry}`); debugLog.push(logEntry); document.dispatchEvent(new CustomEvent('ocr-log-update')); };
 
     // --- TOUCH INTERACTION LOGIC (Unchanged) ---
     function triggerOverlayToggle(targetImg) { const overlayState = managedElements.get(targetImg); if (overlayState?.overlay) { if (overlayState.overlay === activeOverlay) { hideActiveOverlay(); } else { showOverlay(overlayState.overlay, targetImg); } } }
@@ -93,92 +93,144 @@
     function showOverlay(overlay, image) { if (activeOverlay && activeOverlay !== overlay) { hideActiveOverlay(); } activeOverlay = overlay; activeImageForExport = image; overlay.classList.remove('is-hidden'); overlay.classList.add('is-focused'); UI.globalAnkiButton?.classList.remove('is-hidden'); }
     function hideActiveOverlay() { if (!activeOverlay) return; activeOverlay.classList.add('is-hidden'); activeOverlay.classList.remove('is-focused', 'has-manual-highlight'); activeOverlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight')); UI.globalAnkiButton?.classList.add('is-hidden'); activeOverlay = null; activeImageForExport = null; }
 
-    // --- MODIFIED: Orientation Detection Helper for Mobile ---
-    function determineIfVertical(item, textOrientationSetting) {
-        // Handle explicit user overrides first.
-        if (textOrientationSetting === 'forceVertical') return true;
-        if (textOrientationSetting === 'forceHorizontal') return false;
+    // --- NEW: Best-Fit Rendering Engine ---
 
-        const box = item.tightBoundingBox;
+    /**
+     * Helper function to find the maximum font size that fits within given dimensions.
+     * @returns {number} The optimal font size in pixels.
+     */
+    function findBestFitFontSize(text, availableWidth, availableHeight, isVertical) {
+        if (!text || availableWidth <= 0 || availableHeight <= 0) return 0;
 
-        // The 'serverAngle' mode is for users who explicitly trust the server's angle.
-        if (textOrientationSetting === 'serverAngle') {
-            const hasAngle = item.orientation !== undefined && item.orientation !== null;
-            return hasAngle && Math.abs(item.orientation) > 45;
-        }
+        measurementSpan.style.writingMode = isVertical ? 'vertical-rl' : 'horizontal-tb';
+        measurementSpan.textContent = text;
 
-        // The 'smart' mode for mobile now ONLY uses dimension calculation,
-        // ignoring the potentially incorrect server angle.
-        if (textOrientationSetting === 'smart') {
-            if (box.height > 0) {
-                // True for vertical if the box is significantly wider than it is tall.
-                return (box.height / box.width) > 1.5;
+        let low = 6, high = 200, bestSize = 6;
+        while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            if (mid <= 0) break;
+            measurementSpan.style.fontSize = `${mid}px`;
+            if (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) {
+                bestSize = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
             }
-            return false; // Cannot determine if height is zero.
         }
-
-        // Default fallback.
-        return false;
+        return bestSize;
     }
+
+    /**
+     * Determines the best orientation (horizontal/vertical) and font size for each text box
+     * and applies the appropriate styles. This is the new core rendering function.
+     */
+    function calculateAndApplyOptimalStyles(overlay, imgRect) {
+        if (!measurementSpan) return;
+
+        const baseStyle = getComputedStyle(overlay.querySelector('.gemini-ocr-text-box') || overlay);
+        Object.assign(measurementSpan.style, {
+            fontFamily: baseStyle.fontFamily,
+            fontWeight: baseStyle.fontWeight,
+            letterSpacing: baseStyle.letterSpacing
+        });
+
+        overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
+            const text = box.textContent || '';
+            if (!text) return;
+
+            const boxStyle = box.style;
+            const availableWidth = (parseFloat(boxStyle.width) / 100) * imgRect.width - 8;
+            const availableHeight = (parseFloat(boxStyle.height) / 100) * imgRect.height - 8;
+
+            let isVertical = false;
+            let finalFontSize = 0;
+
+            // Determine orientation based on user settings
+            if (settings.textOrientation === 'forceVertical') {
+                isVertical = true;
+                finalFontSize = findBestFitFontSize(text, availableWidth, availableHeight, true);
+            } else if (settings.textOrientation === 'forceHorizontal') {
+                isVertical = false;
+                finalFontSize = findBestFitFontSize(text, availableWidth, availableHeight, false);
+            } else {
+                // "Smart" mode: Calculate the best fit by comparing which orientation allows a larger font.
+                const horizontalFitSize = findBestFitFontSize(text, availableWidth, availableHeight, false);
+                const verticalFitSize = findBestFitFontSize(text, availableWidth, availableHeight, true);
+
+                if (verticalFitSize > horizontalFitSize) {
+                    isVertical = true;
+                    finalFontSize = verticalFitSize;
+                } else {
+                    isVertical = false;
+                    finalFontSize = horizontalFitSize;
+                }
+                logDebug(`'${text.substring(0,5)}...': H-fit=${horizontalFitSize}px, V-fit=${verticalFitSize}px. Chose: ${isVertical ? 'Vertical' : 'Horizontal'}`);
+            }
+
+            // Apply the determined styles
+            box.classList.toggle('gemini-ocr-text-vertical', isVertical);
+            const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
+            box.style.fontSize = `${finalFontSize * multiplier}px`;
+        });
+        // Reset measurement span for safety
+        measurementSpan.style.writingMode = 'horizontal-tb';
+    }
+
 
     function displayOcrResults(targetImg) {
         if (ocrDataCache.get(targetImg) === 'pending' || managedElements.has(targetImg)) return;
         const data = ocrDataCache.get(targetImg);
         if (!data || !Array.isArray(data)) { logDebug(`Invalid OCR data received for ${targetImg.src.slice(-30)}`); ocrDataCache.delete(targetImg); return; }
+
         data.sort((a, b) => { const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x, ROW_TOLERANCE = 0.05; if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x; else return a_y - b_y; });
+
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
+
         data.forEach((item) => {
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.textContent = item.text;
-            if (determineIfVertical(item, settings.textOrientation)) { ocrBox.classList.add('gemini-ocr-text-vertical'); }
-            Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x * 100}%`, top: `${item.tightBoundingBox.y * 100}%`, width: `${item.tightBoundingBox.width * 100}%`, height: `${item.tightBoundingBox.height * 100}%` });
+            // We no longer decide orientation here. We just set the dimensions.
+            Object.assign(ocrBox.style, {
+                left: `${item.tightBoundingBox.x * 100}%`,
+                top: `${item.tightBoundingBox.y * 100}%`,
+                width: `${item.tightBoundingBox.width * 100}%`,
+                height: `${item.tightBoundingBox.height * 100}%`
+            });
             overlay.appendChild(ocrBox);
         });
+
         document.body.appendChild(overlay);
         overlay.addEventListener('click', handleOverlayInteraction);
         const state = { overlay, lastWidth: 0, lastHeight: 0 };
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for ...${targetImg.src.slice(-30)}`);
+
         if (!overlayUpdateRunning) { requestAnimationFrame(updateAllOverlays); overlayUpdateRunning = true; }
     }
 
-    // --- REFACTORED: Accurate Font Calculation (Unchanged from previous version) ---
-    function calculateAndApplyFontSizes(overlay, imgRect) {
-        if (!measurementSpan) return;
-        overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
-            const text = box.textContent || ''; if (!text) return;
-            const isVertical = box.classList.contains('gemini-ocr-text-vertical');
-            const boxStyle = box.style;
-            const availableWidth = (parseFloat(boxStyle.width) / 100) * imgRect.width - 8;
-            const availableHeight = (parseFloat(boxStyle.height) / 100) * imgRect.height - 8;
-            if (availableWidth <= 0 || availableHeight <= 0) return;
-            measurementSpan.style.writingMode = isVertical ? 'vertical-rl' : 'horizontal-tb';
-            measurementSpan.textContent = text;
-            Object.assign(measurementSpan.style, { fontFamily: getComputedStyle(box).fontFamily, fontWeight: getComputedStyle(box).fontWeight, letterSpacing: getComputedStyle(box).letterSpacing });
-            let low = 6, high = 150, bestSize = 6;
-            while (low <= high) {
-                const mid = Math.floor((low + high) / 2); if (mid <= 0) break;
-                measurementSpan.style.fontSize = `${mid}px`;
-                if (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) { bestSize = mid; low = mid + 1; } else { high = mid - 1; }
-            }
-            const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
-            box.style.fontSize = `${bestSize * multiplier}px`;
-        });
-        measurementSpan.style.writingMode = 'horizontal-tb';
-    }
 
-    // --- Update Loop (Unchanged) ---
     function updateAllOverlays() {
         try {
             const elementsToDelete = [];
             for (const [img, state] of managedElements.entries()) {
                 if (!img.isConnected || !state.overlay.isConnected) { elementsToDelete.push(img); continue; }
+
                 const rect = img.getBoundingClientRect();
-                if (rect.width === 0 || rect.height === 0) { if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden'); continue; }
+                if (rect.width === 0 || rect.height === 0) {
+                    if (!state.overlay.classList.contains('is-hidden')) state.overlay.classList.add('is-hidden');
+                    continue;
+                }
+
                 Object.assign(state.overlay.style, { top: `${rect.top}px`, left: `${rect.left}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) { calculateAndApplyFontSizes(state.overlay, rect); state.lastWidth = rect.width; state.lastHeight = rect.height; }
+
+                if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
+                    // On first creation or resize, run the new optimal style calculation.
+                    calculateAndApplyOptimalStyles(state.overlay, rect);
+                    state.lastWidth = rect.width;
+                    state.lastHeight = rect.height;
+                }
             }
             elementsToDelete.forEach(img => { const state = managedElements.get(img); if (state) { state.overlay.remove(); managedElements.delete(img); ocrDataCache.delete(img); logDebug(`Garbage collected overlay.`); } });
         } catch (error) { logDebug(`Critical error in updateAllOverlays: ${error.message}`); }
