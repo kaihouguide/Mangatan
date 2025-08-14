@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v21.7.7-NoCache-UI-Feedback)
+// @name         Automatic Content OCR (v22.0.0-Refactored-Engine)
 // @namespace    http://tampermonkey.net/
-// @version      21.7.7
-// @description  Adds a stable, inline OCR button for server-side pre-processing. Always re-requests from the server.
-// @author       1Selxo (Probe Engine Port by Gemini)
+// @version      22.0.0
+// @description  Adds a stable, inline OCR button with improved orientation and font-sizing logic.
+// @author       1Selxo (Probe Engine Port by Gemini, Refactoring by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -38,16 +38,15 @@
         }],
         debugMode: true,
         textOrientation: 'smart', // smart, serverAngle, forceHorizontal, forceVertical
-        interactionMode: 'hover', // 'hover', 'click', or 'proximity'
-        proximityRadius: 150,
+        interactionMode: 'hover', // 'hover', 'click'
         dimmedOpacity: 0.3,
         fontMultiplierHorizontal: 1.0,
         fontMultiplierVertical: 1.0,
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v21_7_server';
-    const ocrCache = new WeakMap(); // Session-level cache to prevent duplicate processing of the same element
+    const SETTINGS_KEY = 'gemini_ocr_settings_v22_server';
+    const ocrCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
     const attachedAttributeObservers = new WeakMap();
@@ -58,7 +57,6 @@
     let activeImageForExport = null;
     let hideButtonTimer = null;
 
-    // --- Color Themes ---
     const COLOR_THEMES = {
         deepblue: { main: 'rgba(0,191,255,',  text: '#FFFFFF', highlightText: '#000000' },
         red:      { main: 'rgba(255, 71, 87,',   text: '#FFFFFF', highlightText: '#000000' },
@@ -70,7 +68,6 @@
         grey:     { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
 
-    // --- Logging ---
     const logDebug = (message) => {
         if (!settings.debugMode) return;
         const timestamp = new Date().toLocaleTimeString();
@@ -80,7 +77,6 @@
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
-    // --- CORE LOGIC & OBSERVERS ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) for (const node of mutation.addedNodes) if (node.nodeType === 1) {
             if (node.tagName === 'IMG') observeImageForSrcChange(node);
@@ -103,7 +99,7 @@
         }
     });
     function activateScanner() {
-        logDebug("Activating scanner vHybrid (No-Cache)...");
+        logDebug("Activating scanner vHybrid (Refactored)...");
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
         if (!activeSiteConfig?.imageContainerSelectors?.length) return logDebug(`No matching site config for URL: ${window.location.href}.`);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -130,7 +126,6 @@
         }
     }
 
-    // --- Image Processing ---
     function observeImageForSrcChange(img) {
         const processTheImage = (src) => { if (src?.includes('/api/v1/manga/')) { primeImageForOcr(img); return true; } return false; };
         if (processTheImage(img.src)) return;
@@ -147,7 +142,6 @@
             if (managedElements.has(img)) return;
             img.crossOrigin = "anonymous";
             const realSrc = img.src;
-            // Always re-request from server, but prevent duplicate active requests for the same image element.
             if (ocrCache.get(img) === 'pending') return;
             processImage(img, realSrc);
         };
@@ -156,7 +150,6 @@
     }
     function processImage(img, sourceUrl) {
         if (ocrCache.has(img) && ocrCache.get(img) !== 'pending') {
-             // If we already have data in the session, just display it.
             displayOcrResults(img);
             return;
         }
@@ -170,20 +163,28 @@
             method: 'GET', url: ocrRequestUrl, timeout: 45000,
             onload: (res) => {
                 try {
-                    const data = JSON.parse(res.responseText);
-                    if (data.error) throw new Error(data.error);
-                    // NOTE: No longer setting to PersistentCache
-                    ocrCache.set(img, data);
+                    const fullData = JSON.parse(res.responseText);
+                    if (fullData.error) throw new Error(fullData.error);
+
+                    const ocrResultForThisImage = fullData[sourceUrl];
+                    if (!ocrResultForThisImage) {
+                         throw new Error(`OCR data not found for URL key in server response.`);
+                    }
+
+                    // Sort the data for this specific image before caching
+                    ocrResultForThisImage.sort((a, b) => a.tightBoundingBox.y - b.tightBoundingBox.y);
+                    ocrCache.set(img, ocrResultForThisImage);
                     displayOcrResults(img);
+                } catch (e) {
+                    logDebug(`OCR Error for ${sourceUrl.slice(-30)}: ${e.message}`);
+                    ocrCache.delete(img);
                 }
-                catch (e) { logDebug(`OCR Error: ${e.message}`); ocrCache.delete(img); }
             },
             onerror: () => { logDebug(`Connection error.`); ocrCache.delete(img); },
             ontimeout: () => { logDebug(`Request timed out.`); ocrCache.delete(img); }
         });
     }
 
-    // --- ANKI INTEGRATION ---
     async function ankiConnectRequest(action, params = {}) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -225,21 +226,50 @@
         }
     }
 
-    // --- OVERLAY & UPDATE ENGINE ---
+    // --- NEW HELPER FUNCTION for more robust orientation detection ---
+    function determineIfVertical(item, textOrientationSetting) {
+        if (textOrientationSetting === 'forceVertical') return true;
+        if (textOrientationSetting === 'forceHorizontal') return false;
+
+        const box = item.tightBoundingBox;
+        const hasReliableAngle = item.orientation !== undefined && item.orientation !== null;
+
+        if (textOrientationSetting === 'serverAngle' && hasReliableAngle) {
+            // More robust: check if angle is > 45 degrees from horizontal
+            return Math.abs(item.orientation) > 45;
+        }
+
+        if (textOrientationSetting === 'smart') {
+            // "Smart" mode: Prefer server angle if it's decisive, otherwise use aspect ratio.
+            if (hasReliableAngle) {
+                return Math.abs(item.orientation) > 45;
+            }
+            // Fallback to aspect ratio: vertical text boxes are much wider than they are tall.
+            // Use a ratio to be more robust than a simple > check.
+            if (box.height > 0) {
+               return (box.width / box.height) > 1.5;
+            }
+            return false; // Cannot determine if height is zero
+        }
+
+        return false; // Default case
+    }
+
     function displayOcrResults(targetImg) {
         const data = ocrCache.get(targetImg);
         if (!data || data === 'pending' || managedElements.has(targetImg)) return;
-        data.sort((a,b) => a.tightBoundingBox.y - b.tightBoundingBox.y);
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-hidden interaction-mode-${settings.interactionMode}`;
         data.forEach((item) => {
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.textContent = item.text;
-            let isVertical = (settings.textOrientation === 'forceVertical') ||
-                             (settings.textOrientation === 'smart' && item.tightBoundingBox.height > item.tightBoundingBox.width) ||
-                             (settings.textOrientation === 'serverAngle' && item.orientation === 90);
-            if (isVertical) ocrBox.classList.add('gemini-ocr-text-vertical');
+
+            // Use the new, more robust helper function
+            if (determineIfVertical(item, settings.textOrientation)) {
+                ocrBox.classList.add('gemini-ocr-text-vertical');
+            }
+
             Object.assign(ocrBox.style, {
                 left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`,
                 width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%`
@@ -264,32 +294,60 @@
         if (!overlayUpdateRunning) requestAnimationFrame(updateAllOverlays);
     }
 
-    // --- FONT CALCULATION ---
+    // --- HEAVILY REFACTORED FONT CALCULATION ---
     function calculateAndApplyFontSizes(overlay) {
         if (!measurementSpan) return;
+
         overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
-            const text = box.textContent || ''; if (!text) return;
+            const text = box.textContent || '';
+            if (!text) return;
+
             const isVertical = box.classList.contains('gemini-ocr-text-vertical');
             const boxRect = box.getBoundingClientRect();
-            const availableWidth = boxRect.width - 8, availableHeight = boxRect.height - 8;
+            // Give a little padding
+            const availableWidth = boxRect.width - 4;
+            const availableHeight = boxRect.height - 4;
+
             if (availableWidth <= 0 || availableHeight <= 0) return;
-            box.style.whiteSpace = 'nowrap';
-            let low = 8, high = 150, bestSize = 8;
-            Object.assign(measurementSpan.style, { fontFamily: getComputedStyle(box).fontFamily, fontWeight: getComputedStyle(box).fontWeight, letterSpacing: getComputedStyle(box).letterSpacing, });
+
+            // Set the writing mode on our measurement tool to match the target box
+            measurementSpan.style.writingMode = isVertical ? 'vertical-rl' : 'horizontal-tb';
             measurementSpan.textContent = text;
+            Object.assign(measurementSpan.style, {
+                fontFamily: getComputedStyle(box).fontFamily,
+                fontWeight: getComputedStyle(box).fontWeight,
+                letterSpacing: getComputedStyle(box).letterSpacing,
+            });
+
+            // Binary search for the best font size
+            let low = 6, high = 150, bestSize = 6;
             while (low <= high) {
-                const mid = Math.floor((low + high) / 2); if (mid <= 0) break;
+                const mid = Math.floor((low + high) / 2);
+                if (mid <= 0) break;
+
                 measurementSpan.style.fontSize = `${mid}px`;
-                let textFits = isVertical ? (mid * text.length * 0.9 <= availableHeight) && (mid <= availableWidth)
-                                          : (measurementSpan.offsetWidth <= availableWidth) && (measurementSpan.offsetHeight <= availableHeight);
-                if (textFits) { bestSize = mid; low = mid + 1; }
-                else { high = mid - 1; }
+
+                // This logic now works for BOTH vertical and horizontal text!
+                if (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) {
+                    bestSize = mid;
+                    low = mid + 1; // Try larger
+                } else {
+                    high = mid - 1; // Try smaller
+                }
             }
+
             const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
             box.style.fontSize = `${bestSize * multiplier}px`;
-            if (isVertical) box.style.lineHeight = '1';
+
+            if (isVertical) {
+                box.style.lineHeight = '1.1'; // Use a slight line height for better CJK char spacing
+                box.style.letterSpacing = '0.05em';
+            }
         });
+        // Reset measurement span for safety
+        measurementSpan.style.writingMode = 'horizontal-tb';
     }
+
 
     function updateAllOverlays() {
         overlayUpdateRunning = true;
@@ -311,13 +369,11 @@
         finally { overlayUpdateRunning = false; if (managedElements.size > 0) requestAnimationFrame(updateAllOverlays); }
     }
 
-    // --- UI & EVENT HANDLING ---
     function manageScrollFix() {
         const urlPattern = '/manga/', shouldBeActive = window.location.href.includes(urlPattern), isActive = document.documentElement.classList.contains('ocr-scroll-fix-active');
         if (shouldBeActive && !isActive) { document.documentElement.classList.add('ocr-scroll-fix-active'); }
         else if (!shouldBeActive && isActive) { document.documentElement.classList.remove('ocr-scroll-fix-active'); }
     }
-
     function applyDynamicStyles() {
         const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.deepblue;
         const cssVars = `:root { --ocr-highlight-bg-color: ${theme.main}0.9); --modal-header-color: ${theme.main}1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; }`;
@@ -325,9 +381,9 @@
         if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); }
         styleTag.textContent = cssVars;
     }
-
     function createUI() {
         GM_addStyle(`
+            /* ... (rest of your CSS is good, no changes needed here) ... */
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
             .gemini-ocr-decoupled-overlay { position: absolute; z-index: 9998; pointer-events: none !important; transition: opacity 0.15s, visibility 0.15s; }
             .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
@@ -360,6 +416,7 @@
             #gemini-ocr-server-status.status-error { background-color: #c0392b; }
             #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
+        // The HTML structure is fine, no changes needed.
         document.body.insertAdjacentHTML('beforeend', `
             <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button>
             <button id="gemini-ocr-settings-button">⚙️</button>
@@ -398,8 +455,8 @@
             <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div>
         `);
     }
-
     function bindUIEvents() {
+        // This function is fine, no changes needed.
         Object.assign(UI, {
             settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'),
             globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'), debugModal: document.getElementById('gemini-ocr-debug-modal'),
@@ -450,79 +507,40 @@
         document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }});
     }
 
-    // --- BATCH PROCESSING ---
     async function runProbingProcess(baseUrl, btn) {
         logDebug(`Requesting SERVER-SIDE job for: ${baseUrl}`);
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = 'Starting...';
-
-        const postData = {
-            baseUrl: baseUrl,
-            user: settings.imageServerUser,
-            pass: settings.imageServerPassword
-        };
-
+        const postData = { baseUrl: baseUrl, user: settings.imageServerUser, pass: settings.imageServerPassword };
         GM_xmlhttpRequest({
-            method: 'POST',
-            url: `${settings.ocrServerUrl}/preprocess-chapter`,
-            headers: { 'Content-Type': 'application/json' },
-            data: JSON.stringify(postData),
-            timeout: 10000,
+            method: 'POST', url: `${settings.ocrServerUrl}/preprocess-chapter`, headers: { 'Content-Type': 'application/json' },
+            data: JSON.stringify(postData), timeout: 10000,
             onload: (res) => {
                 try {
                     const data = JSON.parse(res.responseText);
                     if (res.status === 202 && data.status === 'accepted') {
                         logDebug(`Chapter job successfully accepted by server.`);
-                        btn.textContent = 'Accepted';
-                        btn.style.borderColor = '#3498db';
-                        checkServerStatus();
-                    } else {
-                        throw new Error(data.error || `Server responded with status ${res.status}`);
-                    }
+                        btn.textContent = 'Accepted'; btn.style.borderColor = '#3498db'; checkServerStatus();
+                    } else { throw new Error(data.error || `Server responded with status ${res.status}`); }
                 } catch (e) {
                     logDebug(`Error starting chapter job: ${e.message}`);
-                    btn.textContent = 'Error!';
-                    btn.style.borderColor = '#c0392b';
-                    alert(`Failed to start chapter job: ${e.message}`);
+                    btn.textContent = 'Error!'; btn.style.borderColor = '#c0392b'; alert(`Failed to start chapter job: ${e.message}`);
                 }
             },
-            onerror: () => {
-                logDebug('Connection error while trying to start chapter job.');
-                btn.textContent = 'Conn. Error!';
-                btn.style.borderColor = '#c0392b';
-                alert('Failed to connect to the OCR server to start the job.');
-            },
-            ontimeout: () => {
-                logDebug('Timeout while trying to start chapter job.');
-                btn.textContent = 'Timeout!';
-                btn.style.borderColor = '#c0392b';
-                alert('The request to start the chapter job timed out.');
-            },
-            onloadend: () => {
-               setTimeout(() => {
-                    if (btn.isConnected) {
-                        btn.textContent = originalText;
-                        btn.style.borderColor = '';
-                        btn.disabled = false;
-                    }
-                }, 3500);
-            }
+            onerror: () => { logDebug('Connection error while trying to start chapter job.'); btn.textContent = 'Conn. Error!'; btn.style.borderColor = '#c0392b'; alert('Failed to connect to the OCR server to start the job.'); },
+            ontimeout: () => { logDebug('Timeout while trying to start chapter job.'); btn.textContent = 'Timeout!'; btn.style.borderColor = '#c0392b'; alert('The request to start the chapter job timed out.'); },
+            onloadend: () => { setTimeout(() => { if (btn.isConnected) { btn.textContent = originalText; btn.style.borderColor = ''; btn.disabled = false; } }, 3500); }
         });
     }
-
     async function batchProcessCurrentChapterFromURL() {
         const btn = UI.batchChapterBtn;
         const urlPath = window.location.pathname;
         const urlMatch = urlPath.match(/\/manga\/\d+\/chapter\/\d+/);
-        if (!urlMatch) {
-            alert(`Error: URL does not match '.../manga/ID/chapter/ID'.`);
-            return;
-        }
+        if (!urlMatch) { alert(`Error: URL does not match '.../manga/ID/chapter/ID'.`); return; }
         const baseUrl = `${window.location.origin}/api/v1${urlMatch[0]}/page/`;
         await runProbingProcess(baseUrl, btn);
     }
-
     async function handleChapterBatchClick(event) {
         event.preventDefault(); event.stopPropagation();
         const btn = event.currentTarget;
@@ -532,7 +550,6 @@
         const baseUrl = `${window.location.origin}/api/v1${urlPath}/page/`;
         await runProbingProcess(baseUrl, btn);
     }
-
     function addOcrButtonToChapter(chapterLinkElement) {
         const moreButton = chapterLinkElement.querySelector('button[aria-label="more"]');
         if (!moreButton) return;
@@ -545,7 +562,6 @@
         ocrButton.addEventListener('click', handleChapterBatchClick);
         actionContainer.insertBefore(ocrButton, moreButton);
     }
-
     function checkServerStatus() {
         const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return;
         UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...';
@@ -558,17 +574,13 @@
                         UI.statusDiv.className = 'status-ok';
                         const jobs = data.active_preprocess_jobs !== undefined ? data.active_preprocess_jobs : 'N/A';
                         UI.statusDiv.textContent = `Connected (Cache: ${data.items_in_cache} | Active Jobs: ${jobs})`;
-                    } else {
-                         UI.statusDiv.className = 'status-error';
-                         UI.statusDiv.textContent = 'Server Unresponsive';
-                    }
+                    } else { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Server Unresponsive'; }
                 } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; }
             },
             onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; },
             ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; }
         });
     }
-
     function purgeServerCache() {
         if (!confirm("Are you sure you want to permanently delete all items from the server's OCR cache?")) return;
         const btn = UI.purgeCacheBtn;
@@ -585,15 +597,14 @@
             onloadend: () => { btn.disabled = false; btn.textContent = originalText; }
         });
     }
-
     function createMeasurementSpan() {
         if (measurementSpan) return;
         measurementSpan = document.createElement('span');
-        measurementSpan.style.cssText = `position: absolute !important; visibility: hidden !important; height: auto !important; width: auto !important; white-space: nowrap !important; z-index: -1 !important;`;
+        // This is a crucial tool. It's a hidden span that we use to measure text dimensions without affecting the layout.
+        measurementSpan.style.cssText = `position: absolute !important; visibility: hidden !important; left: -10000px; top: -10000px; height: auto !important; width: auto !important; white-space: nowrap !important; z-index: -1 !important;`;
         document.body.appendChild(measurementSpan);
     }
 
-    // --- SCRIPT INITIALIZATION ---
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) {
@@ -601,7 +612,6 @@
             catch(e) { logDebug("Could not parse saved settings. Using defaults."); }
         }
         createUI();
-        // NOTE: PersistentCache.load() has been removed.
         bindUIEvents();
         applyDynamicStyles();
         createMeasurementSpan();
