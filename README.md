@@ -109,7 +109,7 @@ This is a high-performance, alternative local OCR server written in Python. It d
 For Android users, you'll need **Termux**.
 
 > **Recommended Browser for Android:**
-> For the best experience, it's recommended to use **Edge Canary** or another browser that supports extensions. After installing it, get the **Tampermonkey** extension.
+> For the best experience, it's recommended to use **Edge Canary** , ** Firefox** or another browser that supports extensions. After installing it, install the **Tampermonkey** extension.
 >
 > To install the userscript, go to Tampermonkey's Dashboard -> Utilities -> "Install from File" after you download from this repository, or simply copy-paste the code.
 
@@ -119,7 +119,7 @@ For Android users, you'll need **Termux**.
 2.  **Set up Suwayomi-Server in Termux:**
     *   Open a Termux session and run the following command to install and configure Suwayomi-Server. This sets up a simple `suwayomi` command for you to use.
     > ```sh
-    > pkg update -y && pkg install -y openjdk-21 wget && mkdir -p ~/suwayomi/bin && wget -O ~/suwayomi/SuwayomiServer.jar https://github.com/Suwayomi/Suwayomi-Server/releases/download/v2.0.1727/Suwayomi-Server-v2.0.1727.jar && echo -e '#!/data/data/com.termux/files/usr/bin/bash\njava -jar ~/suwayomi/SuwayomiServer.jar' > ~/suwayomi/bin/suwayomi && chmod +x ~/suwayomi/bin/suwayomi && echo 'export PATH="$HOME/suwayomi/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+    > pkg update -y && pkg install -y openjdk-21 wget jq && mkdir -p ~/suwayomi/bin && LATEST_JAR_URL=$(curl -s https://api.github.com/repos/Suwayomi/Suwayomi-Server/releases/latest | jq -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url') && wget -O ~/suwayomi/SuwayomiServer.jar "$LATEST_JAR_URL" && echo -e '#!/data/data/com.termux/files/usr/bin/bash\njava -jar ~/suwayomi/SuwayomiServer.jar' > ~/suwayomi/bin/suwayomi && chmod +x ~/suwayomi/bin/suwayomi && echo 'export PATH="$HOME/suwayomi/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
     > ```
     *   From now on, you can always run Suwayomi by just typing `suwayomi` in Termux.
 
@@ -128,18 +128,12 @@ For Android users, you'll need **Termux**.
     *   Copy the entire command block and paste it into your Termux terminal, then press Enter.
     > ```sh
     > rm -rf ~/Mangatan && pkg install -y git nodejs && git clone https://github.com/kaihouguide/Mangatan && cd Mangatan/ocr-server-legacy && npm install express chrome-lens-ocr multer node-fetch --force && mkdir -p ~/bin && echo -e '#!/data/data/com.termux/files/usr/bin/sh\ncd ~/Mangatan/ocr-server-legacy && node server.js' > ~/bin/mangatan && chmod +x ~/bin/mangatan && echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
-    > ```
-    *   After the command above finishes, run these next commands **one-by-one** to finalize the installation.
-        > ```sh
-        > npm install --cpu=wasm32 sharp
-        > npm install @img/sharp-wasm32 --force
-        > rm -rf node_modules package-lock.json
-        > npm install --force
-        > ```
+    
+   
     > After this, you can always start the Mangatan server by just typing `mangatan` in Termux.
 
 ### 💡 Usage
-*   Open Termux and write `suwayomi`, swipe right to open a new session, and write `mangatan`. Then go to `127.0.0.1:4567` and start reading.
+*   Open Termux and write `suwayomi`, swipe from left to right to open a new session*, and write `mangatan`. Then go to `127.0.0.1:4567` and start reading. *If you have swipe gestures, swipe from bottom left, upwards.
 *   **Toggle Overlay**: **Long-press** (press and hold for about half a second) on an image to show or hide the OCR text overlay.
 *   **Tap-to-Focus**: Once the overlay is visible, **tap** on any specific text box to highlight it.
 *   **Configuration**: Tap the **`⚙️`** (gear) icon to open the settings panel. From here you can change the color theme, text orientation, Anki settings, and more.
