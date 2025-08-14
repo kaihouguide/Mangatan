@@ -5,12 +5,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
+import process from 'node:process';
 
 const app = express();
 const port = 3000;
 const lens = new LensCore();
 
-const CACHE_FILE_PATH = path.join(process.cwd(), 'ocr-cache.json');
+// Get cache path from command-line arguments, otherwise use the default.
+const customCachePath = process.argv[2] ? path.resolve(process.argv[2]) : process.cwd();
+const CACHE_FILE_PATH = path.join(customCachePath, 'ocr-cache.json');
 const upload = multer({ dest: 'uploads/' });
 let ocrCache = new Map();
 let ocrRequestsProcessed = 0;
@@ -26,7 +29,7 @@ function loadCacheFromFile() {
             ocrCache = new Map(Object.entries(data));
             console.log(`[Cache] Loaded ${ocrCache.size} items from ${CACHE_FILE_PATH}`);
         } else {
-            console.log(`[Cache] No cache file found. Starting fresh.`);
+            console.log(`[Cache] No cache file found. Starting fresh at ${CACHE_FILE_PATH}`);
         }
     } catch (error) {
         console.error('[Cache] Error loading cache from file:', error);
@@ -35,6 +38,11 @@ function loadCacheFromFile() {
 
 function saveCacheToFile() {
     try {
+        // Ensure the directory exists before saving the file
+        const cacheDir = path.dirname(CACHE_FILE_PATH);
+        if (!fs.existsSync(cacheDir)) {
+            fs.mkdirSync(cacheDir, { recursive: true });
+        }
         const data = Object.fromEntries(ocrCache);
         fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(data, null, 2));
     } catch (error) {
@@ -256,6 +264,7 @@ app.listen(port, (err) => {
     } else {
         loadCacheFromFile();
         console.log(`Local OCR Server V3.0 listening at http://127.0.0.1:${port}`);
+        console.log(`Cache file path: ${CACHE_FILE_PATH}`); // NEW: Log the cache file path
         console.log('Features: Persistent Caching, Import/Export, Conditional Auth, Chapter Pre-processing');
     }
 });
