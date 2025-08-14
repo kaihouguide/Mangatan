@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.5 - Parser-Fix)
+// @name         Automatic Content OCR (v23.M.6 - Smart-Mode-Fix)
 // @namespace    http://tampermonkey.net/
-// @version      23.5.0
-// @description  Server-side OCR with a mobile-optimized UI. Features refactored engines and a fix for data parsing.
+// @version      23.6.0
+// @description  Server-side OCR with a mobile-optimized UI. Smart orientation mode is now based purely on dimensions.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -48,7 +48,7 @@
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M5_parserfix'; // Updated settings key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v23_M6_smartfix'; // Updated settings key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -65,7 +65,7 @@
     const DOUBLE_TAP_THRESHOLD = 300;
 
     const COLOR_THEMES = { deepblue: { main: 'rgba(0,191,255,',  text: '#FFFFFF', highlightText: '#000000' }, red: { main: 'rgba(255, 71, 87,',   text: '#FFFFFF', highlightText: '#000000' }, green: { main: 'rgba(46, 204, 113,',  text: '#FFFFFF', highlightText: '#000000' }, orange: { main: 'rgba(243, 156, 18,',  text: '#FFFFFF', highlightText: '#000000' }, purple: { main: 'rgba(155, 89, 182,',  text: '#FFFFFF', highlightText: '#000000' }, turquoise:{ main: 'rgba(26, 188, 156,', text: '#FFFFFF', highlightText: '#000000' }, pink: { main: 'rgba(232, 67, 147,',  text: '#FFFFFF', highlightText: '#000000' }, grey: { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' } };
-    const logDebug = (message) => { if (!settings.debugMode) return; const timestamp = new Date().toLocaleTimeString(); const logEntry = `[${timestamp}] ${message}`; console.log(`[OCR v23.M.5-ParserFix] ${logEntry}`); debugLog.push(logEntry); document.dispatchEvent(new CustomEvent('ocr-log-update')); };
+    const logDebug = (message) => { if (!settings.debugMode) return; const timestamp = new Date().toLocaleTimeString(); const logEntry = `[${timestamp}] ${message}`; console.log(`[OCR v23.M.6-SmartFix] ${logEntry}`); debugLog.push(logEntry); document.dispatchEvent(new CustomEvent('ocr-log-update')); };
 
     // --- TOUCH INTERACTION LOGIC (Unchanged) ---
     function triggerOverlayToggle(targetImg) { const overlayState = managedElements.get(targetImg); if (overlayState?.overlay) { if (overlayState.overlay === activeOverlay) { hideActiveOverlay(); } else { showOverlay(overlayState.overlay, targetImg); } } }
@@ -84,59 +84,43 @@
     const chapterObserver = new MutationObserver((mutations) => { for (const mutation of mutations) { for (const node of mutation.addedNodes) { if (node.nodeType === 1) { const chapterLinks = node.matches('a[href*="/manga/"][href*="/chapter/"]') ? [node] : node.querySelectorAll('a[href*="/manga/"][href*="/chapter/"]'); chapterLinks.forEach(addOcrButtonToChapter); } } } });
     function observeChapters() { const targetNode = document.getElementById('root'); if (targetNode) { logDebug("Chapter observer activated on #root."); targetNode.querySelectorAll('a[href*="/manga/"][href*="/chapter/"]').forEach(addOcrButtonToChapter); chapterObserver.observe(targetNode, { childList: true, subtree: true }); } }
 
-    // --- Image Handling Logic ---
+    // --- Image Handling Logic (Unchanged) ---
     function observeImageForSrcChange(img) { const processTheImage = (src) => { if (src?.includes('/api/v1/manga/') && src?.includes('/chapter/')) { primeImageForOcr(img); return true; } return false; }; if (processTheImage(img.src) || attachedAttributeObservers.has(img)) return; const attributeObserver = new MutationObserver((mutations) => { for (const mutation of mutations) if (mutation.attributeName === 'src' && processTheImage(img.src)) { attributeObserver.disconnect(); attachedAttributeObservers.delete(img); break; } }); attributeObserver.observe(img, { attributes: true }); attachedAttributeObservers.set(img, attributeObserver); }
     function primeImageForOcr(img) { const process = () => { if (ocrDataCache.get(img) === 'pending') return; img.crossOrigin = "anonymous"; const realSrc = img.src; processImage(img, realSrc); }; if (img.complete && img.naturalHeight > 0) process(); else img.addEventListener('load', process, { once: true }); }
-
-    // --- REVERTED: processImage now handles direct array response ---
-    function processImage(img, sourceUrl) {
-        if (ocrDataCache.has(img) && ocrDataCache.get(img) !== 'pending') {
-            displayOcrResults(img);
-            return;
-        }
-        logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
-        ocrDataCache.set(img, 'pending');
-
-        let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`;
-        if (settings.imageServerUser) { ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`; }
-
-        GM_xmlhttpRequest({
-            method: 'GET', url: ocrRequestUrl, timeout: 30000,
-            onload: (res) => {
-                try {
-                    // Reverted to parsing the response directly as the data array.
-                    const data = JSON.parse(res.responseText);
-                    if (data.error) throw new Error(data.error);
-
-                    ocrDataCache.set(img, data);
-                    logDebug(`OCR success for ...${sourceUrl.slice(-30)}`);
-                    displayOcrResults(img);
-                } catch (e) {
-                    logDebug(`OCR Error: ${e.message}`);
-                    ocrDataCache.delete(img);
-                }
-            },
-            onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); },
-            ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); }
-        });
-    }
+    function processImage(img, sourceUrl) { if (ocrDataCache.has(img) && ocrDataCache.get(img) !== 'pending') { displayOcrResults(img); return; } logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`); ocrDataCache.set(img, 'pending'); let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`; if (settings.imageServerUser) { ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`; } GM_xmlhttpRequest({ method: 'GET', url: ocrRequestUrl, timeout: 30000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); ocrDataCache.set(img, data); logDebug(`OCR success for ...${sourceUrl.slice(-30)}`); displayOcrResults(img); } catch (e) { logDebug(`OCR Error: ${e.message}`); ocrDataCache.delete(img); } }, onerror: (res) => { logDebug(`Connection error. Status: ${res.status}`); ocrDataCache.delete(img); }, ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); } }); }
 
     // --- Overlay Management (Unchanged) ---
     function showOverlay(overlay, image) { if (activeOverlay && activeOverlay !== overlay) { hideActiveOverlay(); } activeOverlay = overlay; activeImageForExport = image; overlay.classList.remove('is-hidden'); overlay.classList.add('is-focused'); UI.globalAnkiButton?.classList.remove('is-hidden'); }
     function hideActiveOverlay() { if (!activeOverlay) return; activeOverlay.classList.add('is-hidden'); activeOverlay.classList.remove('is-focused', 'has-manual-highlight'); activeOverlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight')); UI.globalAnkiButton?.classList.add('is-hidden'); activeOverlay = null; activeImageForExport = null; }
 
-    // --- NEW: Robust Orientation Detection Helper (Kept) ---
+    // --- MODIFIED: Orientation Detection Helper for Mobile ---
     function determineIfVertical(item, textOrientationSetting) {
+        // Handle explicit user overrides first.
         if (textOrientationSetting === 'forceVertical') return true;
         if (textOrientationSetting === 'forceHorizontal') return false;
+
         const box = item.tightBoundingBox;
-        const hasReliableAngle = item.orientation !== undefined && item.orientation !== null;
-        if (textOrientationSetting === 'serverAngle' && hasReliableAngle) { return Math.abs(item.orientation) > 45; }
-        if (textOrientationSetting === 'smart') { if (hasReliableAngle) { return Math.abs(item.orientation) > 45; } if (box.height > 0) { return (box.width / box.height) > 1.5; } return false; }
+
+        // The 'serverAngle' mode is for users who explicitly trust the server's angle.
+        if (textOrientationSetting === 'serverAngle') {
+            const hasAngle = item.orientation !== undefined && item.orientation !== null;
+            return hasAngle && Math.abs(item.orientation) > 45;
+        }
+
+        // The 'smart' mode for mobile now ONLY uses dimension calculation,
+        // ignoring the potentially incorrect server angle.
+        if (textOrientationSetting === 'smart') {
+            if (box.height > 0) {
+                // True for vertical if the box is significantly wider than it is tall.
+                return (box.width / box.height) > 1.5;
+            }
+            return false; // Cannot determine if height is zero.
+        }
+
+        // Default fallback.
         return false;
     }
 
-    // --- displayOcrResults now uses the new helper (Kept) ---
     function displayOcrResults(targetImg) {
         if (ocrDataCache.get(targetImg) === 'pending' || managedElements.has(targetImg)) return;
         const data = ocrDataCache.get(targetImg);
@@ -160,7 +144,7 @@
         if (!overlayUpdateRunning) { requestAnimationFrame(updateAllOverlays); overlayUpdateRunning = true; }
     }
 
-    // --- REFACTORED: Accurate Font Calculation (Kept) ---
+    // --- REFACTORED: Accurate Font Calculation (Unchanged from previous version) ---
     function calculateAndApplyFontSizes(overlay, imgRect) {
         if (!measurementSpan) return;
         overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
