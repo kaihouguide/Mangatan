@@ -1,23 +1,32 @@
-// server.js - V3.0 with Ported Python Features
+// server.js - V3.2 with Configurable Host & Port using Commander.js
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
-import process from 'node:process';
+import { program } from 'commander'; // Needed AFAIK for CMD Below
 
 const app = express();
-const port = 3000;
-const lens = new LensCore();
 
-// Get cache path from command-line arguments, otherwise use the default.
-const customCachePath = process.argv[2] ? path.resolve(process.argv[2]) : process.cwd();
+// --- Command-line Argument Parsing ---
+program
+    .option('--ip <string>', 'Specify the server IP address to bind to', '127.0.0.1')
+    .option('--port <number>', 'Specify the server port to listen on', 3000)
+    .option('--cache-path <string>', 'Specify a custom path for the cache file', process.cwd())
+    .parse(process.argv);
+
+const options = program.opts();
+const host = options.ip;
+const port = options.port;
+const customCachePath = path.resolve(options.cachePath);
+
+const lens = new LensCore();
 const CACHE_FILE_PATH = path.join(customCachePath, 'ocr-cache.json');
 const upload = multer({ dest: 'uploads/' });
 let ocrCache = new Map();
 let ocrRequestsProcessed = 0;
-let activeJobCount = 0; // NEW: Counter for active background jobs
+let activeJobCount = 0; // Counter for active background jobs
 
 // --- Utility Functions ---
 
@@ -71,7 +80,7 @@ function transformOcrData(lensResult) {
     });
 }
 
-// --- NEW: Background Job for Chapter Pre-processing ---
+// --- Background Job for Chapter Pre-processing ---
 
 async function runChapterProcessingJob(baseUrl, authUser, authPass) {
     activeJobCount++;
@@ -80,7 +89,7 @@ async function runChapterProcessingJob(baseUrl, authUser, authPass) {
     let pageIndex = 0;
     let consecutiveErrors = 0;
     const CONSECUTIVE_ERROR_THRESHOLD = 3;
-    const SERVER_URL_BASE = `http://127.0.0.1:${port}`;
+    const SERVER_URL_BASE = `http://${host}:${port}`;
 
     while (consecutiveErrors < CONSECUTIVE_ERROR_THRESHOLD) {
         const imageUrl = `${baseUrl}${pageIndex}`;
@@ -124,7 +133,6 @@ async function runChapterProcessingJob(baseUrl, authUser, authPass) {
     activeJobCount--;
 }
 
-
 // --- Middleware & Endpoints ---
 
 app.use(express.json()); // Middleware to parse JSON bodies
@@ -140,7 +148,9 @@ app.get('/', (req, res) => {
         message: 'Local OCR server is active.',
         requests_processed: ocrRequestsProcessed,
         items_in_cache: ocrCache.size,
-        active_preprocess_jobs: activeJobCount, // NEW: Added active job count
+        active_preprocess_jobs: activeJobCount,
+        server_host: host,
+        server_port: port
     });
 });
 
@@ -192,21 +202,20 @@ app.get('/ocr', async (req, res) => {
     }
 });
 
-// NEW: Endpoint to start a chapter pre-processing job
+// Endpoint to start a chapter pre-processing job
 app.post("/preprocess-chapter", (req, res) => {
     const { baseUrl, user, pass } = req.body;
     if (!baseUrl) {
         return res.status(400).json({ error: "baseUrl is required" });
     }
 
-    // Run the job in the background without waiting for it to complete
     runChapterProcessingJob(baseUrl, user, pass);
 
     console.log(`[Queue] Job started in background for ...${baseUrl.slice(-40)}`);
     return res.status(202).json({ status: "accepted", message: "Chapter pre-processing job has been started." });
 });
 
-// NEW: Endpoint to purge the cache
+// Endpoint to purge the cache
 app.post("/purge-cache", (req, res) => {
     const count = ocrCache.size;
     ocrCache.clear();
@@ -257,14 +266,14 @@ app.post('/import-cache', upload.single('cacheFile'), (req, res) => {
 
 // --- Server Initialization ---
 
-app.listen(port, (err) => {
+app.listen(port, host, (err) => {
     if (err) {
         console.error('An error has occurred while booting up the server.');
         console.error(err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V3.0 listening at http://127.0.0.1:${port}`);
-        console.log(`Cache file path: ${CACHE_FILE_PATH}`); // NEW: Log the cache file path
+        console.log(`Local OCR Server V3.2 listening at http://${host}:${port}`);
+        console.log(`Cache file path: ${CACHE_FILE_PATH}`);
         console.log('Features: Persistent Caching, Import/Export, Conditional Auth, Chapter Pre-processing');
     }
 });

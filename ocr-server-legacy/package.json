@@ -13,6 +13,7 @@
       "license": "ISC",
       "dependencies": {
             "chrome-lens-ocr": "^4.1.0",
+            "commander": "^14.0.0",
             "express": "^5.1.0",
             "multer": "^2.0.2",
             "node-fetch": "^3.3.2"
