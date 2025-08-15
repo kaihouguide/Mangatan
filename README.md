@@ -177,15 +177,27 @@ This section provides an alternative setup method for users who prefer to run th
 
 ### 💡 Tips
 
-  * **Automate Startup**: You can use a `.bat` script to launch both Suwayomi and the OCR server with a single click. For even more convenience, use a tool like **NSSM** (Non-Sucking Service Manager) to set these scripts to automatically start when your computer is reset or rebooted.
-  * **Example `.bat` script**:
+  * **Automate Startup**: For the most reliable performance, you should run the Suwayomi server and the OCR server as separate services. This allows a tool like **NSSM** (Non-Sucking Service Manager) to monitor and restart each component independently if it crashes.
+
+  * **Example Script for Suwayomi Server**:
+    To launch the core server directly and avoid any issues with the launcher, create a `.bat` file with the following content. Make sure to use the specific Java runtime that comes with the application.
+
     ```bat
     @echo off
-    java -jar Suwayomi-Launcher.jar
-    cd ocr-server-legacy/
-    node server.js --ip 10.0.0.X --port: 1234 --cache-file d://cache/
-    pause
+    cd /d "<path-to-suwayomi-server-folder>"
+    "<path-to-suwayomi-server-folder>\jre\bin\java.exe" -jar "<path-to-suwayomi-server-folder>\bin\Suwayomi-Server.jar"
     ```
+
+  * **Example Script for OCR Server**:
+    The OCR server should be in a separate `.bat` file and configured as its own service.
+
+    ```bat
+    @echo off
+    cd /d "<path-to-suwayomi-server-folder>\ocr-server-legacy"
+    node server.js --cache-path "<your-cache-path>" --ip <your-ip-address> --port <your-port>
+    ```
+
+  * **Important**: You must use absolute paths for both the `cd` commands and the executable files. NSSM services often run with a different environment than your user account, so relative paths may not work correctly.
 #### Notes
 * You will have to go into tamper monke
 
