@@ -109,7 +109,7 @@ This is a high-performance, alternative local OCR server written in Python. It d
 For Android users, you'll need **Termux**.
 
 > **Recommended Browser for Android:**
-> For the best experience, it's recommended to use **Edge Canary** , ** Firefox** or another browser that supports extensions. After installing it, install the **Tampermonkey** extension.
+> For the best experience, it's recommended to use **Edge Canary** , **Firefox** or another browser that supports extensions. After installing it, install the **Tampermonkey** extension.
 >
 > To install the userscript, go to Tampermonkey's Dashboard -> Utilities -> "Install from File" after you download from this repository, or simply copy-paste the code.
 
@@ -140,6 +140,54 @@ For Android users, you'll need **Termux**.
 *   **Anki Export**: After long-pressing an image to make the overlay visible, a **`✚`** button will appear. Tapping this button will export a screenshot of the image to the last created card in Anki.
 *   **Note**: The persistent cache file (`ocr-cache.json`) will be stored in the `~/Mangatan/ocr-server-legacy` directory.
 
+Here is the updated response with the new header you requested.
+
+## <a id="for-android-alternative"></a>📱 For Android {ALTERNATIVE}
+
+This section provides an alternative setup method for users who prefer to run the servers on a desktop or host machine and access them from their mobile device.
+
+1.  **Download and Set up Suwayomi & OCR on Host Machine:**
+
+      * Begin by downloading and configuring both the Suwayomi-Server and Mangatan OCR-Server on your host computer (Windows, macOS, or Linux).
+
+2.  **Configure Suwayomi and OCR URLs:**
+
+      * **Suwayomi Setup**:
+
+          * Locate the `server.conf` file, which is typically found in the application data directory.
+          * Change the `server.ip` setting to your host machine's IP address. More information on the default data directory locations can be found below.
+
+        > **Data Directory Locations:**
+
+        >   * **Windows 7 and later**: `C:\Users\<Account>\AppData\Local\Tachidesk`
+        >   * **Windows XP**: `C:\Documents and Settings\<Account>\Application Data\Local Settings\Tachidesk`
+        >   * **macOS**: `/Users/<Account>/Library/Application Support/Tachidesk`
+        >   * **Unix/Linux**: `/home/<account>/.local/share/Tachidesk`
+
+      * **OCR Setup**:
+
+          * Launch the Mangatan OCR server with a custom argument to specify its IP address.
+          * Use the command-line argument `--ip <your_host_ip_address>` when starting the server.
+
+3.  **Mobile Setup:**
+
+      * On your Android device, install the **Tampermonkey** extension on your preferred browser (e.g., Edge Canary, Firefox).
+      * Install the tampermonkey and the script from the repository.
+      * After installation, adjust the IP addresses and port numbers in the scripts's settings to match the ones you configured on your host machine. This will allow your mobile browser to connect to the servers running on your desktop. (You will have to do this every script update——For now.)
+
+### 💡 Tips
+
+  * **Automate Startup**: You can use a `.bat` script to launch both Suwayomi and the OCR server with a single click. For even more convenience, use a tool like **NSSM** (Non-Sucking Service Manager) to set these scripts to automatically start when your computer is reset or rebooted.
+  * **Example `.bat` script**:
+    ```bat
+    @echo off
+    java -jar Suwayomi-Launcher.jar
+    cd ocr-server-legacy/
+    node server.js --ip 10.0.0.X --port: 1234 --cache-file d://cache/
+    pause
+    ```
+#### Notes
+* You will have to go into tamper monke
 
 
 ## Combined Server
