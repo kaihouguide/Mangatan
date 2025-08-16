@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.9-Best-Fit-Engine-Optimized)
+// @name         Automatic Content OCR (v23.M.9-Best-Fit-Engine-Corrected)
 // @namespace    http://tampermonkey.net/
-// @version      23.9.1
-// @description  Server-side OCR with a mobile-optimized UI. Features a new, highly optimized "best fit" engine for orientation and font-size detection.
+// @version      23.9.2
+// @description  Server-side OCR with a mobile-optimized UI. Features a corrected, high-performance "best fit" engine.
 // @author       1Selxo (Mobile port by Gemini, Refactors by Gemini, Optimization by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -93,12 +93,11 @@
     function showOverlay(overlay, image) { if (activeOverlay && activeOverlay !== overlay) { hideActiveOverlay(); } activeOverlay = overlay; activeImageForExport = image; overlay.classList.remove('is-hidden'); overlay.classList.add('is-focused'); UI.globalAnkiButton?.classList.remove('is-hidden'); }
     function hideActiveOverlay() { if (!activeOverlay) return; activeOverlay.classList.add('is-hidden'); activeOverlay.classList.remove('is-focused', 'has-manual-highlight'); activeOverlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight')); UI.globalAnkiButton?.classList.add('is-hidden'); activeOverlay = null; activeImageForExport = null; }
 
-    // --- OPTIMIZED Best-Fit Rendering Engine ---
+    // --- CORRECTED & OPTIMIZED Best-Fit Rendering Engine ---
 
     /**
-     * Determines the best orientation and font size for each text box using a highly efficient
-     * ratio-based calculation instead of an iterative binary search. This avoids "layout thrashing"
-     * and provides a massive performance boost.
+     * Determines the best orientation and font size using a corrected, high-performance,
+     * two-dimensional ratio calculation. This is both fast and accurate.
      *
      * @param {HTMLElement} overlay The overlay element containing the text boxes.
      * @param {DOMRect} imgRect The current dimensions of the source image.
@@ -106,12 +105,10 @@
     function calculateAndApplyOptimalStyles_Optimized(overlay, imgRect) {
         if (!measurementSpan || imgRect.width === 0 || imgRect.height === 0) return;
 
-        logDebug("Running OPTIMIZED style calculation...");
+        logDebug("Running CORRECTED & OPTIMIZED style calculation...");
         const boxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box'));
         if (boxes.length === 0) return;
 
-        // --- Phase 1: Gather data and prepare calculation jobs ---
-        // This phase reads from the DOM.
         const baseStyle = getComputedStyle(boxes[0]);
         Object.assign(measurementSpan.style, {
             fontFamily: baseStyle.fontFamily,
@@ -120,46 +117,47 @@
             fontSize: '100px' // Use a large, fixed base size for stable ratio calculations
         });
 
-        const calculationJobs = boxes.map(box => {
-            const text = box.textContent || '';
-            const boxStyle = box.style;
-            const availableWidth = (parseFloat(boxStyle.width) / 100) * imgRect.width - 8; // Subtract padding
-            const availableHeight = (parseFloat(boxStyle.height) / 100) * imgRect.height - 8; // Subtract padding
-            return { box, text, availableWidth, availableHeight };
-        });
+        const calculationJobs = boxes.map(box => ({
+            box: box,
+            text: box.textContent || '',
+            availableWidth: (parseFloat(box.style.width) / 100) * imgRect.width - 8,
+            availableHeight: (parseFloat(box.style.height) / 100) * imgRect.height - 8
+        }));
 
-        // --- Phase 2: Perform calculations ---
-        // This phase is computationally intensive but has minimal DOM interaction (only reads).
         const styleResults = [];
         const BASE_FONT_SIZE = 100;
 
         for (const job of calculationJobs) {
             if (!job.text || job.availableWidth <= 0 || job.availableHeight <= 0) continue;
 
+            // --- Horizontal Calculation ---
+            measurementSpan.style.writingMode = 'horizontal-tb';
+            measurementSpan.textContent = job.text;
+            const h_w = measurementSpan.offsetWidth;
+            const h_h = measurementSpan.offsetHeight;
+            const h_ratio_w = h_w > 0 ? job.availableWidth / h_w : 0;
+            const h_ratio_h = h_h > 0 ? job.availableHeight / h_h : 0;
+            const horizontalFitSize = BASE_FONT_SIZE * Math.min(h_ratio_w, h_ratio_h);
+
+            // --- Vertical Calculation ---
+            measurementSpan.style.writingMode = 'vertical-rl';
+            const v_w = measurementSpan.offsetWidth;
+            const v_h = measurementSpan.offsetHeight;
+            const v_ratio_w = v_w > 0 ? job.availableWidth / v_w : 0;
+            const v_ratio_h = v_h > 0 ? job.availableHeight / v_h : 0;
+            const verticalFitSize = BASE_FONT_SIZE * Math.min(v_ratio_w, v_ratio_h);
+
             let finalFontSize = 0;
             let isVertical = false;
 
-            // Measure once for horizontal, calculate optimal size via ratio
-            measurementSpan.style.writingMode = 'horizontal-tb';
-            measurementSpan.textContent = job.text;
-            const hMetrics = { w: measurementSpan.offsetWidth, h: measurementSpan.offsetHeight };
-            const hRatio = hMetrics.w > 0 ? job.availableWidth / hMetrics.w : 0;
-            const horizontalFitSize = BASE_FONT_SIZE * hRatio;
-
-            // Measure once for vertical, calculate optimal size via ratio
-            measurementSpan.style.writingMode = 'vertical-rl';
-            const vMetrics = { w: measurementSpan.offsetWidth, h: measurementSpan.offsetHeight };
-            const vRatio = vMetrics.h > 0 ? job.availableHeight / vMetrics.h : 0;
-            const verticalFitSize = BASE_FONT_SIZE * vRatio;
-
-            // Determine orientation based on settings
+            // --- Determine orientation based on settings ---
             if (settings.textOrientation === 'forceVertical') {
                 isVertical = true;
                 finalFontSize = verticalFitSize;
             } else if (settings.textOrientation === 'forceHorizontal') {
                 isVertical = false;
                 finalFontSize = horizontalFitSize;
-            } else { // 'smart' mode
+            } else { // 'smart' mode: choose the orientation that allows for a larger font
                 if (verticalFitSize > horizontalFitSize) {
                     isVertical = true;
                     finalFontSize = verticalFitSize;
@@ -168,7 +166,7 @@
                     finalFontSize = horizontalFitSize;
                 }
             }
-            
+
             const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
             styleResults.push({
                 box: job.box,
@@ -177,15 +175,13 @@
             });
         }
 
-        // --- Phase 3: Apply styles ---
-        // This phase writes all the calculated styles to the DOM in a single batch.
+        // --- Batch apply all styles to the DOM ---
         for (const result of styleResults) {
             result.box.style.fontSize = result.fontSize;
             result.box.classList.toggle('gemini-ocr-text-vertical', result.isVertical);
         }
 
-        // Reset measurement span for safety
-        measurementSpan.style.writingMode = 'horizontal-tb';
+        measurementSpan.style.writingMode = 'horizontal-tb'; // Reset for safety
     }
 
 
