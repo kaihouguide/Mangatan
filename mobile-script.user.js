@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.M.9-Best-Fit-Engine)
+// @name         Automatic Content OCR (v23.M.9-Best-Fit-Engine-Optimized)
 // @namespace    http://tampermonkey.net/
-// @version      23.9.0
-// @description  Server-side OCR with a mobile-optimized UI. Features a new "best fit" engine for orientation detection.
-// @author       1Selxo (Mobile port by Gemini, Refactors by Gemini)
+// @version      23.9.1
+// @description  Server-side OCR with a mobile-optimized UI. Features a new, highly optimized "best fit" engine for orientation and font-size detection.
+// @author       1Selxo (Mobile port by Gemini, Refactors by Gemini, Optimization by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -93,70 +93,73 @@
     function showOverlay(overlay, image) { if (activeOverlay && activeOverlay !== overlay) { hideActiveOverlay(); } activeOverlay = overlay; activeImageForExport = image; overlay.classList.remove('is-hidden'); overlay.classList.add('is-focused'); UI.globalAnkiButton?.classList.remove('is-hidden'); }
     function hideActiveOverlay() { if (!activeOverlay) return; activeOverlay.classList.add('is-hidden'); activeOverlay.classList.remove('is-focused', 'has-manual-highlight'); activeOverlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight')); UI.globalAnkiButton?.classList.add('is-hidden'); activeOverlay = null; activeImageForExport = null; }
 
-    // --- NEW: Best-Fit Rendering Engine ---
+    // --- OPTIMIZED Best-Fit Rendering Engine ---
 
     /**
-     * Helper function to find the maximum font size that fits within given dimensions.
-     * @returns {number} The optimal font size in pixels.
+     * Determines the best orientation and font size for each text box using a highly efficient
+     * ratio-based calculation instead of an iterative binary search. This avoids "layout thrashing"
+     * and provides a massive performance boost.
+     *
+     * @param {HTMLElement} overlay The overlay element containing the text boxes.
+     * @param {DOMRect} imgRect The current dimensions of the source image.
      */
-    function findBestFitFontSize(text, availableWidth, availableHeight, isVertical) {
-        if (!text || availableWidth <= 0 || availableHeight <= 0) return 0;
+    function calculateAndApplyOptimalStyles_Optimized(overlay, imgRect) {
+        if (!measurementSpan || imgRect.width === 0 || imgRect.height === 0) return;
 
-        measurementSpan.style.writingMode = isVertical ? 'vertical-rl' : 'horizontal-tb';
-        measurementSpan.textContent = text;
+        logDebug("Running OPTIMIZED style calculation...");
+        const boxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box'));
+        if (boxes.length === 0) return;
 
-        let low = 6, high = 200, bestSize = 6;
-        while (low <= high) {
-            const mid = Math.floor((low + high) / 2);
-            if (mid <= 0) break;
-            measurementSpan.style.fontSize = `${mid}px`;
-            if (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) {
-                bestSize = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-        return bestSize;
-    }
-
-    /**
-     * Determines the best orientation (horizontal/vertical) and font size for each text box
-     * and applies the appropriate styles. This is the new core rendering function.
-     */
-    function calculateAndApplyOptimalStyles(overlay, imgRect) {
-        if (!measurementSpan) return;
-
-        const baseStyle = getComputedStyle(overlay.querySelector('.gemini-ocr-text-box') || overlay);
+        // --- Phase 1: Gather data and prepare calculation jobs ---
+        // This phase reads from the DOM.
+        const baseStyle = getComputedStyle(boxes[0]);
         Object.assign(measurementSpan.style, {
             fontFamily: baseStyle.fontFamily,
             fontWeight: baseStyle.fontWeight,
-            letterSpacing: baseStyle.letterSpacing
+            letterSpacing: baseStyle.letterSpacing,
+            fontSize: '100px' // Use a large, fixed base size for stable ratio calculations
         });
 
-        overlay.querySelectorAll('.gemini-ocr-text-box').forEach(box => {
+        const calculationJobs = boxes.map(box => {
             const text = box.textContent || '';
-            if (!text) return;
-
             const boxStyle = box.style;
-            const availableWidth = (parseFloat(boxStyle.width) / 100) * imgRect.width - 8;
-            const availableHeight = (parseFloat(boxStyle.height) / 100) * imgRect.height - 8;
+            const availableWidth = (parseFloat(boxStyle.width) / 100) * imgRect.width - 8; // Subtract padding
+            const availableHeight = (parseFloat(boxStyle.height) / 100) * imgRect.height - 8; // Subtract padding
+            return { box, text, availableWidth, availableHeight };
+        });
 
-            let isVertical = false;
+        // --- Phase 2: Perform calculations ---
+        // This phase is computationally intensive but has minimal DOM interaction (only reads).
+        const styleResults = [];
+        const BASE_FONT_SIZE = 100;
+
+        for (const job of calculationJobs) {
+            if (!job.text || job.availableWidth <= 0 || job.availableHeight <= 0) continue;
+
             let finalFontSize = 0;
+            let isVertical = false;
 
-            // Determine orientation based on user settings
+            // Measure once for horizontal, calculate optimal size via ratio
+            measurementSpan.style.writingMode = 'horizontal-tb';
+            measurementSpan.textContent = job.text;
+            const hMetrics = { w: measurementSpan.offsetWidth, h: measurementSpan.offsetHeight };
+            const hRatio = hMetrics.w > 0 ? job.availableWidth / hMetrics.w : 0;
+            const horizontalFitSize = BASE_FONT_SIZE * hRatio;
+
+            // Measure once for vertical, calculate optimal size via ratio
+            measurementSpan.style.writingMode = 'vertical-rl';
+            const vMetrics = { w: measurementSpan.offsetWidth, h: measurementSpan.offsetHeight };
+            const vRatio = vMetrics.h > 0 ? job.availableHeight / vMetrics.h : 0;
+            const verticalFitSize = BASE_FONT_SIZE * vRatio;
+
+            // Determine orientation based on settings
             if (settings.textOrientation === 'forceVertical') {
                 isVertical = true;
-                finalFontSize = findBestFitFontSize(text, availableWidth, availableHeight, true);
+                finalFontSize = verticalFitSize;
             } else if (settings.textOrientation === 'forceHorizontal') {
                 isVertical = false;
-                finalFontSize = findBestFitFontSize(text, availableWidth, availableHeight, false);
-            } else {
-                // "Smart" mode: Calculate the best fit by comparing which orientation allows a larger font.
-                const horizontalFitSize = findBestFitFontSize(text, availableWidth, availableHeight, false);
-                const verticalFitSize = findBestFitFontSize(text, availableWidth, availableHeight, true);
-
+                finalFontSize = horizontalFitSize;
+            } else { // 'smart' mode
                 if (verticalFitSize > horizontalFitSize) {
                     isVertical = true;
                     finalFontSize = verticalFitSize;
@@ -164,14 +167,23 @@
                     isVertical = false;
                     finalFontSize = horizontalFitSize;
                 }
-                logDebug(`'${text.substring(0,5)}...': H-fit=${horizontalFitSize}px, V-fit=${verticalFitSize}px. Chose: ${isVertical ? 'Vertical' : 'Horizontal'}`);
             }
-
-            // Apply the determined styles
-            box.classList.toggle('gemini-ocr-text-vertical', isVertical);
+            
             const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
-            box.style.fontSize = `${finalFontSize * multiplier}px`;
-        });
+            styleResults.push({
+                box: job.box,
+                fontSize: `${finalFontSize * multiplier}px`,
+                isVertical: isVertical
+            });
+        }
+
+        // --- Phase 3: Apply styles ---
+        // This phase writes all the calculated styles to the DOM in a single batch.
+        for (const result of styleResults) {
+            result.box.style.fontSize = result.fontSize;
+            result.box.classList.toggle('gemini-ocr-text-vertical', result.isVertical);
+        }
+
         // Reset measurement span for safety
         measurementSpan.style.writingMode = 'horizontal-tb';
     }
@@ -226,8 +238,8 @@
                 Object.assign(state.overlay.style, { top: `${rect.top}px`, left: `${rect.left}px`, width: `${rect.width}px`, height: `${rect.height}px` });
 
                 if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
-                    // On first creation or resize, run the new optimal style calculation.
-                    calculateAndApplyOptimalStyles(state.overlay, rect);
+                    // On first creation or resize, run the new OPTIMIZED style calculation.
+                    calculateAndApplyOptimalStyles_Optimized(state.overlay, rect);
                     state.lastWidth = rect.width;
                     state.lastHeight = rect.height;
                 }
@@ -249,7 +261,7 @@
     function bindUIEvents() { Object.assign(UI, { settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'), globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'), debugModal: document.getElementById('gemini-ocr-debug-modal'), serverUrlInput: document.getElementById('gemini-ocr-server-url'), imageServerUserInput: document.getElementById('gemini-image-server-user'), imageServerPasswordInput: document.getElementById('gemini-image-server-password'), ankiUrlInput: document.getElementById('gemini-ocr-anki-url'), ankiFieldInput: document.getElementById('gemini-ocr-anki-field'), debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'), interactionModeSelect: document.getElementById('ocr-interaction-mode'), activationModeSelect: document.getElementById('ocr-activation-mode'), proximityRadiusInput: document.getElementById('ocr-proximity-radius'), dimmedOpacityInput: document.getElementById('ocr-dimmed-opacity'), textOrientationSelect: document.getElementById('ocr-text-orientation'), colorThemeSelect: document.getElementById('ocr-color-theme'), fontMultiplierHorizontalInput: document.getElementById('ocr-font-multiplier-horizontal'), fontMultiplierVerticalInput: document.getElementById('ocr-font-multiplier-vertical'), sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'), statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'), saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'), batchChapterBtn: document.getElementById('gemini-ocr-batch-chapter-btn'), purgeCacheBtn: document.getElementById('gemini-ocr-purge-cache-btn'), }); document.body.addEventListener('touchstart', handleTouchStart, { passive: false }); document.body.addEventListener('touchmove', handleTouchMove, { passive: false }); document.body.addEventListener('touchend', handleTouchEnd); document.body.addEventListener('touchcancel', handleTouchEnd); window.addEventListener('contextmenu', handleContextMenu, { capture: true, passive: false }); document.body.addEventListener('click', handleGlobalTap, true); UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden')); UI.globalAnkiButton.addEventListener('click', async () => { if (!activeImageForExport) { alert("No active image selected for export."); return; } const btn = UI.globalAnkiButton; btn.textContent = '…'; btn.disabled = true; const success = await exportImageToAnki(activeImageForExport); if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; } setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000); }); UI.statusDiv.addEventListener('click', checkServerStatus); UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden')); UI.debugBtn.addEventListener('click', () => { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugModal.classList.remove('is-hidden'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }); UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden')); UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); }); UI.batchChapterBtn.addEventListener('click', batchProcessCurrentChapterFromURL); UI.purgeCacheBtn.addEventListener('click', purgeServerCache); UI.saveBtn.addEventListener('click', async () => { const newSettings = { ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value, ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(), debugMode: UI.debugModeCheckbox.checked, interactionMode: UI.interactionModeSelect.value, activationMode: UI.activationModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value, proximityRadius: parseInt(UI.proximityRadiusInput.value, 10) || 150, dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100, fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0, sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: '', imageContainerSelectors: parts.slice(1).filter(s => s) }; }) }; try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); } catch (e) { logDebug(`Failed to save settings: ${e.message}`); alert(`Error: Could not save settings.`); } }); document.addEventListener('ocr-log-update', () => { if(UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) { UI.debugLogTextarea.value = debugLog.join('\n'); UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; }}); }
     function checkServerStatus() { const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return; UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...'; GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.status === 'running') { UI.statusDiv.className = 'status-ok'; const jobs = data.active_preprocess_jobs !== undefined ? data.active_preprocess_jobs : 'N/A'; UI.statusDiv.textContent = `Connected (Cache: ${data.items_in_cache} | Active Jobs: ${jobs})`; } else { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Server Unresponsive'; } } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } }); }
     function purgeServerCache() { if (!confirm("Are you sure you want to permanently delete all items from the server's OCR cache?")) return; const btn = UI.purgeCacheBtn; const originalText = btn.textContent; btn.disabled = true; btn.textContent = 'Purging...'; GM_xmlhttpRequest({ method: 'POST', url: `${settings.ocrServerUrl}/purge-cache`, timeout: 10000, onload: (res) => { try { const data = JSON.parse(res.responseText); alert(data.message || data.error); checkServerStatus(); } catch(e) { alert('Failed to parse server response.'); } }, onerror: () => alert('Failed to connect to server to purge cache.'), ontimeout: () => alert('Request to purge cache timed out.'), onloadend: () => { btn.disabled = false; btn.textContent = originalText; } }); }
-    function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:fixed!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;top:-9999px;left:-9999px;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
+    function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:fixed!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;top:-9999px;left:-9999px;padding:0!important;border:0!important;margin:0!important;`; document.body.appendChild(measurementSpan); logDebug("Created shared measurement span."); }
     async function init() { const loadedSettings = await GM_getValue(SETTINGS_KEY); if (loadedSettings) { try { const parsed = JSON.parse(loadedSettings); settings = { ...settings, ...parsed }; } catch(e) { logDebug("Could not parse saved settings. Using defaults."); } } createUI(); bindUIEvents(); applyStyles(); createMeasurementSpan(); UI.serverUrlInput.value = settings.ocrServerUrl; UI.imageServerUserInput.value = settings.imageServerUser || ''; UI.imageServerPasswordInput.value = settings.imageServerPassword || ''; UI.ankiUrlInput.value = settings.ankiConnectUrl; UI.ankiFieldInput.value = settings.ankiImageField; UI.debugModeCheckbox.checked = settings.debugMode; UI.interactionModeSelect.value = settings.interactionMode; UI.activationModeSelect.value = settings.activationMode; UI.textOrientationSelect.value = settings.textOrientation; UI.colorThemeSelect.value = settings.colorTheme; UI.proximityRadiusInput.value = settings.proximityRadius; UI.dimmedOpacityInput.value = settings.dimmedOpacity * 100; UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal; UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical; UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, ...(s.imageContainerSelectors || [])].join('; ')).join('\n'); activateScanner(); observeChapters(); }
     init().catch(e => console.error(`[OCR] Fatal Initialization Error: ${e.message}`));
 })();
