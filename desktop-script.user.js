@@ -5,13 +5,13 @@
 // @description  Adds a stable, inline OCR button with a "best fit" engine and a corrected data parser.
 // @author       1Selxo (Probe Engine Port by Gemini, Refactoring by Gemini)
 // @match        *://127.0.0.1*/*
-// @match        *://10.0.0.80*/*
+
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
-// @connect      10.0.0.80
+
 // @connect      localhost
 // @downloadURL  https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
 // @updateURL    https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
@@ -21,7 +21,7 @@
     'use strict';
     // --- Global State and Settings ---
     let settings = {
-        ocrServerUrl: 'http://10.0.0.80:3000',
+        ocrServerUrl: 'http://127.0.0.1:3000',
         imageServerUser: '',
         imageServerPassword: '',
         ankiConnectUrl: 'http://127.0.0.1:8765',
