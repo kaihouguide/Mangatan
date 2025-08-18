@@ -2,12 +2,26 @@
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
 ## Choose Your Platform:
-
+*   [**💻 Combined Server**](#Combined-Server)
 *   [**💻 For PC/Desktop (Node.js)**](#for-pc-desktop)
 *   [**🐍 For PC - Local OCR (Alternative Python Server)**](#for-pc-local-ocr)
 *   [**📱 For Android**](#for-android)
 
+## Combined Server
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+2. Run one of the following commands in the `ocr-server` folder:
+    > ```
+    > # Run with Google Lens
+    > uv run server.py
+    >
+    > # Run with OneOCR
+    > uv run server.py -e=oneocr
+    > ```
 
+
+## 🎉 All Done!
+
+Your server should now be active and ready to use. To stop it at any time, return to the terminal window and press **`Ctrl + C`**.
 ## <a id="for-pc-desktop"></a>💻 For PC/Desktop (Node.js)
 
 ### ✅ Step 1: Prerequisites
@@ -203,21 +217,7 @@ This section provides an alternative setup method for users who prefer to run th
 * You will have to go into tampermonkey and change each value of 127.0.0.1 to your host IP, this will have to be repeated every time you update your script! 
 
 
-## Combined Server
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-2. Run one of the following commands in the `ocr-server` folder:
-    > ```
-    > # Run with Google Lens
-    > uv run server.py
-    >
-    > # Run with OneOCR
-    > uv run server.py -e=oneocr
-    > ```
 
-
-## 🎉 All Done!
-
-Your server should now be active and ready to use. To stop it at any time, return to the terminal window and press **`Ctrl + C`**.
 
 ### DEMO
 *(This entire project was tested kindly by **sonphamthai** on Discord, who also made the demo)*
