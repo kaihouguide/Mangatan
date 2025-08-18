@@ -2,7 +2,7 @@
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
 ## Choose Your Platform:
-*   [**💻 Combined Server**](#Combined-Server)
+*   [**💻 Combined Server(Reccomended)**](#Combined-Server)
 *   [**💻 For PC/Desktop (Node.js)**](#for-pc-desktop)
 *   [**🐍 For PC - Local OCR (Alternative Python Server)**](#for-pc-local-ocr)
 *   [**📱 For Android**](#for-android)
@@ -206,7 +206,7 @@ This section provides an alternative setup method for users who prefer to run th
     The OCR server should be in a separate `.bat` file and configured as its own service.
 
     ```bat
-    @echo off
+    @echo offs
     cd /d "<path-to-suwayomi-server-folder>\ocr-server-legacy"
     node server.js --cache-path "<your-cache-path>" --ip <your-ip-address> --port <your-port>
     ```
@@ -220,7 +220,7 @@ This section provides an alternative setup method for users who prefer to run th
 
 
 ### DEMO
-*(This entire project was tested kindly by **sonphamthai** on Discord, who also made the demo)*
+*(This entire project was tested kindly by **sonphamthai** on Discord, Demo By Rin)*
 ![alt text](https://files.catbox.moe/9px8v2.gif)
 
-##TODO: maybe we add an option to use Mansive's compiled server.exes?
+
