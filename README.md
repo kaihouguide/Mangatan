@@ -26,7 +26,7 @@ Your server should now be active and ready to use. To stop it at any time, retur
 
 ### DEMO
 *(This entire project was tested kindly by **sonphamthai** on Discord, Demo By Rin)*
-![alt text](https://files.catbox.moe/9pryzc.mp4)
+![alt text](https://files.catbox.moe/xlxoja.gif)
 
 ## <a id="for-pc-desktop"></a>💻 For PC/Desktop (Node.js)
 
