@@ -199,7 +199,8 @@ This section provides an alternative setup method for users who prefer to run th
 
   * **Important**: You must use absolute paths for both the `cd` commands and the executable files. NSSM services often run with a different environment than your user account, so relative paths may not work correctly.
 #### Notes
-* You will have to go into tamper monke
+
+* You will have to go into tampermonkey and change each value of 127.0.0.1 to your host IP, this will have to be repeated every time you update your script! 
 
 
 ## Combined Server
