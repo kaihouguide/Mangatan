@@ -22,6 +22,12 @@ Welcome! This guide provides the steps to get your Google Lens-powered OCR serve
 ## 🎉 All Done!
 
 Your server should now be active and ready to use. To stop it at any time, return to the terminal window and press **`Ctrl + C`**.
+
+
+### DEMO
+*(This entire project was tested kindly by **sonphamthai** on Discord, Demo By Rin)*
+![alt text](https://files.catbox.moe/9pryzc.mp4)
+
 ## <a id="for-pc-desktop"></a>💻 For PC/Desktop (Node.js)
 
 ### ✅ Step 1: Prerequisites
@@ -218,9 +224,5 @@ This section provides an alternative setup method for users who prefer to run th
 
 
 
-
-### DEMO
-*(This entire project was tested kindly by **sonphamthai** on Discord, Demo By Rin)*
-![alt text](https://files.catbox.moe/9px8v2.gif)
 
 
