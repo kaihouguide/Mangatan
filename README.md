@@ -2,26 +2,40 @@
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
 ## Choose Your Platform:
-*   [**💻 Combined Server(Reccomended)**](#Combined-Server)
-*   [**💻 For PC/Desktop (Node.js)**](#for-pc-desktop)
-*   [**🐍 For PC - Local OCR (Alternative Python Server)**](#for-pc-local-ocr)
-*   [**📱 For Android**](#for-android)
+*   [**💻 Combined Server(Recommended)**](#Combined-Server) | Combines the below 2 methods into one easy to use script. 
+*   [**💻 For PC/Desktop (Node.js)**](#for-pc-desktop) | The old method, still up-to-date and works just fine.
+*   [**🐍 For PC - Local OCR (Alternative Python Server)**](#for-pc-local-ocr) | Locally run ocr server instead of google lens.
+*   [**📱 For Android**](#for-android) | Host Mangatan and Suwayomi on your mobile device! 
+*   [**📱 For Android Alternative**](#for-android-alternative) | Rely on a host server!
+
+
+
+ There are multiple ways to run the OCR itself, the recommneded way is using the simplified combined server below.
 
 ## Combined Server
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-2. Run one of the following commands in the `ocr-server` folder:
+
+1.  **Suwayomi-Server**
+    *   First, download and set up the **[Suwayomi-Server](https://github.com/Suwayomi/Suwayomi-Server)**.
+    *   Follow the installation instructions provided on their official GitHub page to get it running.
+
+2.  **Tampermonkey Extension & Userscript**
+    *   Get the **[Tampermonkey](https://www.tampermonkey.net/)** extension for your browser.
+    *   Then, install the required userscript for this project from this GitHub repository.
+
+3. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+4. Run one of the following commands in the `ocr-server` folder:
     > ```
-    > # Run with Google Lens
+    > # Run with Google Lens ( Use Google to proccess )
     > uv run server.py
     >
-    > # Run with OneOCR
+    > # Run with OneOCR ( Use local computer to proccess ) 
     > uv run server.py -e=oneocr
     > ```
 
 
 ## 🎉 All Done!
 
-Your server should now be active and ready to use. To stop it at any time, return to the terminal window and press **`Ctrl + C`**.
+Your ocr server should now be active and ready to use. To stop it at any time, return to the terminal window and press **`Ctrl + C`**.
 
 
 ### DEMO
