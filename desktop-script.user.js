@@ -1,17 +1,15 @@
 // ==UserScript==
-// @name         Automatic Content OCR (v23.1.0-PC-Parser-Fix)
+// @name         Automatic Content OCR
 // @namespace    http://tampermonkey.net/
-// @version      23.1.0
+// @version      23.1.1
 // @description  Adds a stable, inline OCR button with a "best fit" engine and a corrected data parser.
 // @author       1Selxo (Probe Engine Port by Gemini, Refactoring by Gemini)
 // @match        *://127.0.0.1*/*
-
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
-
 // @connect      localhost
 // @downloadURL  https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
 // @updateURL    https://github.com/kaihouguide/Mangatan/raw/main/desktop-script.user.js
@@ -29,12 +27,12 @@
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                'div.muiltr-masn8', // Old Continuous Vertical
-                'div.muiltr-79elbk', // Webtoon
-                'div.muiltr-u43rde', // Single Page
+                'div.muiltr-masn8',   // Old Continuous Vertical
+                'div.muiltr-79elbk',  // Webtoon
+                'div.muiltr-u43rde',  // Single Page
                 'div.muiltr-1r1or1s', // Double Page
                 'div.muiltr-18sieki', // New Continuous Vertical
-                'div.muiltr-cns6dc', // Added per request
+                'div.muiltr-cns6dc',  // Added per request
                 '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical (FIXED)
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
@@ -112,6 +110,7 @@
         document.dispatchEvent(new CustomEvent('ocr-log-update'));
     };
 
+    // --- Core Observation Logic ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations)
             for (const node of mutation.addedNodes)
@@ -121,16 +120,18 @@
                 }
     });
 
-    function manageContainer(container) {
-        if (managedContainers.has(container)) return;
+    function manageContainer(container) { 
+        if (!managedContainers.has(container)) { 
         logDebug(`New container found. Managing: ${container.className}`);
-        container.querySelectorAll('img').forEach(observeImageForSrcChange);
-        imageObserver.observe(container, {
-            childList: true,
-            subtree: true
-        });
-        managedContainers.set(container, true);
+            container.querySelectorAll('img').forEach(observeImageForSrcChange); 
+            imageObserver.observe(container, { 
+                childList: true, 
+                subtree: true 
+            }); 
+            managedContainers.set(container, true); 
+        } 
     }
+    
     const containerObserver = new MutationObserver((mutations) => {
         if (!activeSiteConfig) return;
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
@@ -177,6 +178,7 @@
         }
     }
 
+    // --- Image Handling Logic ---
     function observeImageForSrcChange(img) {
         const processTheImage = (src) => {
             if (src?.includes('/api/v1/manga/')) {
@@ -185,16 +187,14 @@
             }
             return false;
         };
-        if (processTheImage(img.src)) return;
-        if (attachedAttributeObservers.has(img)) return;
+        if (processTheImage(img.src) || attachedAttributeObservers.has(img)) return; 
         const attributeObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations)
-                if (mutation.attributeName === 'src')
-                    if (processTheImage(img.src)) {
-                        attributeObserver.disconnect();
-                        attachedAttributeObservers.delete(img);
-                        break;
-                    }
+                if (mutation.attributeName === 'src' && processTheImage(img.src)) { 
+                    attributeObserver.disconnect();
+                    attachedAttributeObservers.delete(img);
+                    break;
+                }
         });
         attributeObserver.observe(img, {
             attributes: true
@@ -519,7 +519,7 @@
         }
     }
 
-    function applyDynamicStyles() {
+    function applyStyles() {
         const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.deepblue;
         const cssVars = `:root { --ocr-highlight-bg-color: ${theme.main}0.9); --modal-header-color: ${theme.main}1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; }`;
         let styleTag = document.getElementById('gemini-ocr-dynamic-styles');
@@ -643,10 +643,10 @@
         });
         document.addEventListener('ocr-log-update', () => {
             if (UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) {
-                UI.debugLogTextarea.value = debugLog.join('\n');
-                UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight;
+                UI.debugLogTextarea.value = debugLog.join('\n'); 
+                UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight; 
             }
-        });
+        }); 
     }
     async function runProbingProcess(baseUrl, btn) {
         logDebug(`Requesting SERVER-SIDE job for: ${baseUrl}`);
@@ -827,7 +827,7 @@
         }
         createUI();
         bindUIEvents();
-        applyDynamicStyles();
+        applyStyles();
         createMeasurementSpan();
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.imageServerUserInput.value = settings.imageServerUser || '';
