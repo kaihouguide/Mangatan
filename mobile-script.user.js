@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.4.10-M
-// @description  Adds a mobile-optimized OCR overlay with a global edit button. Restores fluid scrolling and intuitive overlay dismissal from the original script.
-// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini)
+// @version      24.4.11-M-Fix
+// @description  Adds a mobile-optimized OCR overlay with a global edit button. Fixes layout persistence bug on page/chapter change.
+// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -190,6 +190,7 @@
     function cleanupManagedElement(img) {
         const state = managedElements.get(img);
         if (state) {
+            logDebug(`Cleaning up element for image: ${state.srcStub}`);
             resizeObserver.unobserve(img);
             intersectionObserver.unobserve(img);
             visibleImages.delete(img);
@@ -286,16 +287,39 @@
 
     // --- Core Observation Logic ---
     const imageObserver = new MutationObserver((mutations) => {
-        for (const mutation of mutations)
-            for (const node of mutation.addedNodes)
+        for (const mutation of mutations) {
+            // Handle added nodes
+            for (const node of mutation.addedNodes) {
                 if (node.nodeType === 1) {
                     if (node.tagName === 'IMG') observeImageForSrcChange(node);
                     else node.querySelectorAll('img').forEach(observeImageForSrcChange);
                 }
+            }
+
+            // [FIX] Handle removed nodes to prevent layout persistence
+            for (const node of mutation.removedNodes) {
+                if (node.nodeType === 1) {
+                    // Case 1: The removed node is a managed image itself
+                    if (node.tagName === 'IMG' && managedElements.has(node)) {
+                        cleanupManagedElement(node);
+                    }
+                    // Case 2: The removed node is a container that might have managed images inside
+                    else {
+                        node.querySelectorAll('img').forEach(img => {
+                            if (managedElements.has(img)) {
+                                cleanupManagedElement(img);
+                            }
+                        });
+                    }
+                }
+            }
+        }
     });
+
 
     function manageContainer(container) {
         if (!managedContainers.has(container)) {
+            logDebug(`Managing new container: ${container.className}`);
             container.querySelectorAll('img').forEach(observeImageForSrcChange);
             imageObserver.observe(container, {
                 childList: true,
@@ -317,7 +341,11 @@
 
     function activateScanner() {
         activeSiteConfig = settings.sites.find(site => window.location.href.includes(site.urlPattern));
-        if (!activeSiteConfig?.imageContainerSelectors?.length) return;
+        if (!activeSiteConfig?.imageContainerSelectors?.length) {
+            logDebug("No active site configuration found for this URL.");
+            return;
+        }
+        logDebug("Activating scanner for site: " + activeSiteConfig.urlPattern);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
         document.querySelectorAll(selectorQuery).forEach(manageContainer);
         containerObserver.observe(document.body, {
@@ -386,6 +414,7 @@
             displayOcrResults(img);
             return;
         }
+        logDebug(`Processing image: ${sourceUrl.slice(-50)}`);
         ocrDataCache.set(img, 'pending');
         let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}`;
         if (settings.imageServerUser) {
@@ -400,16 +429,20 @@
                     const data = JSON.parse(res.responseText);
                     if (data.error) throw new Error(data.error);
                     if (!Array.isArray(data)) throw new Error('Server response not valid.');
+                    logDebug(`OCR successful for: ${sourceUrl.slice(-50)}`);
                     ocrDataCache.set(img, data);
                     displayOcrResults(img);
                 } catch (e) {
+                    logDebug(`OCR failed for ${sourceUrl.slice(-50)}: ${e.message}`);
                     ocrDataCache.delete(img);
                 }
             },
-            onerror: () => {
+            onerror: (err) => {
+                logDebug(`OCR connection error for ${sourceUrl.slice(-50)}: ${JSON.stringify(err)}`);
                 ocrDataCache.delete(img);
             },
             ontimeout: () => {
+                logDebug(`OCR timed out for ${sourceUrl.slice(-50)}`);
                 ocrDataCache.delete(img);
             }
         });
@@ -635,6 +668,7 @@
             srcStub: targetImg.src.slice(-30)
         };
         managedElements.set(targetImg, state);
+        logDebug(`Created overlay for: ${state.srcStub}`);
         updateOverlayDimensionsAndStyles(targetImg, state);
         resizeObserver.observe(targetImg);
         intersectionObserver.observe(targetImg);
