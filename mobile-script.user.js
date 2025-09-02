@@ -396,18 +396,16 @@
         });
         attachedAttributeObservers.set(img, attributeObserver);
     }
-
-    function primeImageForOcr(img) {
-        const process = () => {
-            if (ocrDataCache.get(img) === 'pending') return;
-            img.crossOrigin = "anonymous";
-            processImage(img, img.src);
-        };
-        if (img.complete && img.naturalHeight > 0) process();
-        else img.addEventListener('load', process, {
-            once: true
-        });
-    }
+function primeImageForOcr(img) {
+    if (managedElements.has(img)) return; //Immediately stop if already managed.
+    const process = () => { // Also check if managed here to prevent race conditions after loading.
+        if (managedElements.has(img) || ocrDataCache.get(img) === 'pending') return;
+        img.crossOrigin = "anonymous";
+        processImage(img, img.src);
+    };
+    if (img.complete && img.naturalHeight > 0) process();
+    else img.addEventListener('load', process, { once: true });
+}
 
     function processImage(img, sourceUrl) {
         if (ocrDataCache.has(img)) {
