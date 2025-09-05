@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (PC Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.4.8
+// @version      24.5.2
 // @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling.
-// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space by Gemini)
+// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -48,7 +48,7 @@
         soloHoverMode: false,
         mergeModifierKey: 'Control',
         deleteModifierKey: 'Alt',
-        addSpaceOnMerge: false, // <-- Set to false by default
+        addSpaceOnMerge: false,
         colorTheme: 'deepblue'
     };
     let debugLog = [];
@@ -287,24 +287,56 @@
         const availableWidth = (parseFloat(box.style.width) / 100) * imgRect.width + settings.boundingBoxAdjustment;
         const availableHeight = (parseFloat(box.style.height) / 100) * imgRect.height + settings.boundingBoxAdjustment;
         if (!text || availableWidth <= 0 || availableHeight <= 0) return;
+
+        const ocrData = box._ocrData;
+        const isMergedVertical = ocrData?.forcedOrientation === 'vertical';
         const BASE_FONT_SIZE = 100;
+
+        // --- Horizontal calculation (always needed for smart mode) ---
         measurementSpan.style.writingMode = 'horizontal-tb'; measurementSpan.textContent = text;
         const h_w = measurementSpan.offsetWidth, h_h = measurementSpan.offsetHeight;
         const h_ratio_w = h_w > 0 ? availableWidth / h_w : 0, h_ratio_h = h_h > 0 ? availableHeight / h_h : 0;
         const horizontalFitSize = BASE_FONT_SIZE * Math.min(h_ratio_w, h_ratio_h);
+
+        // --- Vertical calculation ---
         measurementSpan.style.writingMode = 'vertical-rl';
         const v_w = measurementSpan.offsetWidth, v_h = measurementSpan.offsetHeight;
-        const v_ratio_w = v_w > 0 ? availableWidth / v_w : 0, v_ratio_h = v_h > 0 ? availableHeight / v_h : 0;
-        const verticalFitSize = BASE_FONT_SIZE * Math.min(v_ratio_w, v_ratio_h);
-        let finalFontSize = 0, isVertical = false;
-        if (settings.textOrientation === 'forceVertical') { isVertical = true; finalFontSize = verticalFitSize; }
-        else if (settings.textOrientation === 'forceHorizontal') { isVertical = false; finalFontSize = horizontalFitSize; }
-        else {
-            if (verticalFitSize > horizontalFitSize) { isVertical = true; finalFontSize = verticalFitSize; }
-            else { isVertical = false; finalFontSize = horizontalFitSize; }
+        let verticalFitSize;
+        if (isMergedVertical && v_w > 0 && v_h > 0) {
+            // BUGFIX: For merged vertical text, use an area-based approximation.
+            const textAreaAtBase = v_w * v_h;
+            const boxArea = availableWidth * availableHeight;
+            const areaRatio = boxArea / textAreaAtBase;
+            verticalFitSize = BASE_FONT_SIZE * Math.sqrt(areaRatio);
+            logDebug(`Applying area-based font constraint. BoxArea: ${boxArea}, TextArea: ${textAreaAtBase}, NewSize: ${verticalFitSize}`);
+        } else {
+            // Standard calculation for single or horizontal boxes
+            const v_ratio_w = v_w > 0 ? availableWidth / v_w : 0;
+            const v_ratio_h = v_h > 0 ? availableHeight / v_h : 0;
+            verticalFitSize = BASE_FONT_SIZE * Math.min(v_ratio_w, v_ratio_h);
         }
+
+        let finalFontSize = 0, isVertical = false;
+        if (isMergedVertical) {
+            isVertical = true;
+            finalFontSize = verticalFitSize;
+        } else if (settings.textOrientation === 'forceVertical') {
+            isVertical = true;
+            finalFontSize = verticalFitSize;
+        } else if (settings.textOrientation === 'forceHorizontal') {
+            isVertical = false;
+            finalFontSize = horizontalFitSize;
+        } else { // Smart mode
+            if (verticalFitSize > horizontalFitSize) {
+                isVertical = true; finalFontSize = verticalFitSize;
+            } else {
+                isVertical = false; finalFontSize = horizontalFitSize;
+            }
+        }
+
         const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
-        box.style.fontSize = `${finalFontSize * multiplier}px`;
+        // Apply final font size with user requested "safety" multiplier
+        box.style.fontSize = `${finalFontSize * multiplier * 0.85}px`;
         box.classList.toggle('gemini-ocr-text-vertical', isVertical);
     }
     function calculateAndApplyOptimalStyles_Optimized(overlay, imgRect) {
@@ -417,20 +449,37 @@
         const combinedText = settings.addSpaceOnMerge
             ? box1.textContent + ' ' + box2.textContent
             : box1.textContent + box2.textContent;
-        let b1 = box1._ocrData.tightBoundingBox, b2 = box2._ocrData.tightBoundingBox;
+
+        const b1 = box1._ocrData.tightBoundingBox;
+        const b2 = box2._ocrData.tightBoundingBox;
         const newBoundingBox = { x: Math.min(b1.x, b2.x), y: Math.min(b1.y, b2.y), width: Math.max(b1.x + b1.width, b2.x + b2.width) - Math.min(b1.x, b2.x), height: Math.max(b1.y + b1.height, b2.y + b2.height) - Math.min(b1.y, b2.y) };
-        const newOcrItem = { text: combinedText, tightBoundingBox: newBoundingBox };
+
+        const areBothVertical = box1.classList.contains('gemini-ocr-text-vertical') &&
+                                box2.classList.contains('gemini-ocr-text-vertical');
+        const forcedOrientation = areBothVertical ? 'vertical' : 'auto';
+        logDebug(`Merging boxes. Both vertical: ${areBothVertical}. Forcing orientation to: ${forcedOrientation}`);
+
+        const newOcrItem = {
+            text: combinedText,
+            tightBoundingBox: newBoundingBox,
+            forcedOrientation: forcedOrientation // Pass this info to the styling function
+        };
+
         const originalData = ocrDataCache.get(sourceImage);
         const indicesToDelete = new Set([box1._ocrDataIndex, box2._ocrDataIndex]);
         const newData = originalData.filter((item, index) => !indicesToDelete.has(index));
         newData.push(newOcrItem);
         ocrDataCache.set(sourceImage, newData);
         box1.remove(); box2.remove();
+
         const newBoxElement = document.createElement('div');
         newBoxElement.className = 'gemini-ocr-text-box';
-        newBoxElement.textContent = newOcrItem.text; newBoxElement._ocrData = newOcrItem; newBoxElement._ocrDataIndex = newData.length - 1;
+        newBoxElement.textContent = newOcrItem.text;
+        newBoxElement._ocrData = newOcrItem;
+        newBoxElement._ocrDataIndex = newData.length - 1;
         Object.assign(newBoxElement.style, { left: `${newOcrItem.tightBoundingBox.x*100}%`, top: `${newOcrItem.tightBoundingBox.y*100}%`, width: `${newOcrItem.tightBoundingBox.width*100}%`, height: `${newOcrItem.tightBoundingBox.height*100}%` });
         overlay.appendChild(newBoxElement);
+
         calculateAndApplyStylesForSingleBox(newBoxElement, sourceImage.getBoundingClientRect());
     }
 
