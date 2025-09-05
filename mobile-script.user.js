@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.4.11-M-Fix
-// @description  Adds a mobile-optimized OCR overlay with a global edit button. Fixes layout persistence bug on page/chapter change.
-// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini)
+// @version      24.5.2-M-Sync
+// @description  Adds a mobile-optimized OCR overlay with a global edit button. Fixes layout persistence and vertical merge rendering.
+// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini, Merge-Space & Merge-Bugfix Port by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -46,10 +46,11 @@
         boundingBoxAdjustment: 5,
         focusScaleMultiplier: 1.2,
         soloHoverMode: false,
+        addSpaceOnMerge: false, // Ported from PC
         colorTheme: 'deepblue'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v24_M_scroll_fix'; // Updated key
+    const SETTINGS_KEY = 'gemini_ocr_settings_v24.5_M_mergefix'; // Updated key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -75,46 +76,14 @@
     let animationFrameId = null;
 
     const COLOR_THEMES = {
-        deepblue: {
-            main: 'rgba(0,191,255,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        },
-        red: {
-            main: 'rgba(255, 71, 87,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        },
-        green: {
-            main: 'rgba(46, 204, 113,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        },
-        orange: {
-            main: 'rgba(243, 156, 18,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        },
-        purple: {
-            main: 'rgba(155, 89, 182,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        },
-        turquoise: {
-            main: 'rgba(26, 188, 156,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        },
-        pink: {
-            main: 'rgba(232, 67, 147,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        },
-        grey: {
-            main: 'rgba(149, 165, 166,',
-            text: '#FFFFFF',
-            highlightText: '#000000'
-        }
+        deepblue: { main: 'rgba(0,191,255,', text: '#FFFFFF', highlightText: '#000000' },
+        red: { main: 'rgba(255, 71, 87,', text: '#FFFFFF', highlightText: '#000000' },
+        green: { main: 'rgba(46, 204, 113,', text: '#FFFFFF', highlightText: '#000000' },
+        orange: { main: 'rgba(243, 156, 18,', text: '#FFFFFF', highlightText: '#000000' },
+        purple: { main: 'rgba(155, 89, 182,', text: '#FFFFFF', highlightText: '#000000' },
+        turquoise: { main: 'rgba(26, 188, 156,', text: '#FFFFFF', highlightText: '#000000' },
+        pink: { main: 'rgba(232, 67, 147,', text: '#FFFFFF', highlightText: '#000000' },
+        grey: { main: 'rgba(149, 165, 166,', text: '#FFFFFF', highlightText: '#000000' }
     };
     const logDebug = (message) => {
         if (!settings.debugMode) return;
@@ -131,10 +100,7 @@
             const state = managedElements.get(img);
             if (state) {
                 const rect = img.getBoundingClientRect();
-                Object.assign(state.overlay.style, {
-                    top: `${rect.top}px`,
-                    left: `${rect.left}px`
-                });
+                Object.assign(state.overlay.style, { top: `${rect.top}px`, left: `${rect.left}px` });
             }
         }
         animationFrameId = requestAnimationFrame(updateVisibleOverlaysPosition);
@@ -143,10 +109,7 @@
     function updateOverlayDimensionsAndStyles(img, state, rect = null) {
         if (!rect) rect = img.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
-            Object.assign(state.overlay.style, {
-                width: `${rect.width}px`,
-                height: `${rect.height}px`
-            });
+            Object.assign(state.overlay.style, { width: `${rect.width}px`, height: `${rect.height}px` });
             if (state.lastWidth !== rect.width || state.lastHeight !== rect.height) {
                 calculateAndApplyOptimalStyles_Optimized(state.overlay, rect);
                 state.lastWidth = rect.width;
@@ -210,7 +173,7 @@
         }
     };
 
-    // --- TOUCH INTERACTION LOGIC (Original Mobile Logic) ---
+    // --- TOUCH INTERACTION LOGIC ---
     function triggerOverlayToggle(targetImg) {
         const overlayState = managedElements.get(targetImg);
         if (overlayState?.overlay) {
@@ -288,23 +251,17 @@
     // --- Core Observation Logic ---
     const imageObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
-            // Handle added nodes
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === 1) {
                     if (node.tagName === 'IMG') observeImageForSrcChange(node);
                     else node.querySelectorAll('img').forEach(observeImageForSrcChange);
                 }
             }
-
-            // [FIX] Handle removed nodes to prevent layout persistence
             for (const node of mutation.removedNodes) {
                 if (node.nodeType === 1) {
-                    // Case 1: The removed node is a managed image itself
                     if (node.tagName === 'IMG' && managedElements.has(node)) {
                         cleanupManagedElement(node);
-                    }
-                    // Case 2: The removed node is a container that might have managed images inside
-                    else {
+                    } else {
                         node.querySelectorAll('img').forEach(img => {
                             if (managedElements.has(img)) {
                                 cleanupManagedElement(img);
@@ -321,10 +278,7 @@
         if (!managedContainers.has(container)) {
             logDebug(`Managing new container: ${container.className}`);
             container.querySelectorAll('img').forEach(observeImageForSrcChange);
-            imageObserver.observe(container, {
-                childList: true,
-                subtree: true
-            });
+            imageObserver.observe(container, { childList: true, subtree: true });
             managedContainers.set(container, true);
         }
     }
@@ -348,10 +302,7 @@
         logDebug("Activating scanner for site: " + activeSiteConfig.urlPattern);
         const selectorQuery = activeSiteConfig.imageContainerSelectors.join(', ');
         document.querySelectorAll(selectorQuery).forEach(manageContainer);
-        containerObserver.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
+        containerObserver.observe(document.body, { childList: true, subtree: true });
     }
     const chapterObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations)
@@ -366,10 +317,7 @@
         const targetNode = document.getElementById('root');
         if (targetNode) {
             targetNode.querySelectorAll('a[href*="/manga/"][href*="/chapter/"]').forEach(addOcrButtonToChapter);
-            chapterObserver.observe(targetNode, {
-                childList: true,
-                subtree: true
-            });
+            chapterObserver.observe(targetNode, { childList: true, subtree: true });
         }
     }
 
@@ -391,21 +339,20 @@
                     break;
                 }
         });
-        attributeObserver.observe(img, {
-            attributes: true
-        });
+        attributeObserver.observe(img, { attributes: true });
         attachedAttributeObservers.set(img, attributeObserver);
     }
-function primeImageForOcr(img) {
-    if (managedElements.has(img)) return; //Immediately stop if already managed.
-    const process = () => { // Also check if managed here to prevent race conditions after loading.
-        if (managedElements.has(img) || ocrDataCache.get(img) === 'pending') return;
-        img.crossOrigin = "anonymous";
-        processImage(img, img.src);
-    };
-    if (img.complete && img.naturalHeight > 0) process();
-    else img.addEventListener('load', process, { once: true });
-}
+
+    function primeImageForOcr(img) {
+        if (managedElements.has(img)) return;
+        const process = () => {
+            if (managedElements.has(img) || ocrDataCache.get(img) === 'pending') return;
+            img.crossOrigin = "anonymous";
+            processImage(img, img.src);
+        };
+        if (img.complete && img.naturalHeight > 0) process();
+        else img.addEventListener('load', process, { once: true });
+    }
 
     function processImage(img, sourceUrl) {
         if (ocrDataCache.has(img)) {
@@ -419,9 +366,7 @@ function primeImageForOcr(img) {
             ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
         }
         GM_xmlhttpRequest({
-            method: 'GET',
-            url: ocrRequestUrl,
-            timeout: 45000,
+            method: 'GET', url: ocrRequestUrl, timeout: 45000,
             onload: (res) => {
                 try {
                     const data = JSON.parse(res.responseText);
@@ -430,19 +375,10 @@ function primeImageForOcr(img) {
                     logDebug(`OCR successful for: ${sourceUrl.slice(-50)}`);
                     ocrDataCache.set(img, data);
                     displayOcrResults(img);
-                } catch (e) {
-                    logDebug(`OCR failed for ${sourceUrl.slice(-50)}: ${e.message}`);
-                    ocrDataCache.delete(img);
-                }
+                } catch (e) { logDebug(`OCR failed for ${sourceUrl.slice(-50)}: ${e.message}`); ocrDataCache.delete(img); }
             },
-            onerror: (err) => {
-                logDebug(`OCR connection error for ${sourceUrl.slice(-50)}: ${JSON.stringify(err)}`);
-                ocrDataCache.delete(img);
-            },
-            ontimeout: () => {
-                logDebug(`OCR timed out for ${sourceUrl.slice(-50)}`);
-                ocrDataCache.delete(img);
-            }
+            onerror: (err) => { logDebug(`OCR connection error for ${sourceUrl.slice(-50)}: ${JSON.stringify(err)}`); ocrDataCache.delete(img); },
+            ontimeout: () => { logDebug(`OCR timed out for ${sourceUrl.slice(-50)}`); ocrDataCache.delete(img); }
         });
     }
 
@@ -473,19 +409,26 @@ function primeImageForOcr(img) {
     }
 
     function finalizeMerge(box1, box2, sourceImage, overlay) {
-        const combinedText = box1.textContent + box2.textContent;
-        let b1 = box1._ocrData.tightBoundingBox,
-            b2 = box2._ocrData.tightBoundingBox;
-        const newBoundingBox = {
-            x: Math.min(b1.x, b2.x),
-            y: Math.min(b1.y, b2.y),
-            width: Math.max(b1.x + b1.width, b2.x + b2.width) - Math.min(b1.x, b2.x),
-            height: Math.max(b1.y + b1.height, b2.y + b2.height) - Math.min(b1.y, b2.y)
-        };
+        logDebug("Finalizing merge.");
+        const combinedText = settings.addSpaceOnMerge ?
+            box1.textContent + ' ' + box2.textContent :
+            box1.textContent + box2.textContent;
+
+        const b1 = box1._ocrData.tightBoundingBox;
+        const b2 = box2._ocrData.tightBoundingBox;
+        const newBoundingBox = { x: Math.min(b1.x, b2.x), y: Math.min(b1.y, b2.y), width: Math.max(b1.x + b1.width, b2.x + b2.width) - Math.min(b1.x, b2.x), height: Math.max(b1.y + b1.height, b2.y + b2.height) - Math.min(b1.y, b2.y) };
+
+        const areBothVertical = box1.classList.contains('gemini-ocr-text-vertical') &&
+            box2.classList.contains('gemini-ocr-text-vertical');
+        const forcedOrientation = areBothVertical ? 'vertical' : 'auto';
+        logDebug(`Merging boxes. Both vertical: ${areBothVertical}. Forcing orientation to: ${forcedOrientation}`);
+
         const newOcrItem = {
             text: combinedText,
-            tightBoundingBox: newBoundingBox
+            tightBoundingBox: newBoundingBox,
+            forcedOrientation: forcedOrientation // Pass this info to the styling function
         };
+
         const originalData = ocrDataCache.get(sourceImage);
         const indicesToDelete = new Set([box1._ocrDataIndex, box2._ocrDataIndex]);
         const newData = originalData.filter((item, index) => !indicesToDelete.has(index));
@@ -493,18 +436,15 @@ function primeImageForOcr(img) {
         ocrDataCache.set(sourceImage, newData);
         box1.remove();
         box2.remove();
+
         const newBoxElement = document.createElement('div');
         newBoxElement.className = 'gemini-ocr-text-box';
         newBoxElement.textContent = newOcrItem.text;
         newBoxElement._ocrData = newOcrItem;
         newBoxElement._ocrDataIndex = newData.length - 1;
-        Object.assign(newBoxElement.style, {
-            left: `${newOcrItem.tightBoundingBox.x*100}%`,
-            top: `${newOcrItem.tightBoundingBox.y*100}%`,
-            width: `${newOcrItem.tightBoundingBox.width*100}%`,
-            height: `${newOcrItem.tightBoundingBox.height*100}%`
-        });
+        Object.assign(newBoxElement.style, { left: `${newOcrItem.tightBoundingBox.x*100}%`, top: `${newOcrItem.tightBoundingBox.y*100}%`, width: `${newOcrItem.tightBoundingBox.width*100}%`, height: `${newOcrItem.tightBoundingBox.height*100}%` });
         overlay.appendChild(newBoxElement);
+
         calculateAndApplyStylesForSingleBox(newBoxElement, sourceImage.getBoundingClientRect());
     }
 
@@ -558,7 +498,12 @@ function primeImageForOcr(img) {
         const availableWidth = (parseFloat(box.style.width) / 100) * imgRect.width + settings.boundingBoxAdjustment;
         const availableHeight = (parseFloat(box.style.height) / 100) * imgRect.height + settings.boundingBoxAdjustment;
         if (!text || availableWidth <= 0 || availableHeight <= 0) return;
+
+        const ocrData = box._ocrData;
+        const isMergedVertical = ocrData?.forcedOrientation === 'vertical';
         const BASE_FONT_SIZE = 100;
+
+        // --- Horizontal calculation (always needed for smart mode) ---
         measurementSpan.style.writingMode = 'horizontal-tb';
         measurementSpan.textContent = text;
         const h_w = measurementSpan.offsetWidth,
@@ -566,21 +511,38 @@ function primeImageForOcr(img) {
         const h_ratio_w = h_w > 0 ? availableWidth / h_w : 0,
             h_ratio_h = h_h > 0 ? availableHeight / h_h : 0;
         const horizontalFitSize = BASE_FONT_SIZE * Math.min(h_ratio_w, h_ratio_h);
+
+        // --- Vertical calculation ---
         measurementSpan.style.writingMode = 'vertical-rl';
         const v_w = measurementSpan.offsetWidth,
             v_h = measurementSpan.offsetHeight;
-        const v_ratio_w = v_w > 0 ? availableWidth / v_w : 0,
-            v_ratio_h = v_h > 0 ? availableHeight / v_h : 0;
-        const verticalFitSize = BASE_FONT_SIZE * Math.min(v_ratio_w, v_ratio_h);
+        let verticalFitSize;
+        if (isMergedVertical && v_w > 0 && v_h > 0) {
+            // BUGFIX: For merged vertical text, use an area-based approximation.
+            const textAreaAtBase = v_w * v_h;
+            const boxArea = availableWidth * availableHeight;
+            const areaRatio = boxArea / textAreaAtBase;
+            verticalFitSize = BASE_FONT_SIZE * Math.sqrt(areaRatio);
+            logDebug(`Applying area-based font constraint. BoxArea: ${boxArea}, TextArea: ${textAreaAtBase}, NewSize: ${verticalFitSize}`);
+        } else {
+            // Standard calculation for single or horizontal boxes
+            const v_ratio_w = v_w > 0 ? availableWidth / v_w : 0;
+            const v_ratio_h = v_h > 0 ? availableHeight / v_h : 0;
+            verticalFitSize = BASE_FONT_SIZE * Math.min(v_ratio_w, v_ratio_h);
+        }
+
         let finalFontSize = 0,
             isVertical = false;
-        if (settings.textOrientation === 'forceVertical') {
+        if (isMergedVertical) {
+            isVertical = true;
+            finalFontSize = verticalFitSize;
+        } else if (settings.textOrientation === 'forceVertical') {
             isVertical = true;
             finalFontSize = verticalFitSize;
         } else if (settings.textOrientation === 'forceHorizontal') {
             isVertical = false;
             finalFontSize = horizontalFitSize;
-        } else {
+        } else { // Smart mode
             if (verticalFitSize > horizontalFitSize) {
                 isVertical = true;
                 finalFontSize = verticalFitSize;
@@ -589,8 +551,9 @@ function primeImageForOcr(img) {
                 finalFontSize = horizontalFitSize;
             }
         }
+
         const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
-        box.style.fontSize = `${finalFontSize * multiplier}px`;
+        box.style.fontSize = `${finalFontSize * multiplier * 0.85}px`;
         box.classList.toggle('gemini-ocr-text-vertical', isVertical);
     }
 
@@ -599,12 +562,7 @@ function primeImageForOcr(img) {
         const boxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box'));
         if (boxes.length === 0) return;
         const baseStyle = getComputedStyle(boxes[0]);
-        Object.assign(measurementSpan.style, {
-            fontFamily: baseStyle.fontFamily,
-            fontWeight: baseStyle.fontWeight,
-            letterSpacing: baseStyle.letterSpacing,
-            fontSize: '100px'
-        });
+        Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing, fontSize: '100px' });
         for (const box of boxes) {
             calculateAndApplyStylesForSingleBox(box, imgRect);
         }
@@ -617,11 +575,7 @@ function primeImageForOcr(img) {
         let data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || !Array.isArray(data)) return;
         data.sort((a, b) => {
-            const a_y = a.tightBoundingBox.y,
-                b_y = b.tightBoundingBox.y,
-                a_x = a.tightBoundingBox.x,
-                b_x = b.tightBoundingBox.x,
-                ROW_TOLERANCE = 0.05;
+            const a_y = a.tightBoundingBox.y, b_y = b.tightBoundingBox.y, a_x = a.tightBoundingBox.x, b_x = b.tightBoundingBox.x, ROW_TOLERANCE = 0.05;
             if (Math.abs(a_y - b_y) < ROW_TOLERANCE) return b_x - a_x;
             else return a_y - b_y;
         });
@@ -635,12 +589,7 @@ function primeImageForOcr(img) {
             ocrBox.textContent = item.text;
             ocrBox._ocrData = item;
             ocrBox._ocrDataIndex = index;
-            Object.assign(ocrBox.style, {
-                left: `${item.tightBoundingBox.x*100}%`,
-                top: `${item.tightBoundingBox.y*100}%`,
-                width: `${item.tightBoundingBox.width*100}%`,
-                height: `${item.tightBoundingBox.height*100}%`
-            });
+            Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
             overlay.appendChild(ocrBox);
         });
         const deleteButton = document.createElement('button');
@@ -659,12 +608,7 @@ function primeImageForOcr(img) {
         });
         document.body.appendChild(overlay);
         overlay.addEventListener('click', handleOverlayInteraction);
-        const state = {
-            overlay,
-            lastWidth: 0,
-            lastHeight: 0,
-            srcStub: targetImg.src.slice(-30)
-        };
+        const state = { overlay, lastWidth: 0, lastHeight: 0, srcStub: targetImg.src.slice(-30) };
         managedElements.set(targetImg, state);
         logDebug(`Created overlay for: ${state.srcStub}`);
         updateOverlayDimensionsAndStyles(targetImg, state);
@@ -672,30 +616,12 @@ function primeImageForOcr(img) {
         intersectionObserver.observe(targetImg);
     }
 
-    // --- Anki & Batch Processing (Unchanged) ---
+    // --- Anki & Batch Processing ---
     async function ankiConnectRequest(action, params = {}) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
-                method: 'POST',
-                url: settings.ankiConnectUrl,
-                data: JSON.stringify({
-                    action,
-                    version: 6,
-                    params
-                }),
-                headers: {
-                    'Content-Type': 'application/json; charset=UTF-8'
-                },
-                timeout: 15000,
-                onload: (res) => {
-                    try {
-                        const data = JSON.parse(res.responseText);
-                        if (data.error) reject(new Error(data.error));
-                        else resolve(data.result);
-                    } catch (e) {
-                        reject(new Error('Failed to parse Anki-Connect response.'));
-                    }
-                },
+                method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000,
+                onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } },
                 onerror: () => reject(new Error('Connection to Anki-Connect failed.')),
                 ontimeout: () => reject(new Error('Anki-Connect request timed out.')),
             });
@@ -719,23 +645,13 @@ function primeImageForOcr(img) {
             const base64data = canvas.toDataURL('image/png').split(',')[1];
             if (!base64data) throw new Error("Canvas toDataURL failed.");
             const filename = `screenshot_${Date.now()}.png`;
-            await ankiConnectRequest('storeMediaFile', {
-                filename,
-                data: base64data
-            });
-            const notes = await ankiConnectRequest('findNotes', {
-                query: 'added:1'
-            });
+            await ankiConnectRequest('storeMediaFile', { filename, data: base64data });
+            const notes = await ankiConnectRequest('findNotes', { query: 'added:1' });
             if (!notes || notes.length === 0) throw new Error('No recently added cards found.');
             const lastNoteId = notes.sort((a, b) => b - a)[0];
-            await ankiConnectRequest('updateNoteFields', {
-                note: {
-                    id: lastNoteId,
-                    fields: {
+            await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: {
                         [settings.ankiImageField]: `<img src="${filename}">`
-                    }
-                }
-            });
+                    } } });
             return true;
         } catch (error) {
             alert(`Anki Export Failed: ${error.message}`);
@@ -746,19 +662,9 @@ function primeImageForOcr(img) {
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = 'Starting...';
-        const postData = {
-            baseUrl: baseUrl,
-            user: settings.imageServerUser,
-            pass: settings.imageServerPassword
-        };
+        const postData = { baseUrl: baseUrl, user: settings.imageServerUser, pass: settings.imageServerPassword };
         GM_xmlhttpRequest({
-            method: 'POST',
-            url: `${settings.ocrServerUrl}/preprocess-chapter`,
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify(postData),
-            timeout: 10000,
+            method: 'POST', url: `${settings.ocrServerUrl}/preprocess-chapter`, headers: { 'Content-Type': 'application/json' }, data: JSON.stringify(postData), timeout: 10000,
             onload: (res) => {
                 try {
                     const data = JSON.parse(res.responseText);
@@ -766,34 +672,12 @@ function primeImageForOcr(img) {
                         btn.textContent = 'Accepted';
                         btn.style.borderColor = '#3498db';
                         checkServerStatus();
-                    } else {
-                        throw new Error(data.error || `Server responded with status ${res.status}`);
-                    }
-                } catch (e) {
-                    btn.textContent = 'Error!';
-                    btn.style.borderColor = '#c032b';
-                    alert(`Failed to start job: ${e.message}`);
-                }
+                    } else { throw new Error(data.error || `Server responded with status ${res.status}`); }
+                } catch (e) { btn.textContent = 'Error!'; btn.style.borderColor = '#c032b'; alert(`Failed to start job: ${e.message}`); }
             },
-            onerror: () => {
-                btn.textContent = 'Conn. Error!';
-                btn.style.borderColor = '#c0392b';
-                alert('Failed to connect to the OCR server.');
-            },
-            ontimeout: () => {
-                btn.textContent = 'Timeout!';
-                btn.style.borderColor = '#c0392b';
-                alert('Request timed out.');
-            },
-            onloadend: () => {
-                setTimeout(() => {
-                    if (btn.isConnected) {
-                        btn.textContent = originalText;
-                        btn.style.borderColor = '';
-                        btn.disabled = false;
-                    }
-                }, 3500);
-            }
+            onerror: () => { btn.textContent = 'Conn. Error!'; btn.style.borderColor = '#c0392b'; alert('Failed to connect to the OCR server.'); },
+            ontimeout: () => { btn.textContent = 'Timeout!'; btn.style.borderColor = '#c0392b'; alert('Request timed out.'); },
+            onloadend: () => { setTimeout(() => { if (btn.isConnected) { btn.textContent = originalText; btn.style.borderColor = ''; btn.disabled = false; } }, 3500); }
         });
     }
     async function batchProcessCurrentChapterFromURL() {
@@ -874,54 +758,19 @@ function primeImageForOcr(img) {
 /* --- Modal & Other UI --- */
 .gemini-ocr-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(20, 20, 25, 0.6); backdrop-filter: blur(8px) saturate(1.2); z-index: 2147483646; color: #EAEAEA; display: flex; align-items: center; justify-content: center; } .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-container { width: clamp(320px, 95vw, 700px); max-height: 90vh; background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 16px; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; } .gemini-ocr-modal-header { padding: clamp(15px, 4vw, 20px) clamp(15px, 5vw, 25px); border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); } .gemini-ocr-modal-content { padding: clamp(5px, 2vw, 10px) clamp(15px, 5vw, 25px); overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: clamp(10px, 3vw, 15px) clamp(15px, 5vw, 25px); border-top: 1px solid #444; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 10px; align-items: center; background-color: rgba(0,0,0,0.2); } .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; } .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: clamp(15px, 4vw, 20px) 0 clamp(8px, 2vw, 10px) 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); } .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: clamp(10px, 3vw, 12px) clamp(10px, 3vw, 15px); align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); } .full-width { grid-column: 1 / -1; } .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: clamp(8px, 2.5vw, 12px); box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; } .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); } #gemini-ocr-server-status { padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; transition: background-color 0.3s; } #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; } .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; }
         `);
-        document.body.insertAdjacentHTML('beforeend', ` <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button> <button id="gemini-ocr-global-edit-btn" class="is-hidden" title="Toggle Edit Mode">✏️</button> <button id="gemini-ocr-settings-button" title="OCR Settings">⚙️</button> <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden"> <div class="gemini-ocr-modal-container"> <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings</h2></div> <div class="gemini-ocr-modal-content"> <h3>OCR & Image Source</h3><div class="gemini-ocr-settings-grid full-width"> <label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"> <label for="gemini-image-server-user">Image Source Username:</label><input type="text" id="gemini-image-server-user" autocomplete="username" placeholder="Optional"> <label for="gemini-image-server-password">Image Source Password:</label><input type="password" id="gemini-image-server-password" autocomplete="current-password" placeholder="Optional"> </div> <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div> <h3>Anki Integration</h3><div class="gemini-ocr-settings-grid"> <label for="gemini-ocr-anki-url">Anki-Connect URL:</label><input type="text" id="gemini-ocr-anki-url"> <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field" placeholder="e.g., Image"> </div> <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid"> <label for="ocr-activation-mode">Activation Gesture:</label><select id="ocr-activation-mode"><option value="longPress">Long Press</option><option value="doubleTap">Double Tap</option></select> <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme">${Object.keys(COLOR_THEMES).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select> <label for="ocr-interaction-mode">Highlight Mode:</label><select id="ocr-interaction-mode"><option value="hover">On Hover</option><option value="click">On Click</option></select> <label for="ocr-focus-scale-multiplier">Focus Scale Multiplier:</label><input type="number" id="ocr-focus-scale-multiplier" min="1" max="3" step="0.1"> <label for="ocr-dimmed-opacity">Dimmed Box Opacity (%):</label><input type="number" id="ocr-dimmed-opacity" min="0" max="100" step="5"> <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select> <label for="ocr-font-multiplier-horizontal">H. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-horizontal" min="0.1" max="5" step="0.1"> <label for="ocr-font-multiplier-vertical">V. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-vertical" min="0.1" max="5" step="0.1"> <label for="ocr-bounding-box-adjustment-input">Box Adjustment (px):</label><input type="number" id="ocr-bounding-box-adjustment-input" min="0" max="100" step="1"> </div><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-solo-hover-mode"> Only show hovered box</label></div> <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div> <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1;.container1;.container2\n"></textarea></div> </div> <div class="gemini-ocr-modal-footer"> <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;">Purge Cache</button> <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;">Pre-process Chapter</button> <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn" style="background-color: #3ad602;">Save & Reload</button> </div> </div> </div> <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-container"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div></div> `);
+        document.body.insertAdjacentHTML('beforeend', ` <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button> <button id="gemini-ocr-global-edit-btn" class="is-hidden" title="Toggle Edit Mode">✏️</button> <button id="gemini-ocr-settings-button" title="OCR Settings">⚙️</button> <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden"> <div class="gemini-ocr-modal-container"> <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings</h2></div> <div class="gemini-ocr-modal-content"> <h3>OCR & Image Source</h3><div class="gemini-ocr-settings-grid full-width"> <label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"> <label for="gemini-image-server-user">Image Source Username:</label><input type="text" id="gemini-image-server-user" autocomplete="username" placeholder="Optional"> <label for="gemini-image-server-password">Image Source Password:</label><input type="password" id="gemini-image-server-password" autocomplete="current-password" placeholder="Optional"> </div> <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div> <h3>Anki Integration</h3><div class="gemini-ocr-settings-grid"> <label for="gemini-ocr-anki-url">Anki-Connect URL:</label><input type="text" id="gemini-ocr-anki-url"> <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field" placeholder="e.g., Image"> </div> <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid"> <label for="ocr-activation-mode">Activation Gesture:</label><select id="ocr-activation-mode"><option value="longPress">Long Press</option><option value="doubleTap">Double Tap</option></select> <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme">${Object.keys(COLOR_THEMES).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select> <label for="ocr-interaction-mode">Highlight Mode:</label><select id="ocr-interaction-mode"><option value="hover">On Hover</option><option value="click">On Click</option></select> <label for="ocr-focus-scale-multiplier">Focus Scale Multiplier:</label><input type="number" id="ocr-focus-scale-multiplier" min="1" max="3" step="0.1"> <label for="ocr-dimmed-opacity">Dimmed Box Opacity (%):</label><input type="number" id="ocr-dimmed-opacity" min="0" max="100" step="5"> <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select> <label for="ocr-font-multiplier-horizontal">H. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-horizontal" min="0.1" max="5" step="0.1"> <label for="ocr-font-multiplier-vertical">V. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-vertical" min="0.1" max="5" step="0.1"> <label for="ocr-bounding-box-adjustment-input">Box Adjustment (px):</label><input type="number" id="ocr-bounding-box-adjustment-input" min="0" max="100" step="1"> </div><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-solo-hover-mode"> Only show hovered box</label><label><input type="checkbox" id="gemini-ocr-add-space-on-merge"> Add space on merge</label></div> <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div> <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1;.container1;.container2\n"></textarea></div> </div> <div class="gemini-ocr-modal-footer"> <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;">Purge Cache</button> <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;">Pre-process Chapter</button> <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn" style="background-color: #3ad602;">Save & Reload</button> </div> </div> </div> <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-container"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div></div> `);
     }
 
     function bindUIEvents() {
         Object.assign(UI, {
-            settingsButton: document.getElementById('gemini-ocr-settings-button'),
-            settingsModal: document.getElementById('gemini-ocr-settings-modal'),
-            globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'),
-            globalEditButton: document.getElementById('gemini-ocr-global-edit-btn'),
-            debugModal: document.getElementById('gemini-ocr-debug-modal'),
-            serverUrlInput: document.getElementById('gemini-ocr-server-url'),
-            imageServerUserInput: document.getElementById('gemini-image-server-user'),
-            imageServerPasswordInput: document.getElementById('gemini-image-server-password'),
-            ankiUrlInput: document.getElementById('gemini-ocr-anki-url'),
-            ankiFieldInput: document.getElementById('gemini-ocr-anki-field'),
-            debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'),
-            soloHoverCheckbox: document.getElementById('gemini-ocr-solo-hover-mode'),
-            interactionModeSelect: document.getElementById('ocr-interaction-mode'),
-            activationModeSelect: document.getElementById('ocr-activation-mode'),
-            dimmedOpacityInput: document.getElementById('ocr-dimmed-opacity'),
-            textOrientationSelect: document.getElementById('ocr-text-orientation'),
-            colorThemeSelect: document.getElementById('ocr-color-theme'),
-            fontMultiplierHorizontalInput: document.getElementById('ocr-font-multiplier-horizontal'),
-            fontMultiplierVerticalInput: document.getElementById('ocr-font-multiplier-vertical'),
-            boundingBoxAdjustmentInput: document.getElementById('ocr-bounding-box-adjustment-input'),
-            focusScaleMultiplierInput: document.getElementById('ocr-focus-scale-multiplier'),
-            sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'),
-            statusDiv: document.getElementById('gemini-ocr-server-status'),
-            debugLogTextarea: document.getElementById('gemini-ocr-debug-log'),
-            saveBtn: document.getElementById('gemini-ocr-save-btn'),
-            closeBtn: document.getElementById('gemini-ocr-close-btn'),
-            debugBtn: document.getElementById('gemini-ocr-debug-btn'),
-            closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'),
-            batchChapterBtn: document.getElementById('gemini-ocr-batch-chapter-btn'),
-            purgeCacheBtn: document.getElementById('gemini-ocr-purge-cache-btn'),
+            settingsButton: document.getElementById('gemini-ocr-settings-button'), settingsModal: document.getElementById('gemini-ocr-settings-modal'), globalAnkiButton: document.getElementById('gemini-ocr-global-anki-export-btn'), globalEditButton: document.getElementById('gemini-ocr-global-edit-btn'), debugModal: document.getElementById('gemini-ocr-debug-modal'), serverUrlInput: document.getElementById('gemini-ocr-server-url'), imageServerUserInput: document.getElementById('gemini-image-server-user'), imageServerPasswordInput: document.getElementById('gemini-image-server-password'), ankiUrlInput: document.getElementById('gemini-ocr-anki-url'), ankiFieldInput: document.getElementById('gemini-ocr-anki-field'), debugModeCheckbox: document.getElementById('gemini-ocr-debug-mode'), soloHoverCheckbox: document.getElementById('gemini-ocr-solo-hover-mode'), addSpaceOnMergeCheckbox: document.getElementById('gemini-ocr-add-space-on-merge'), // Ported
+            interactionModeSelect: document.getElementById('ocr-interaction-mode'), activationModeSelect: document.getElementById('ocr-activation-mode'), dimmedOpacityInput: document.getElementById('ocr-dimmed-opacity'), textOrientationSelect: document.getElementById('ocr-text-orientation'), colorThemeSelect: document.getElementById('ocr-color-theme'), fontMultiplierHorizontalInput: document.getElementById('ocr-font-multiplier-horizontal'), fontMultiplierVerticalInput: document.getElementById('ocr-font-multiplier-vertical'), boundingBoxAdjustmentInput: document.getElementById('ocr-bounding-box-adjustment-input'), focusScaleMultiplierInput: document.getElementById('ocr-focus-scale-multiplier'), sitesConfigTextarea: document.getElementById('gemini-ocr-sites-config'), statusDiv: document.getElementById('gemini-ocr-server-status'), debugLogTextarea: document.getElementById('gemini-ocr-debug-log'), saveBtn: document.getElementById('gemini-ocr-save-btn'), closeBtn: document.getElementById('gemini-ocr-close-btn'), debugBtn: document.getElementById('gemini-ocr-debug-btn'), closeDebugBtn: document.getElementById('gemini-ocr-close-debug-btn'), batchChapterBtn: document.getElementById('gemini-ocr-batch-chapter-btn'), purgeCacheBtn: document.getElementById('gemini-ocr-purge-cache-btn'),
         });
-        document.body.addEventListener('touchstart', handleTouchStart, {
-            passive: false
-        });
-        document.body.addEventListener('touchmove', handleTouchMove, {
-            passive: false
-        });
+        document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
+        document.body.addEventListener('touchmove', handleTouchMove, { passive: false });
         document.body.addEventListener('touchend', handleTouchEnd);
         document.body.addEventListener('touchcancel', handleTouchEnd);
-        window.addEventListener('contextmenu', handleContextMenu, {
-            capture: true,
-            passive: false
-        });
+        window.addEventListener('contextmenu', handleContextMenu, { capture: true, passive: false });
         document.body.addEventListener('click', handleGlobalTap, true);
         UI.settingsButton.addEventListener('click', () => UI.settingsModal.classList.toggle('is-hidden'));
         UI.globalEditButton.addEventListener('click', (e) => {
@@ -942,18 +791,8 @@ function primeImageForOcr(img) {
             btn.textContent = '…';
             btn.disabled = true;
             const success = await exportImageToAnki(activeImageForExport);
-            if (success) {
-                btn.textContent = '✓';
-                btn.style.backgroundColor = '#27ae60';
-            } else {
-                btn.textContent = '✖';
-                btn.style.backgroundColor = '#c0392b';
-            }
-            setTimeout(() => {
-                btn.textContent = '✚';
-                btn.style.backgroundColor = '';
-                btn.disabled = false;
-            }, 2000);
+            if (success) { btn.textContent = '✓'; btn.style.backgroundColor = '#27ae60'; } else { btn.textContent = '✖'; btn.style.backgroundColor = '#c0392b'; }
+            setTimeout(() => { btn.textContent = '✚'; btn.style.backgroundColor = ''; btn.disabled = false; }, 2000);
         });
         UI.statusDiv.addEventListener('click', checkServerStatus);
         UI.closeBtn.addEventListener('click', () => UI.settingsModal.classList.add('is-hidden'));
@@ -963,9 +802,7 @@ function primeImageForOcr(img) {
             UI.debugLogTextarea.scrollTop = UI.debugLogTextarea.scrollHeight;
         });
         UI.closeDebugBtn.addEventListener('click', () => UI.debugModal.classList.add('is-hidden'));
-        UI.colorThemeSelect.addEventListener('change', () => {
-            document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)');
-        });
+        UI.colorThemeSelect.addEventListener('change', () => { document.documentElement.style.setProperty('--modal-header-color', COLOR_THEMES[UI.colorThemeSelect.value].main + '1)'); });
         UI.batchChapterBtn.addEventListener('click', batchProcessCurrentChapterFromURL);
         UI.purgeCacheBtn.addEventListener('click', purgeServerCache);
         UI.saveBtn.addEventListener('click', async () => {
@@ -977,6 +814,7 @@ function primeImageForOcr(img) {
                 ankiImageField: UI.ankiFieldInput.value.trim(),
                 debugMode: UI.debugModeCheckbox.checked,
                 soloHoverMode: UI.soloHoverCheckbox.checked,
+                addSpaceOnMerge: UI.addSpaceOnMergeCheckbox.checked, // Ported
                 interactionMode: UI.interactionModeSelect.value,
                 activationMode: UI.activationModeSelect.value,
                 textOrientation: UI.textOrientationSelect.value,
@@ -988,19 +826,14 @@ function primeImageForOcr(img) {
                 focusScaleMultiplier: parseFloat(UI.focusScaleMultiplierInput.value) || 1.2,
                 sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => {
                     const parts = line.split(';').map(s => s.trim());
-                    return {
-                        urlPattern: parts[0] || '',
-                        imageContainerSelectors: parts.slice(1).filter(s => s)
-                    };
+                    return { urlPattern: parts[0] || '', imageContainerSelectors: parts.slice(1).filter(s => s) };
                 })
             };
             try {
                 await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings));
                 alert('Settings Saved. Reloading.');
                 window.location.reload();
-            } catch (e) {
-                alert(`Error saving settings.`);
-            }
+            } catch (e) { alert(`Error saving settings.`); }
         });
         document.addEventListener('ocr-log-update', () => {
             if (UI.debugModal && !UI.debugModal.classList.contains('is-hidden')) {
@@ -1016,9 +849,7 @@ function primeImageForOcr(img) {
         UI.statusDiv.className = 'status-checking';
         UI.statusDiv.textContent = 'Checking...';
         GM_xmlhttpRequest({
-            method: 'GET',
-            url: serverUrl,
-            timeout: 5000,
+            method: 'GET', url: serverUrl, timeout: 5000,
             onload: (res) => {
                 try {
                     const data = JSON.parse(res.responseText);
@@ -1026,23 +857,11 @@ function primeImageForOcr(img) {
                         UI.statusDiv.className = 'status-ok';
                         const jobs = data.active_preprocess_jobs !== undefined ? data.active_preprocess_jobs : 'N/A';
                         UI.statusDiv.textContent = `Connected (Cache: ${data.items_in_cache} | Jobs: ${jobs})`;
-                    } else {
-                        UI.statusDiv.className = 'status-error';
-                        UI.statusDiv.textContent = 'Server Unresponsive';
-                    }
-                } catch (e) {
-                    UI.statusDiv.className = 'status-error';
-                    UI.statusDiv.textContent = 'Invalid Response';
-                }
+                    } else { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Server Unresponsive'; }
+                } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; }
             },
-            onerror: () => {
-                UI.statusDiv.className = 'status-error';
-                UI.statusDiv.textContent = 'Connection Failed';
-            },
-            ontimeout: () => {
-                UI.statusDiv.className = 'status-error';
-                UI.statusDiv.textContent = 'Timed Out';
-            }
+            onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; },
+            ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; }
         });
     }
 
@@ -1053,24 +872,17 @@ function primeImageForOcr(img) {
         btn.disabled = true;
         btn.textContent = 'Purging...';
         GM_xmlhttpRequest({
-            method: 'POST',
-            url: `${settings.ocrServerUrl}/purge-cache`,
-            timeout: 10000,
+            method: 'POST', url: `${settings.ocrServerUrl}/purge-cache`, timeout: 10000,
             onload: (res) => {
                 try {
                     const data = JSON.parse(res.responseText);
                     alert(data.message || data.error);
                     checkServerStatus();
-                } catch (e) {
-                    alert('Failed to parse response.');
-                }
+                } catch (e) { alert('Failed to parse response.'); }
             },
             onerror: () => alert('Failed to connect to server.'),
             ontimeout: () => alert('Request timed out.'),
-            onloadend: () => {
-                btn.disabled = false;
-                btn.textContent = originalText;
-            }
+            onloadend: () => { btn.disabled = false; btn.textContent = originalText; }
         });
     }
 
@@ -1082,24 +894,10 @@ function primeImageForOcr(img) {
     }
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
-        if (loadedSettings) {
-            try {
-                settings = {
-                    ...settings,
-                    ...JSON.parse(loadedSettings)
-                };
-            } catch (e) {
-                logDebug("Could not parse saved settings.");
-            }
-        }
-        createUI();
-        bindUIEvents();
-        applyStyles();
-        createMeasurementSpan();
+        if (loadedSettings) { try { settings = { ...settings, ...JSON.parse(loadedSettings) }; } catch (e) { logDebug("Could not parse saved settings."); } }
+        createUI(); bindUIEvents(); applyStyles(); createMeasurementSpan();
         resizeObserver = new ResizeObserver(handleResize);
-        intersectionObserver = new IntersectionObserver(handleIntersection, {
-            rootMargin: '100px 0px'
-        });
+        intersectionObserver = new IntersectionObserver(handleIntersection, { rootMargin: '100px 0px' });
         setInterval(periodicCleanup, 5000);
         UI.serverUrlInput.value = settings.ocrServerUrl;
         UI.imageServerUserInput.value = settings.imageServerUser || '';
@@ -1108,6 +906,7 @@ function primeImageForOcr(img) {
         UI.ankiFieldInput.value = settings.ankiImageField;
         UI.debugModeCheckbox.checked = settings.debugMode;
         UI.soloHoverCheckbox.checked = settings.soloHoverMode;
+        UI.addSpaceOnMergeCheckbox.checked = settings.addSpaceOnMerge; // Ported
         UI.interactionModeSelect.value = settings.interactionMode;
         UI.activationModeSelect.value = settings.activationMode;
         UI.textOrientationSelect.value = settings.textOrientation;
