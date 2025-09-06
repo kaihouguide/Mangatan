@@ -33,7 +33,8 @@
                 'div.muiltr-1r1or1s', // Double Page
                 'div.muiltr-18sieki', // New Continuous Vertical
                 'div.muiltr-cns6dc', // Added per request
-                '.MuiBox-root.muiltr-1noqzsz' // RTL Continuous Vertical (FIXED)
+                '.MuiBox-root.muiltr-1noqzsz', // RTL Continuous Vertical (FIXED)
+                '.MuiBox-root.muiltr-1tapw32' // RTL Double Page
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf'
         }],
@@ -375,14 +376,16 @@
         managedElements.set(targetImg, state);
         const show = () => {
             clearTimeout(hideButtonTimer);
-            overlay.classList.remove('is-hidden'); overlay.classList.add('is-focused');
+            overlay.classList.remove('is-hidden');
+            overlay.classList.add('is-focused');
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
         };
         const hide = () => {
             if (activeMergeSelections.has(overlay)) { return; }
             hideButtonTimer = setTimeout(() => {
-                overlay.classList.add('is-hidden'); overlay.classList.remove('is-focused');
+                overlay.classList.add('is-hidden');
+                overlay.classList.remove('is-focused');
                 UI.globalAnkiButton?.classList.add('is-hidden');
                 if (activeImageForExport === targetImg) activeImageForExport = null;
             }, 300);
