@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.5.16-M-Controls-Restored
-// @description  Adds a mobile-optimized OCR overlay. Interaction model and simple editor restored to the classic feel, combined with the new robust rendering engine and auto-merging.
+// @version      24.5.17-M-Robust-Merge
+// @description  Adds a mobile-optimized OCR overlay. Features a robust rendering engine, automatic text bubble merging, and a restored classic interaction model for a seamless experience.
 // @author       1Selxo (PC Base by 1Selxo, Mobile Port & Hybrid Engine by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -61,7 +61,7 @@
         autoMergeMixedMinOverlapRatio: 0.5
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v24_m_robust_reset';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v24_m_robust_merge';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -590,7 +590,7 @@
         const newBoundingBox = { x: Math.min(b1.x, b2.x), y: Math.min(b1.y, b2.y), width: Math.max(b1.x + b1.width, b2.x + b2.width) - Math.min(b1.x, b2.x), height: Math.max(b1.y + b1.height, b2.y + b2.height) - Math.min(b1.y, b2.y) };
 
         const areBothVertical = box1.classList.contains('gemini-ocr-text-vertical') && box2.classList.contains('gemini-ocr-text-vertical');
-        const forcedOrientation = areBothVertical ? 'vertical' : 'auto';
+        const forcedOrientation = areBothVertical ? 'vertical' : 'horizontal';
 
         const newOcrItem = { text: combinedText, tightBoundingBox: newBoundingBox, forcedOrientation: forcedOrientation, isMerged: true };
 
@@ -768,6 +768,8 @@
                 --accent: ${theme.accent};
                 --background: ${theme.background};
                 --modal-header-color: rgba(${theme.accent}, 1);
+                --ocr-dimmed-opacity: ${settings.dimmedOpacity};
+                --ocr-focus-scale: ${settings.focusScaleMultiplier};
             }`;
         } else {
              cssVars = `:root { --modal-header-color: #00BFFF; }`;
@@ -929,11 +931,11 @@
         reinitializeScript(); // Use reinitialize which calls both scanners
         setupNavigationObserver(); // Start watching for page changes
 
-        // Periodic maintenance
+        // Periodic maintenance (as a fallback)
         setInterval(() => {
             for (const [img] of managedElements.entries()) {
                 if (!img.isConnected) {
-                    logDebug("Detected disconnected image during periodic cleanup.");
+                    logDebug("Detected disconnected image during periodic cleanup fallback.");
                     fullCleanupAndReset();
                     setTimeout(reinitializeScript, 250);
                     break;
