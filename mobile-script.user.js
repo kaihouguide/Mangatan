@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.5.3-M-MultiMerge-AutoMerge
+// @version      24.5.3-M-MultiMerge-AutoMerge-OverflowFix
 // @description  Adds a mobile-optimized OCR overlay with multi-select editing and automatic text merging.
 // @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini, Multi-Merge & Auto-Merge Port by Gemini)
 // @match        *://127.0.0.1*/*
@@ -735,7 +735,7 @@
 .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
 .gemini-ocr-text-box { display: flex; justify-content: center; align-items: center; text-align: center; position: absolute; box-sizing: border-box; border-radius: 4px; user-select: text !important; -webkit-user-select: text !important; touch-action: auto !important; cursor: pointer; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 0px 1px 3px rgba(0,0,0,0.9); backdrop-filter: blur(3px); transition: all 0.2s ease-in-out; overflow: hidden; padding: 4px; -webkit-font-smoothing: antialiased; }
 .gemini-ocr-text-vertical { writing-mode: vertical-rl !important; text-orientation: upright !important; letter-spacing: 0.1em; }
-.is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight, .is-focused .selected-for-merge { overflow: visible; transform: scale(var(--ocr-focus-scale, 1.05)); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; opacity: 1; }
+.is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight, .is-focused .selected-for-merge { overflow: visible !important; transform: scale(var(--ocr-focus-scale, 1.05)); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; opacity: 1; }
 .is-focused.has-manual-highlight:not(.edit-mode-active) .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); }
 .solo-hover-mode.is-focused .gemini-ocr-text-box { opacity: 0; } .solo-hover-mode.is-focused .gemini-ocr-text-box.manual-highlight, .solo-hover-mode.is-focused .gemini-ocr-text-box.selected-for-merge { opacity: 1; }
 
