@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.5.15-M-Robust-Reset
-// @description  Adds a mobile-optimized OCR overlay with a robust, stable hybrid rendering engine, advanced editing, unified automatic merging, and a new dark mode.
+// @version      24.5.15-M-Robust-Reset-Layout-Fix
+// @description  Adds a mobile-optimized OCR overlay with a robust, stable hybrid rendering engine, advanced editing, unified automatic merging, and a new dark mode. (Layout controls restored to original feel)
 // @author       1Selxo (PC Base by 1Selxo, Mobile Port & Robust-Reset by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -765,11 +765,6 @@
     }
 
     // --- UI, Styles and Initialization ---
-    function manageScrollFix() {
-        const urlPattern = '/manga/', shouldBeActive = window.location.href.includes(urlPattern), isActive = document.documentElement.classList.contains('ocr-scroll-fix-active');
-        if (shouldBeActive && !isActive) document.documentElement.classList.add('ocr-scroll-fix-active');
-        else if (!shouldBeActive && isActive) document.documentElement.classList.remove('ocr-scroll-fix-active');
-    }
     function applyTheme() {
         const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.blue;
         let cssVars = '';
@@ -794,8 +789,6 @@
     }
     function createUI() {
         GM_addStyle(`
-            html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
-
             /* --- Overlay & Interaction --- */
             .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; transition: opacity 0.2s, visibility 0.2s; visibility: hidden; opacity: 0; -webkit-tap-highlight-color: transparent; }
             .gemini-ocr-decoupled-overlay.is-focused { visibility: visible; opacity: 1; pointer-events: auto; }
@@ -976,7 +969,6 @@
                 }
             }
         }, 5000);
-        setInterval(manageScrollFix, 500);
     }
 
     init().catch(e => console.error(`[OCR Hybrid] Fatal Initialization Error: ${e.message}`));
