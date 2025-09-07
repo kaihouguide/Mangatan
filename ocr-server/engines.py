@@ -1,27 +1,11 @@
 from abc import ABC, abstractmethod
 from math import pi
 from typing import TypedDict
-from platform import system
-import json
+
 
 import chrome_lens_py
 from chrome_lens_py.utils.lens_betterproto import LensOverlayObjectsResponse
 from PIL.Image import Image
-
-if system() == "Windows":
-    try:
-        import oneocr
-
-        ONEOCR_AVAILABLE = True
-    except ImportError as e:
-        print(f"[Warning] OneOCR import failed: {e}")
-        ONEOCR_AVAILABLE = False
-    except Exception as e:
-        print(f"[Warning] If you get this error please spam the Mangatan thread: {e}")
-        ONEOCR_AVAILABLE = False
-else:
-    print(f"[Warning] OneOCR is not available on platform: {system()}")
-    ONEOCR_AVAILABLE = False
 
 
 class BoundingBox(TypedDict):
@@ -51,7 +35,17 @@ class Engine(ABC):
 
 class OneOCR(Engine):
     def __init__(self):
-        self.engine = oneocr.OcrEngine()  # pyright: ignore[reportPossiblyUnboundVariable]
+        try:
+            import oneocr
+
+            self.engine = oneocr.OcrEngine()
+        except ImportError as e:
+            print(f"[Warning] OneOCR import failed: {e}")
+        except Exception as e:
+            print(
+                f"[Warning] If you get this error please spam the Mangatan thread: {e}"
+            )
+
         # The height of each chunk to process.
         # A value between 1000-2000 is a good starting point.
         self.CHUNK_HEIGHT = 1500
@@ -253,12 +247,10 @@ class AppleVision(Engine):
 
 def initialize_engine(engine_name: str) -> Engine:
     engine_name = engine_name.strip().lower()
+
     if engine_name == "lens":
         return GoogleLens()
     elif engine_name == "oneocr":
-        if ONEOCR_AVAILABLE:
-            return OneOCR()
-        else:
-            raise RuntimeError("OneOCR is not available.")
+        return OneOCR()
     else:
         raise ValueError(f"Invalid engine: {engine_name}")
