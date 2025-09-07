@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (PC Hybrid Engine) - Updated
 // @namespace    http://tampermonkey.net/
-// @version      24.5.4-Hybrid-UI-Merge
+// @version      24.5.4-Hybrid-UI-Merge-OverflowFix
 // @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling and an improved UI ported from the mobile version.
 // @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, UI/Editor Port from Mobile by Gemini)
 // @match        *://127.0.0.1*/*
@@ -730,7 +730,7 @@
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
             .is-focused .gemini-ocr-text-box { color: var(--ocr-text-color); background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); text-shadow: 0 1px 3px rgba(0,0,0,0.9); backdrop-filter: blur(3px); }
             body:not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
-            body:not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight { transform: scale(var(--ocr-focus-scale)); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; }
+            body:not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight { overflow: visible !important; transform: scale(var(--ocr-focus-scale)); background: var(--ocr-highlight-bg-color); border-color: var(--ocr-highlight-border-color); color: var(--ocr-highlight-text-color); text-shadow: none; box-shadow: var(--ocr-highlight-shadow), var(--ocr-highlight-inset-shadow); z-index: 9999; }
             .interaction-mode-hover.is-focused:not(.solo-hover-mode):has(.gemini-ocr-text-box:hover):not(body.ocr-edit-mode-active *) .gemini-ocr-text-box:not(:hover),
             .interaction-mode-click.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); background: rgba(10,25,40,0.5); border-color: var(--ocr-border-color-dim); }
             .solo-hover-mode.is-focused .gemini-ocr-text-box { opacity: 0; transition: opacity 0.1s ease-in-out; }
