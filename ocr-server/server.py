@@ -19,6 +19,9 @@ from waitress import serve
 
 # region Config
 
+IP_ADDRESS = "127.0.0.1"
+PORT = 3000
+
 CACHE_FILE_PATH = os.path.join(os.getcwd(), "ocr-cache.json")
 UPLOAD_FOLDER = "uploads"
 IMAGE_CACHE_FOLDER = "image_cache"
@@ -327,11 +330,11 @@ def main():
 
     if is_debug_mode:
         print("--- Starting Flask Development Server in DEBUG MODE ---")
-        app.run(host="127.0.0.1", port=3000, debug=True, use_reloader=False)
+        app.run(host=IP_ADDRESS, port=PORT, debug=True, use_reloader=False)
     else:
         print("--- Starting Waitress Production Server ---")
-        print(f"URL: http://127.0.0.1:3000")
-        serve(app, host="127.0.0.1", port=3000)
+        print(f"URL: http://{IP_ADDRESS}:{PORT}")
+        serve(app, host=IP_ADDRESS, port=PORT)
 
 
 if __name__ == "__main__":
