@@ -17,4 +17,5 @@ dependencies = [
 [dependency-groups]
 dev = [
     "nuitka>=2.7.12",
+    "pytest>=8.4.1",
 ]
