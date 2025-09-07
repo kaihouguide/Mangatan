@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine)
 // @namespace    http://tampermonkey.net/
-// @version      24.5.3-M-MultiMerge-AutoMerge-OverflowFix
-// @description  Adds a mobile-optimized OCR overlay with multi-select editing and automatic text merging.
-// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini, Multi-Merge & Auto-Merge Port by Gemini)
+// @version      24.5.3-M-MultiMerge-AutoMerge-OverflowFix-ScrollFix
+// @description  Adds a mobile-optimized OCR overlay with multi-select editing and automatic text merging. Allows scrolling when the overlay is active.
+// @author       1Selxo (Mobile port by Gemini, Hybrid Rendering & Editor by Gemini, Interaction Fixes by Gemini, Layout Fix by Gemini, Multi-Merge & Auto-Merge Port by Gemini, Scroll Fix by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -730,7 +730,7 @@
     function createUI() {
         GM_addStyle(`
 .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; touch-action: manipulation; transition: opacity 0.15s; background-color: rgba(0, 0, 0, 0); }
-.gemini-ocr-decoupled-overlay.is-focused { background-color: rgba(0, 0, 0, 0.2); pointer-events: auto; }
+.gemini-ocr-decoupled-overlay.is-focused { background-color: rgba(0, 0, 0, 0.2); }
 .gemini-ocr-text-box, .gemini-ocr-editor-controls button { pointer-events: auto; }
 .gemini-ocr-decoupled-overlay.is-hidden { opacity: 0; visibility: hidden; }
 .gemini-ocr-text-box { display: flex; justify-content: center; align-items: center; text-align: center; position: absolute; box-sizing: border-box; border-radius: 4px; user-select: text !important; -webkit-user-select: text !important; touch-action: auto !important; cursor: pointer; background: var(--ocr-bg-color); border: 2px solid var(--ocr-border-color); color: var(--ocr-text-color); text-shadow: 0px 1px 3px rgba(0,0,0,0.9); backdrop-filter: blur(3px); transition: all 0.2s ease-in-out; overflow: hidden; padding: 4px; -webkit-font-smoothing: antialiased; }
