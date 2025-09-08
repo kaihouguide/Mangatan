@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Automatic Content OCR (PC Hybrid Engine)
+// @name         Automatic Content OCR (PC Hybrid Engine) - Original Interaction
 // @namespace    http://tampermonkey.net/
-// @version      24.5.15-Robust-Reset
+// @version      24.5.19-PC-Interaction-Revert
 // @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling, advanced merging, and a new dark mode.
-// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini)
+// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -63,7 +63,7 @@
         autoMergeMixedMinOverlapRatio: 0.5
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v24_pc_robust_reset';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v24_pc_interaction_revert';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -709,6 +709,8 @@
                 --accent: ${theme.accent};
                 --background: ${theme.background};
                 --modal-header-color: rgba(${theme.accent}, 1);
+                --ocr-dimmed-opacity: ${settings.dimmedOpacity};
+                --ocr-focus-scale: ${settings.focusScaleMultiplier};
             }`;
         } else {
              cssVars = `:root { --modal-header-color: #00BFFF; }`;
@@ -740,7 +742,8 @@
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--background), 1);
             }
             body.ocr-brightness-light:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
-            body.ocr-brightness-light:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight {
+            body.ocr-brightness-light:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight,
+            body.ocr-brightness-light.ocr-edit-mode-active .gemini-ocr-text-box.selected-for-merge {
                 background: rgba(var(--background), 1); color: rgba(var(--accent), 1);
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--background), 1), 0px 0px 0px 0.2em rgba(var(--accent), 1);
             }
@@ -749,7 +752,8 @@
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--accent), 0.4); backdrop-filter: blur(2px);
             }
             body.ocr-brightness-dark:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
-            body.ocr-brightness-dark:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight {
+            body.ocr-brightness-dark:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight,
+            body.ocr-brightness-dark.ocr-edit-mode-active .gemini-ocr-text-box.selected-for-merge {
                 background: rgba(var(--accent), 1); color: #FFFFFF;
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--accent), 0.4), 0px 0px 0px 0.2em rgba(var(--background), 1);
             }
@@ -767,6 +771,7 @@
             .solo-hover-mode.is-focused .gemini-ocr-text-box.selected-for-merge { opacity: 1; }
             body.ocr-theme-minimal .gemini-ocr-text-box { border: 1px solid rgba(255, 0, 0, 0.2); background: transparent !important; color: transparent !important; }
             .gemini-ocr-text-box.selected-for-merge { outline: 3px solid #f1c40f !important; outline-offset: 2px; box-shadow: 0 0 12px #f1c40f; opacity: 1 !important; }
+            body.ocr-edit-mode-active { cursor: crosshair; }
             /* Misc UI */
             .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms; min-width: 80px; text-align: center; } .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); } .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; } #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; } #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); } #gemini-ocr-global-anki-export-btn:hover { background-color: #27ae60; transform: scale(1.1); } #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; } #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); } .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1A1D21; border: 1px solid var(--modal-header-color, #00BFFF); border-radius: 15px; z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); width: 600px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; } .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color, #00BFFF); } .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-start; gap: 10px; align-items: center; } .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; } .gemini-ocr-modal h3 { font-size: 1.1em; margin: 15px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; color: var(--modal-header-color, #00BFFF); } .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 10px 15px; align-items: center; } .full-width { grid-column: 1 / -1; } .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 8px; box-sizing: border-box; font-family: monospace; background-color: #2a2a2e; border: 1px solid #555; border-radius: 5px; color: #EAEAEA; } .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 5px; color: #1A1D21; cursor: pointer; font-weight: bold; } #gemini-ocr-server-status { padding: 10px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s; } #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
@@ -805,7 +810,7 @@
         UI.purgeCacheBtn.addEventListener('click', purgeServerCache);
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
-                ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value, ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(), debugMode: UI.debugModeCheckbox.checked, soloHoverMode: UI.soloHoverCheckbox.checked, addSpaceOnMerge: UI.addSpaceOnMergeCheckbox.checked, interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value, brightnessMode: UI.brightnessModeSelect.value, mergeModifierKey: UI.mergeKeyInput.value.trim(), deleteModifierKey: UI.deleteKeyInput.value.trim(), dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100, fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0, boundingBoxAdjustment: parseInt(UI.boundingBoxAdjustmentInput.value, 10) || 0, focusScaleMultiplier: parseFloat(UI.focusScaleMultiplierInput.value) || 1.1, sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2).filter(s => s), contentRootSelector: parts[parts.length -1] || '#root' }; }),
+                ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value, ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(), debugMode: UI.debugModeCheckbox.checked, soloHoverMode: UI.soloHoverCheckbox.checked, addSpaceOnMerge: UI.addSpaceOnMergeCheckbox.checked, interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value, brightnessMode: UI.brightnessModeSelect.value, mergeModifierKey: UI.mergeKeyInput.value.trim(), deleteModifierKey: UI.deleteKeyInput.value.trim(), dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100, fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0, boundingBoxAdjustment: parseInt(UI.boundingBoxAdjustmentInput.value, 10) || 0, focusScaleMultiplier: parseFloat(UI.focusScaleMultiplierInput.value) || 1.1, sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2,-1).filter(s => s), contentRootSelector: parts[parts.length -1] || '#root'  }; }),
                 autoMergeEnabled: UI.autoMergeEnabledCheckbox.checked, autoMergeDistK: parseFloat(UI.autoMergeDistKInput.value) || 1.2, autoMergeFontRatio: parseFloat(UI.autoMergeFontRatioInput.value) || 1.3, autoMergePerpTol: parseFloat(UI.autoMergePerpTolInput.value) || 0.5, autoMergeOverlapMin: parseFloat(UI.autoMergeOverlapMinInput.value) || 0.1, autoMergeMinLineRatio: parseFloat(UI.autoMergeMinLineRatioInput.value) || 0.5, autoMergeFontRatioForMixed: parseFloat(UI.autoMergeFontRatioForMixedInput.value) || 1.1, autoMergeMixedMinOverlapRatio: parseFloat(UI.autoMergeMixedMinOverlapRatioInput.value) || 0.5,
             };
             try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
@@ -876,7 +881,7 @@
         bindUIEvents();
         applyTheme();
         createMeasurementSpan();
-        logDebug("Initializing HYBRID render engine with Robust Reset.");
+        logDebug("Initializing HYBRID render engine with Robust Reset and Original Interaction.");
 
         resizeObserver = new ResizeObserver(handleResize);
         intersectionObserver = new IntersectionObserver(handleIntersection, { rootMargin: '100px 0px' });
