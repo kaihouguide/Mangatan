@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (PC Hybrid Engine) - Original Interaction
 // @namespace    http://tampermonkey.net/
-// @version      24.5.19-PC-Interaction-Revert
+// @version      24.5.19-PC-Interaction-Revert-GhostFix
 // @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling, advanced merging, and a new dark mode.
-// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini)
+// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini, Ghost-Fix by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -149,23 +149,27 @@
         }
 
         navigationObserver = new MutationObserver((mutations) => {
+            let navigationDetected = false;
             for (const mutation of mutations) {
-                 if (mutation.removedNodes.length > 0) {
-                     let navigated = false;
-                     for(const node of mutation.removedNodes) {
-                         // If a node that we know is a main image container is removed, it's a very reliable sign of navigation.
-                         if (node.nodeType === 1 && managedContainers.has(node)) {
-                             navigated = true;
-                             break;
-                         }
-                     }
-                     if (navigated) {
-                        fullCleanupAndReset();
-                        // Allow the DOM to settle before re-initializing
-                        setTimeout(reinitializeScript, 250);
-                        return; // We only need to handle this once per navigation event
-                     }
+                if (mutation.removedNodes.length > 0) {
+                    for (const node of mutation.removedNodes) {
+                        if (node.nodeType === 1) {
+                            // A navigation event is likely if a managed container OR a managed image itself is removed.
+                            // This is a more robust check that fixes the "ghost overlay" issue.
+                            if (managedContainers.has(node) || managedElements.has(node)) {
+                                navigationDetected = true;
+                                break;
+                            }
+                        }
+                    }
                 }
+                if (navigationDetected) break;
+            }
+
+            if (navigationDetected) {
+                fullCleanupAndReset();
+                // Use a short timeout to allow the DOM to stabilize after navigation before re-scanning.
+                setTimeout(reinitializeScript, 250);
             }
         });
         navigationObserver.observe(targetNode, { childList: true, subtree: true });
