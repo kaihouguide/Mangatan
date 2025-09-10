@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine) - FIXED
 // @namespace    http://tampermonkey.net/
-// @version      24.5.19-M-Interaction-Fix
+// @version      24.5.19-M-Interaction-Fix-2
 // @description  Adds a mobile-optimized OCR overlay. Features a robust rendering engine and automatic merging, with restored non-blocking interaction and optional dimming.
 // @author       1Selxo (PC Base by 1Selxo, Mobile Port & Hybrid Engine by Gemini)
 // @match        *://127.0.0.1*/*
@@ -821,11 +821,14 @@
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
             .is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight, .is-focused .gemini-ocr-text-box.selected-for-merge { z-index: 1; transform: scale(var(--ocr-focus-scale)); overflow: visible !important; }
 
-            /* --- [FIXED] Optional Dimming --- */
-            .solo-hover-mode.is-focused.has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) {
-                opacity: var(--ocr-dimmed-opacity); /* Dimming now only applies if 'Only show selected box' is checked */
+            /* --- [FIXED] Optional Dimming (Disabled in Edit Mode) --- */
+            /* The :not(.edit-mode-active) selector prevents solo/focus mode from hiding/dimming boxes during manual merge operations */
+            .solo-hover-mode.is-focused:not(.edit-mode-active).has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) {
+                opacity: var(--ocr-dimmed-opacity);
             }
-            .solo-hover-mode.is-focused .gemini-ocr-text-box:not(.manual-highlight) { opacity: 0; }
+            .solo-hover-mode.is-focused:not(.edit-mode-active) .gemini-ocr-text-box:not(.manual-highlight) {
+                opacity: 0;
+            }
             .solo-hover-mode.is-focused .gemini-ocr-text-box.selected-for-merge { opacity: 1; }
 
             /* Editor UI */
