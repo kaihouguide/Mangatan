@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Automatic Content OCR (PC Hybrid Engine) - Original Interaction
 // @namespace    http://tampermonkey.net/
-// @version      24.5.20-PC-Interaction-Revert-GhostFix
+// @version      24.5.21-PC-Stable
 // @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling, advanced merging, and a new dark mode.
 // @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini, Ghost-Fix by Gemini)
 // @match        *://127.0.0.1*/*
@@ -27,14 +27,14 @@
         sites: [{
             urlPattern: '127.0.0.1',
             imageContainerSelectors: [
-                'div.muiltr-masn8', // Old Continuous Vertical
-                'div.muiltr-79elbk', // Webtoon
-                'div.muiltr-u43rde', // Single Page
-                'div.muiltr-1r1or1s', // Double Page
-                'div.muiltr-18sieki', // New Continuous Vertical
-                'div.muiltr-cns6dc', // Added per request
+                'div.muiltr-masn8',      // Old Continuous Vertical
+                'div.muiltr-79elbk',      // Webtoon
+                'div.muiltr-u43rde',      // Single Page
+                'div.muiltr-1r1or1s',      // Double Page
+                'div.muiltr-18sieki',     // New Continuous Vertical
+                'div.muiltr-cns6dc',      // Added per request
                 '.MuiBox-root.muiltr-1noqzsz', // RTL Continuous Vertical (FIXED)
-                '.MuiBox-root.muiltr-1tapw32' // RTL Double Page
+                '.MuiBox-root.muiltr-1tapw32'  // RTL Double Page
             ],
             overflowFixSelector: '.MuiBox-root.muiltr-13djdhf',
             contentRootSelector: '#root' // Key selector for robust navigation detection
@@ -63,7 +63,7 @@
         autoMergeMixedMinOverlapRatio: 0.5
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v24_pc_interaction_revert';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v24_hybrid_final';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map();
     const managedContainers = new Map();
@@ -88,8 +88,7 @@
         purple: { accent: '155,89,182', background: '245,229,255' },
         turquoise: { accent: '26,188,156', background: '229,255,250' },
         pink: { accent: '255,77,222', background: '255,229,255' },
-        grey: { accent: '149,165,166', background: '229,236,236' },
-        minimal: { main: 'rgba(255, 0, 0,', text: 'transparent', highlightText: 'transparent' }
+        grey: { accent: '149,165,166', background: '229,236,236' }
     };
 
     const logDebug = (message) => {
@@ -154,8 +153,6 @@
                 if (mutation.removedNodes.length > 0) {
                     for (const node of mutation.removedNodes) {
                         if (node.nodeType === 1) {
-                            // A navigation event is likely if a managed container OR a managed image itself is removed.
-                            // This is a more robust check that fixes the "ghost overlay" issue.
                             if (managedContainers.has(node) || managedElements.has(node)) {
                                 navigationDetected = true;
                                 break;
@@ -168,7 +165,6 @@
 
             if (navigationDetected) {
                 fullCleanupAndReset();
-                // Use a short timeout to allow the DOM to stabilize after navigation before re-scanning.
                 setTimeout(reinitializeScript, 250);
             }
         });
@@ -182,7 +178,11 @@
             const state = managedElements.get(img);
             if (state && state.overlay.isConnected) {
                 const rect = img.getBoundingClientRect();
-                Object.assign(state.overlay.style, { top: `${rect.top}px`, left: `${rect.left}px` });
+                // Use fixed positioning with top/left from getBoundingClientRect
+                Object.assign(state.overlay.style, {
+                    top: `${rect.top}px`,
+                    left: `${rect.left}px`
+                });
             }
         }
         animationFrameId = requestAnimationFrame(updateVisibleOverlaysPosition);
@@ -478,14 +478,31 @@
         if (managedElements.has(targetImg)) return;
         let data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || !Array.isArray(data)) return;
+
+        data.sort((a, b) => {
+            const a_y = a.tightBoundingBox.y;
+            const b_y = b.tightBoundingBox.y;
+            const a_x = a.tightBoundingBox.x;
+            const b_x = b.tightBoundingBox.x;
+            const ROW_TOLERANCE = 0.05;
+            if (Math.abs(a_y - b_y) < ROW_TOLERANCE) {
+                return b_x - a_x;
+            } else {
+                return a_y - b_y;
+            }
+        });
+
+
         if (settings.autoMergeEnabled) {
             data = autoMergeOcrData(data);
             ocrDataCache.set(targetImg, data);
         }
+
         const overlay = document.createElement('div');
-        overlay.className = `gemini-ocr-decoupled-overlay interaction-mode-${settings.interactionMode}`;
+        // MODIFIED: Added 'is-inactive' class to start hidden, removed inline style for visibility
+        overlay.className = `gemini-ocr-decoupled-overlay is-inactive interaction-mode-${settings.interactionMode}`;
         overlay.classList.toggle('solo-hover-mode', settings.soloHoverMode);
-        overlay.style.visibility = 'hidden';
+
         data.forEach((item, index) => {
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box';
@@ -504,24 +521,32 @@
             overlay.appendChild(ocrBox);
         });
         document.body.appendChild(overlay);
+
         const state = { overlay, lastWidth: 0, lastHeight: 0, srcStub: targetImg.src.slice(-30) };
         managedElements.set(targetImg, state);
+
+        // MODIFIED: show() now removes 'is-inactive' to make the overlay visible
         const show = () => {
             clearTimeout(hideButtonTimer);
+            overlay.classList.remove('is-inactive');
             overlay.classList.add('is-focused');
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
         };
+        // MODIFIED: hide() now adds 'is-inactive' to make the overlay disappear
         const hide = () => {
             if (document.body.classList.contains('ocr-edit-mode-active')) return;
             hideButtonTimer = setTimeout(() => {
+                overlay.classList.add('is-inactive');
                 overlay.classList.remove('is-focused', 'has-manual-highlight');
                 overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
                 UI.globalAnkiButton?.classList.add('is-hidden');
                 if (activeImageForExport === targetImg) activeImageForExport = null;
-            }, 300);
+            }, 1000);
         };
+
         [targetImg, overlay].forEach(el => { el.addEventListener('mouseenter', show); el.addEventListener('mouseleave', hide); });
+
         overlay.addEventListener('click', (e) => {
             const clickedBox = e.target.closest('.gemini-ocr-text-box');
             if (!clickedBox) {
@@ -538,6 +563,7 @@
                 overlay.classList.add('has-manual-highlight');
             }
         });
+
         updateOverlayDimensionsAndStyles(targetImg, state);
         resizeObserver.observe(targetImg);
         intersectionObserver.observe(targetImg);
@@ -707,18 +733,13 @@
     }
     function applyTheme() {
         const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.blue;
-        let cssVars = '';
-        if (theme.accent && theme.background) {
-            cssVars = `:root {
-                --accent: ${theme.accent};
-                --background: ${theme.background};
-                --modal-header-color: rgba(${theme.accent}, 1);
-                --ocr-dimmed-opacity: ${settings.dimmedOpacity};
-                --ocr-focus-scale: ${settings.focusScaleMultiplier};
-            }`;
-        } else {
-             cssVars = `:root { --modal-header-color: #00BFFF; }`;
-        }
+        const cssVars = `:root {
+            --accent: ${theme.accent};
+            --background: ${theme.background};
+            --modal-header-color: rgba(${theme.accent}, 1);
+            --ocr-dimmed-opacity: ${settings.dimmedOpacity};
+            --ocr-focus-scale: ${settings.focusScaleMultiplier};
+        }`;
         let styleTag = document.getElementById('gemini-ocr-dynamic-styles');
         if (!styleTag) {
             styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag);
@@ -732,31 +753,32 @@
     function createUI() {
         GM_addStyle(`
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
-            .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; transition: opacity 0.2s, visibility 0.2s; visibility: hidden; opacity: 0; }
-            .gemini-ocr-decoupled-overlay.is-focused { visibility: visible; opacity: 1; }
-            body:not(.ocr-theme-minimal) ::selection { background-color: rgba(var(--accent), 1); color: #FFFFFF; }
+            .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; transition: opacity 0.2s, visibility 0.2s; }
+            /* ADDED: This new class handles hiding the overlay completely */
+            .gemini-ocr-decoupled-overlay.is-inactive { opacity: 0; visibility: hidden; }
+            ::selection { background-color: rgba(var(--accent), 1); color: #FFFFFF; }
             .gemini-ocr-text-box {
                 position: absolute; display: flex; align-items: center; justify-content: center; text-align: center;
                 box-sizing: border-box; user-select: text; cursor: pointer; transition: all 0.2s ease-in-out;
                 overflow: hidden; font-family: 'Noto Sans JP', sans-serif; font-weight: 600;
                 padding: 4px; border-radius: 4px; border: none; text-shadow: none; pointer-events: auto;
             }
-            body.ocr-brightness-light:not(.ocr-theme-minimal) .gemini-ocr-text-box {
+            body.ocr-brightness-light .gemini-ocr-text-box {
                 background: rgba(var(--background), 1); color: rgba(var(--accent), 0.5);
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--background), 1);
             }
-            body.ocr-brightness-light:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
-            body.ocr-brightness-light:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight,
+            body.ocr-brightness-light:not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
+            body.ocr-brightness-light:not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight,
             body.ocr-brightness-light.ocr-edit-mode-active .gemini-ocr-text-box.selected-for-merge {
                 background: rgba(var(--background), 1); color: rgba(var(--accent), 1);
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--background), 1), 0px 0px 0px 0.2em rgba(var(--accent), 1);
             }
-            body.ocr-brightness-dark:not(.ocr-theme-minimal) .gemini-ocr-text-box {
+            body.ocr-brightness-dark .gemini-ocr-text-box {
                 background: rgba(29, 34, 39, 0.9); color: rgba(var(--background), 0.7);
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--accent), 0.4); backdrop-filter: blur(2px);
             }
-            body.ocr-brightness-dark:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
-            body.ocr-brightness-dark:not(.ocr-theme-minimal):not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight,
+            body.ocr-brightness-dark:not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
+            body.ocr-brightness-dark:not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight,
             body.ocr-brightness-dark.ocr-edit-mode-active .gemini-ocr-text-box.selected-for-merge {
                 background: rgba(var(--accent), 1); color: #FFFFFF;
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--accent), 0.4), 0px 0px 0px 0.2em rgba(var(--background), 1);
@@ -773,13 +795,12 @@
             .solo-hover-mode.is-focused .gemini-ocr-text-box { opacity: 0; }
             .solo-hover-mode.is-focused .gemini-ocr-text-box:hover,
             .solo-hover-mode.is-focused .gemini-ocr-text-box.selected-for-merge { opacity: 1; }
-            body.ocr-theme-minimal .gemini-ocr-text-box { border: 1px solid rgba(255, 0, 0, 0.2); background: transparent !important; color: transparent !important; }
             .gemini-ocr-text-box.selected-for-merge { outline: 3px solid #f1c40f !important; outline-offset: 2px; box-shadow: 0 0 12px #f1c40f; opacity: 1 !important; }
             body.ocr-edit-mode-active { cursor: crosshair; }
             /* Misc UI */
             .gemini-ocr-chapter-batch-btn { font-family: "Roboto","Helvetica","Arial",sans-serif; font-weight: 500; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(240,153,136,0.5); color: #f09988; background-color: transparent; cursor: pointer; margin-right: 4px; transition: all 150ms; min-width: 80px; text-align: center; } .gemini-ocr-chapter-batch-btn:hover { background-color: rgba(240,153,136,0.08); } .gemini-ocr-chapter-batch-btn:disabled { color: grey; border-color: grey; cursor: wait; } #gemini-ocr-settings-button { position: fixed; bottom: 15px; right: 15px; z-index: 2147483647; background: #1A1D21; color: #EAEAEA; border: 1px solid #555; border-radius: 50%; width: 50px; height: 50px; font-size: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; } #gemini-ocr-global-anki-export-btn { position: fixed; bottom: 75px; right: 15px; z-index: 2147483646; background-color: #2ecc71; color: white; border: 1px solid white; border-radius: 50%; width: 50px; height: 50px; font-size: 30px; line-height: 50px; text-align: center; cursor: pointer; transition: all 0.2s; user-select: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); } #gemini-ocr-global-anki-export-btn:hover { background-color: #27ae60; transform: scale(1.1); } #gemini-ocr-global-anki-export-btn:disabled { background-color: #95a5a6; cursor: wait; transform: none; } #gemini-ocr-global-anki-export-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); } .gemini-ocr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #1A1D21; border: 1px solid var(--modal-header-color, #00BFFF); border-radius: 15px; z-index: 2147483647; color: #EAEAEA; font-family: sans-serif; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.5); width: 600px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; } .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-header { padding: 20px 25px; border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color, #00BFFF); } .gemini-ocr-modal-content { padding: 10px 25px; overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: 15px 25px; border-top: 1px solid #444; display: flex; justify-content: flex-start; gap: 10px; align-items: center; } .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; } .gemini-ocr-modal h3 { font-size: 1.1em; margin: 15px 0 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px; color: var(--modal-header-color, #00BFFF); } .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: 10px 15px; align-items: center; } .full-width { grid-column: 1 / -1; } .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: 8px; box-sizing: border-box; font-family: monospace; background-color: #2a2a2e; border: 1px solid #555; border-radius: 5px; color: #EAEAEA; } .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 5px; color: #1A1D21; cursor: pointer; font-weight: bold; } #gemini-ocr-server-status { padding: 10px; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s; } #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
-        document.body.insertAdjacentHTML('beforeend', ` <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button> <button id="gemini-ocr-settings-button">⚙️</button> <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden"> <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings (PC Hybrid)</h2></div> <div class="gemini-ocr-modal-content"> <h3>OCR & Image Source</h3><div class="gemini-ocr-settings-grid full-width"> <label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"> <label for="gemini-image-server-user">Image Source Username:</label><input type="text" id="gemini-image-server-user" autocomplete="username" placeholder="Optional"> <label for="gemini-image-server-password">Image Source Password:</label><input type="password" id="gemini-image-server-password" autocomplete="current-password" placeholder="Optional"> </div> <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div> <h3>Anki Integration</h3><div class="gemini-ocr-settings-grid"> <label for="gemini-ocr-anki-url">Anki-Connect URL:</label><input type="text" id="gemini-ocr-anki-url"> <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field" placeholder="e.g., Image"> </div> <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid"> <label for="ocr-brightness-mode">Theme Mode:</label><select id="ocr-brightness-mode"><option value="light">Light</option><option value="dark">Dark</option></select> <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme">${Object.keys(COLOR_THEMES).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select> <label for="ocr-interaction-mode">Highlight Mode:</label><select id="ocr-interaction-mode"><option value="hover">On Hover</option><option value="click">On Click</option></select> <label for="ocr-dimmed-opacity">Dimmed Box Opacity (%):</label><input type="number" id="ocr-dimmed-opacity" min="0" max="100" step="5"> <label for="ocr-focus-scale-multiplier">Focus Scale Multiplier:</label><input type="number" id="ocr-focus-scale-multiplier" min="1" max="3" step="0.05"> <label for="ocr-merge-key">Merge Modifier Key:</label><input type="text" id="ocr-merge-key" placeholder="Control, Alt, Shift..."> <label for="ocr-delete-key">Delete Modifier Key:</label><input type="text" id="ocr-delete-key" placeholder="Control, Alt, Shift..."> <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="serverAngle">Server Angle</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select> <label for="ocr-font-multiplier-horizontal">H. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-horizontal" min="0.1" max="5" step="0.1"> <label for="ocr-font-multiplier-vertical">V. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-vertical" min="0.1" max="5" step="0.1"> <label for="ocr-bounding-box-adjustment-input">Box Adjustment (px):</label><input type="number" id="ocr-bounding-box-adjustment-input" min="0" max="100" step="1"> </div><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-solo-hover-mode"> Only show hovered box</label><label><input type="checkbox" id="gemini-ocr-add-space-on-merge"> Add space on merge</label></div> <h3>Auto-Merging (Experimental)</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-auto-merge-enabled"> Enable Automatic Bubble Merging</label></div><div class="gemini-ocr-settings-grid"><label for="ocr-auto-merge-dist-k" title="Multiplier for median line height/width to determine max distance. (Default: 1.2)">Distance K:</label><input type="number" id="ocr-auto-merge-dist-k" min="0.1" max="5" step="0.1"><label for="ocr-auto-merge-font-ratio" title="Max allowed font size difference ratio. (Default: 1.2 means 20% diff)">Font Ratio:</label><input type="number" id="ocr-auto-merge-font-ratio" min="1" max="3" step="0.05"><label for="ocr-auto-merge-perp-tol" title="Multiplier for median line height/width for perpendicular alignment tolerance. (Default: 0.8)">Perp. Tolerance:</label><input type="number" id="ocr-auto-merge-perp-tol" min="0.1" max="3" step="0.1"><label for="ocr-auto-merge-overlap-min" title="Minimum required perpendicular overlap if alignment tolerance is not met. (Default: 0.1)">Min Overlap:</label><input type="number" id="ocr-auto-merge-overlap-min" min="0" max="1" step="0.05"><label for="ocr-auto-merge-min-line-ratio" title="Minimum size ratio (relative to robust median) for a line to be considered 'primary'. Used for robust median calculation and mixed-type merge conditions. (Default: 0.5)">Min Primary Ratio:</label><input type="number" id="ocr-auto-merge-min-line-ratio" min="0.1" max="1" step="0.05"><label for="ocr-auto-merge-font-ratio-mixed" title="Stricter font ratio for merging a 'primary' line with a 'secondary' line. (Default: 1.1)">Mixed Font Ratio:</label><input type="number" id="ocr-auto-merge-font-ratio-mixed" min="1" max="2" step="0.05"> <label for="ocr-auto-merge-mixed-min-overlap-ratio" title="Minimum perpendicular overlap (as ratio of smaller line's perpendicular size) required for merging a 'primary' line with a 'secondary' line. (Default: 0.5)">Mixed Min Overlap:</label><input type="number" id="ocr-auto-merge-mixed-min-overlap-ratio" min="0" max="1" step="0.05"></div> <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div> <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2\n"></textarea></div> </div> <div class="gemini-ocr-modal-footer"> <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;" title="Deletes all entries from the server's OCR cache file.">Purge Server Cache</button> <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;" title="Queues the current chapter on the server for background pre-processing.">Pre-process Chapter</button> <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn" style="background-color: #3ad602;">Save & Reload</button> </div> </div> <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div> `);
+        document.body.insertAdjacentHTML('beforeend', ` <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button> <button id="gemini-ocr-settings-button">⚙️</button> <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden"> <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings (Hybrid v24)</h2></div> <div class="gemini-ocr-modal-content"> <h3>OCR & Image Source</h3><div class="gemini-ocr-settings-grid full-width"> <label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"> <label for="gemini-image-server-user">Image Source Username:</label><input type="text" id="gemini-image-server-user" autocomplete="username" placeholder="Optional"> <label for="gemini-image-server-password">Image Source Password:</label><input type="password" id="gemini-image-server-password" autocomplete="current-password" placeholder="Optional"> </div> <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div> <h3>Anki Integration</h3><div class="gemini-ocr-settings-grid"> <label for="gemini-ocr-anki-url">Anki-Connect URL:</label><input type="text" id="gemini-ocr-anki-url"> <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field" placeholder="e.g., Image"> </div> <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid"> <label for="ocr-brightness-mode">Theme Mode:</label><select id="ocr-brightness-mode"><option value="light">Light</option><option value="dark">Dark</option></select> <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme">${Object.keys(COLOR_THEMES).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select> <label for="ocr-interaction-mode">Highlight Mode:</label><select id="ocr-interaction-mode"><option value="hover">On Hover</option><option value="click">On Click</option></select> <label for="ocr-dimmed-opacity">Dimmed Box Opacity (%):</label><input type="number" id="ocr-dimmed-opacity" min="0" max="100" step="5"> <label for="ocr-focus-scale-multiplier">Focus Scale Multiplier:</label><input type="number" id="ocr-focus-scale-multiplier" min="1" max="3" step="0.05"> <label for="ocr-merge-key">Merge Modifier Key:</label><input type="text" id="ocr-merge-key" placeholder="Control, Alt, Shift..."> <label for="ocr-delete-key">Delete Modifier Key:</label><input type="text" id="ocr-delete-key" placeholder="Control, Alt, Shift..."> <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="serverAngle">Server Angle</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select> <label for="ocr-font-multiplier-horizontal">H. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-horizontal" min="0.1" max="5" step="0.1"> <label for="ocr-font-multiplier-vertical">V. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-vertical" min="0.1" max="5" step="0.1"> <label for="ocr-bounding-box-adjustment-input">Box Adjustment (px):</label><input type="number" id="ocr-bounding-box-adjustment-input" min="0" max="100" step="1"> </div><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-solo-hover-mode"> Only show hovered box</label><label><input type="checkbox" id="gemini-ocr-add-space-on-merge"> Add space on merge</label></div> <h3>Auto-Merging (Experimental)</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-auto-merge-enabled"> Enable Automatic Bubble Merging</label></div><div class="gemini-ocr-settings-grid"><label for="ocr-auto-merge-dist-k" title="Multiplier for median line height/width to determine max distance. (Default: 1.2)">Distance K:</label><input type="number" id="ocr-auto-merge-dist-k" min="0.1" max="5" step="0.1"><label for="ocr-auto-merge-font-ratio" title="Max allowed font size difference ratio. (Default: 1.2 means 20% diff)">Font Ratio:</label><input type="number" id="ocr-auto-merge-font-ratio" min="1" max="3" step="0.05"><label for="ocr-auto-merge-perp-tol" title="Multiplier for median line height/width for perpendicular alignment tolerance. (Default: 0.8)">Perp. Tolerance:</label><input type="number" id="ocr-auto-merge-perp-tol" min="0.1" max="3" step="0.1"><label for="ocr-auto-merge-overlap-min" title="Minimum required perpendicular overlap if alignment tolerance is not met. (Default: 0.1)">Min Overlap:</label><input type="number" id="ocr-auto-merge-overlap-min" min="0" max="1" step="0.05"><label for="ocr-auto-merge-min-line-ratio" title="Minimum size ratio (relative to robust median) for a line to be considered 'primary'. Used for robust median calculation and mixed-type merge conditions. (Default: 0.5)">Min Primary Ratio:</label><input type="number" id="ocr-auto-merge-min-line-ratio" min="0.1" max="1" step="0.05"><label for="ocr-auto-merge-font-ratio-mixed" title="Stricter font ratio for merging a 'primary' line with a 'secondary' line. (Default: 1.1)">Mixed Font Ratio:</label><input type="number" id="ocr-auto-merge-font-ratio-mixed" min="1" max="2" step="0.05"> <label for="ocr-auto-merge-mixed-min-overlap-ratio" title="Minimum perpendicular overlap (as ratio of smaller line's perpendicular size) required for merging a 'primary' line with a 'secondary' line. (Default: 0.5)">Mixed Min Overlap:</label><input type="number" id="ocr-auto-merge-mixed-min-overlap-ratio" min="0" max="1" step="0.05"></div> <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div> <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; OverflowFix; Containers...)</label><textarea id="gemini-ocr-sites-config" rows="6" placeholder="127.0.0.1; .overflow-fix; .container1; .container2; #root\n"></textarea></div> </div> <div class="gemini-ocr-modal-footer"> <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;" title="Deletes all entries from the server's OCR cache file.">Purge Server Cache</button> <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;" title="Queues the current chapter on the server for background pre-processing.">Pre-process Chapter</button> <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn" style="background-color: #3ad602;">Save & Reload</button> </div> </div> <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div> `);
     }
 
     function bindUIEvents() {
@@ -814,7 +835,7 @@
         UI.purgeCacheBtn.addEventListener('click', purgeServerCache);
         UI.saveBtn.addEventListener('click', async () => {
             const newSettings = {
-                ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value, ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(), debugMode: UI.debugModeCheckbox.checked, soloHoverMode: UI.soloHoverCheckbox.checked, addSpaceOnMerge: UI.addSpaceOnMergeCheckbox.checked, interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value, brightnessMode: UI.brightnessModeSelect.value, mergeModifierKey: UI.mergeKeyInput.value.trim(), deleteModifierKey: UI.deleteKeyInput.value.trim(), dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100, fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0, boundingBoxAdjustment: parseInt(UI.boundingBoxAdjustmentInput.value, 10) || 0, focusScaleMultiplier: parseFloat(UI.focusScaleMultiplierInput.value) || 1.1, sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', imageContainerSelectors: parts.slice(2,-1).filter(s => s), contentRootSelector: parts[parts.length -1] || '#root'  }; }),
+                ocrServerUrl: UI.serverUrlInput.value.trim(), imageServerUser: UI.imageServerUserInput.value.trim(), imageServerPassword: UI.imageServerPasswordInput.value, ankiConnectUrl: UI.ankiUrlInput.value.trim(), ankiImageField: UI.ankiFieldInput.value.trim(), debugMode: UI.debugModeCheckbox.checked, soloHoverMode: UI.soloHoverCheckbox.checked, addSpaceOnMerge: UI.addSpaceOnMergeCheckbox.checked, interactionMode: UI.interactionModeSelect.value, textOrientation: UI.textOrientationSelect.value, colorTheme: UI.colorThemeSelect.value, brightnessMode: UI.brightnessModeSelect.value, mergeModifierKey: UI.mergeKeyInput.value.trim(), deleteModifierKey: UI.deleteKeyInput.value.trim(), dimmedOpacity: (parseInt(UI.dimmedOpacityInput.value, 10) || 30) / 100, fontMultiplierHorizontal: parseFloat(UI.fontMultiplierHorizontalInput.value) || 1.0, fontMultiplierVertical: parseFloat(UI.fontMultiplierVerticalInput.value) || 1.0, boundingBoxAdjustment: parseInt(UI.boundingBoxAdjustmentInput.value, 10) || 0, focusScaleMultiplier: parseFloat(UI.focusScaleMultiplierInput.value) || 1.1, sites: UI.sitesConfigTextarea.value.split('\n').filter(line => line.trim()).map(line => { const parts = line.split(';').map(s => s.trim()); return { urlPattern: parts[0] || '', overflowFixSelector: parts[1] || '', contentRootSelector: parts.pop() || '#root', imageContainerSelectors: parts.slice(2).filter(s => s) }; }),
                 autoMergeEnabled: UI.autoMergeEnabledCheckbox.checked, autoMergeDistK: parseFloat(UI.autoMergeDistKInput.value) || 1.2, autoMergeFontRatio: parseFloat(UI.autoMergeFontRatioInput.value) || 1.3, autoMergePerpTol: parseFloat(UI.autoMergePerpTolInput.value) || 0.5, autoMergeOverlapMin: parseFloat(UI.autoMergeOverlapMinInput.value) || 0.1, autoMergeMinLineRatio: parseFloat(UI.autoMergeMinLineRatioInput.value) || 0.5, autoMergeFontRatioForMixed: parseFloat(UI.autoMergeFontRatioForMixedInput.value) || 1.1, autoMergeMixedMinOverlapRatio: parseFloat(UI.autoMergeMixedMinOverlapRatioInput.value) || 0.5,
             };
             try { await GM_setValue(SETTINGS_KEY, JSON.stringify(newSettings)); alert('Settings Saved. The page will now reload.'); window.location.reload(); }
@@ -879,28 +900,31 @@
     function handleWindowBlur() { document.body.classList.remove('ocr-edit-mode-active'); }
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
-        if (loadedSettings) { try { settings = { ...settings, ...JSON.parse(loadedSettings) }; } catch (e) { logDebug("Could not parse saved settings. Using defaults."); } }
+        if (loadedSettings) {
+            try {
+                settings = { ...settings, ...JSON.parse(loadedSettings) };
+                delete settings.fontSizePercent;
+                delete settings.adaptiveFont;
+            } catch (e) { logDebug("Could not parse saved settings. Using defaults."); }
+        }
 
         createUI();
         bindUIEvents();
         applyTheme();
         createMeasurementSpan();
-        logDebug("Initializing HYBRID render engine with Robust Reset and Original Interaction.");
+        logDebug("Initializing HYBRID render engine with Robust Reset.");
 
         resizeObserver = new ResizeObserver(handleResize);
         intersectionObserver = new IntersectionObserver(handleIntersection, { rootMargin: '100px 0px' });
         setupMutationObservers();
 
-        // Populate settings UI *before* activating scanners
         UI.serverUrlInput.value = settings.ocrServerUrl; UI.imageServerUserInput.value = settings.imageServerUser || ''; UI.imageServerPasswordInput.value = settings.imageServerPassword || ''; UI.ankiUrlInput.value = settings.ankiConnectUrl; UI.ankiFieldInput.value = settings.ankiImageField; UI.debugModeCheckbox.checked = settings.debugMode; UI.soloHoverCheckbox.checked = settings.soloHoverMode; UI.addSpaceOnMergeCheckbox.checked = settings.addSpaceOnMerge; UI.interactionModeSelect.value = settings.interactionMode; UI.textOrientationSelect.value = settings.textOrientation; UI.colorThemeSelect.value = settings.colorTheme; UI.brightnessModeSelect.value = settings.brightnessMode; UI.mergeKeyInput.value = settings.mergeModifierKey; UI.deleteKeyInput.value = settings.deleteModifierKey; UI.dimmedOpacityInput.value = settings.dimmedOpacity * 100; UI.fontMultiplierHorizontalInput.value = settings.fontMultiplierHorizontal; UI.fontMultiplierVerticalInput.value = settings.fontMultiplierVertical; UI.boundingBoxAdjustmentInput.value = settings.boundingBoxAdjustment; UI.focusScaleMultiplierInput.value = settings.focusScaleMultiplier;
         UI.sitesConfigTextarea.value = settings.sites.map(s => [s.urlPattern, s.overflowFixSelector, ...(s.imageContainerSelectors || []), s.contentRootSelector].join('; ')).join('\n');
         UI.autoMergeEnabledCheckbox.checked = settings.autoMergeEnabled; UI.autoMergeDistKInput.value = settings.autoMergeDistK; UI.autoMergeFontRatioInput.value = settings.autoMergeFontRatio; UI.autoMergePerpTolInput.value = settings.autoMergePerpTol; UI.autoMergeOverlapMinInput.value = settings.autoMergeOverlapMin; UI.autoMergeMinLineRatioInput.value = settings.autoMergeMinLineRatio; UI.autoMergeFontRatioForMixedInput.value = settings.autoMergeFontRatioForMixed; UI.autoMergeMixedMinOverlapRatioInput.value = settings.autoMergeMixedMinOverlapRatio;
 
-        // Activate core logic
-        reinitializeScript(); // Use reinitialize which calls both scanners
-        setupNavigationObserver(); // Start watching for page changes
+        reinitializeScript();
+        setupNavigationObserver();
 
-        // Periodic maintenance
         setInterval(() => {
             for (const [img] of managedElements.entries()) {
                 if (!img.isConnected) {
@@ -913,7 +937,6 @@
         }, 5000);
         setInterval(manageScrollFix, 500);
 
-        // Global event listeners
         window.addEventListener('keydown', handleModifierKeyDown);
         window.addEventListener('keyup', handleModifierKeyUp);
         window.addEventListener('blur', handleWindowBlur);
