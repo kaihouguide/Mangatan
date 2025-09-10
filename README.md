@@ -1,4 +1,4 @@
-
+## Please add \n to nothing in your yomitan replacement patterns under Translation for now
 Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
 
 ## Choose Your Platform:
