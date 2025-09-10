@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine) - FIXED
 // @namespace    http://tampermonkey.net/
-// @version      24.5.18-M-Interaction-Fix-FFZWS
+// @version      24.5.19-M-Interaction-Fix
 // @description  Adds a mobile-optimized OCR overlay. Features a robust rendering engine and automatic merging, with restored non-blocking interaction and optional dimming.
-// @author       1Selxo (PC Base by 1Selxo, Mobile Port & Hybrid Engine by Gemini, Firefox ZWS Fix by Gemini)
+// @author       1Selxo (PC Base by 1Selxo, Mobile Port & Hybrid Engine by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -344,7 +344,7 @@
         const findBestFitSize = (isVerticalSearch) => {
             measurementSpan.style.writingMode = isVerticalSearch ? 'vertical-rl' : 'horizontal-tb';
             if (isMerged) {
-                measurementSpan.textContent = text; // Use textContent from source data
+                measurementSpan.innerHTML = box.innerHTML;
                 measurementSpan.style.whiteSpace = 'normal';
             } else {
                 measurementSpan.textContent = text;
@@ -602,7 +602,7 @@
 
         const newBoxElement = document.createElement('div');
         newBoxElement.className = 'gemini-ocr-text-box';
-        newBoxElement.textContent = newOcrItem.text; // Use textContent and keep ZWS
+        newBoxElement.innerHTML = newOcrItem.text.replace(/\u200B/g, "<br>");
         newBoxElement.dataset.fullText = newOcrItem.text;
         newBoxElement._ocrData = newOcrItem;
         newBoxElement._ocrDataIndex = newData.length - 1;
@@ -650,7 +650,7 @@
             ocrBox.dataset.fullText = item.text;
             ocrBox._ocrData = item;
             ocrBox._ocrDataIndex = index;
-            ocrBox.textContent = item.text; // Use textContent and keep ZWS
+            ocrBox.innerHTML = item.text.replace(/\u200B/g, "<br>");
             if (item.isMerged || item.text.includes("\u200B")) {
                 ocrBox.style.whiteSpace = 'normal'; ocrBox.style.textAlign = 'start';
             }
