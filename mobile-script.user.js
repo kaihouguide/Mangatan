@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine) - Synced
 // @namespace    http://tampermonkey.net/
-// @version      24.5.25-M-OverlayInteractionFix
-// @description  A mobile-optimized OCR overlay. Server-side merging, context logging, and respects merge order. Fixes interaction with inactive overlays.
+// @version      24.5.25-M-FontSizeFix
+// @description  A mobile-optimized OCR overlay. Server-side merging, context logging, and respects merge order. Fixes interaction and font-size calculation timing.
 // @author       1Selxo (PC Base by 1Selxo, Mobile Port & Sync by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -102,7 +102,23 @@
     function calculateAndApplyStylesForSingleBox(box, imgRect) { if (!measurementSpan || !box || !imgRect || imgRect.width === 0 || imgRect.height === 0) return; const ocrData = box._ocrData, text = ocrData.text || ''; const availableWidth = box.offsetWidth + settings.boundingBoxAdjustment, availableHeight = box.offsetHeight + settings.boundingBoxAdjustment; if (!text || availableWidth <= 0 || availableHeight <= 0) return; const isMerged = ocrData.isMerged || text.includes('\u200B'); const findBestFitSize = (isVerticalSearch) => { measurementSpan.style.writingMode = isVerticalSearch ? 'vertical-rl' : 'horizontal-tb'; measurementSpan.style.whiteSpace = isMerged ? 'normal' : 'nowrap'; measurementSpan.innerHTML = isMerged ? box.innerHTML : ''; if (!isMerged) measurementSpan.textContent = text; let low = 1, high = 200, bestSize = 1; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; const fits = isMerged ? (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) : (isVerticalSearch ? measurementSpan.offsetHeight <= availableHeight : measurementSpan.offsetWidth <= availableWidth); if (fits) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } return bestSize; }; const horizontalFitSize = findBestFitSize(false), verticalFitSize = findBestFitSize(true); let finalFontSize = 0, isVertical = false; if (ocrData.forcedOrientation === 'vertical') { isVertical = true; finalFontSize = verticalFitSize; } else if (ocrData.forcedOrientation === 'horizontal') { isVertical = false; finalFontSize = horizontalFitSize; } else if (settings.textOrientation === 'forceVertical') { isVertical = true; finalFontSize = verticalFitSize; } else if (settings.textOrientation === 'forceHorizontal') { isVertical = false; finalFontSize = horizontalFitSize; } else { isVertical = verticalFitSize > horizontalFitSize; finalFontSize = isVertical ? verticalFitSize : horizontalFitSize; } const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal; box.style.fontSize = `${finalFontSize * multiplier}px`; box.classList.toggle('gemini-ocr-text-vertical', isVertical); }
     function calculateAndApplyOptimalStyles_Optimized(overlay, imgRect) { if (!measurementSpan || imgRect.width === 0 || imgRect.height === 0) return; const boxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box')); if (boxes.length === 0) return; const baseStyle = getComputedStyle(boxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing }); for (const box of boxes) calculateAndApplyStylesForSingleBox(box, imgRect); measurementSpan.style.writingMode = 'horizontal-tb'; }
     function triggerOverlayToggle(targetImg) { const overlayState = managedElements.get(targetImg); if (overlayState?.overlay) { if (overlayState.overlay === activeOverlay) hideActiveOverlay(); else showOverlay(overlayState.overlay, targetImg); } }
-    function showOverlay(overlay, image) { if (activeOverlay && activeOverlay !== overlay) hideActiveOverlay(); activeOverlay = overlay; activeImageForExport = image; overlay.classList.remove('is-inactive'); overlay.classList.add('is-focused'); UI.globalAnkiButton?.classList.remove('is-hidden'); UI.globalEditButton?.classList.remove('is-hidden'); }
+    function showOverlay(overlay, image) {
+        if (activeOverlay && activeOverlay !== overlay) hideActiveOverlay();
+        activeOverlay = overlay;
+        activeImageForExport = image;
+        overlay.classList.remove('is-inactive');
+        overlay.classList.add('is-focused');
+
+        // --- FIX APPLIED HERE ---
+        // Defer the font-size calculation until the overlay is visible (display: block).
+        // This guarantees that the text boxes have actual dimensions to calculate against.
+        // This fixes the "font size too small" bug caused by the previous display:none change.
+        const rect = image.getBoundingClientRect();
+        calculateAndApplyOptimalStyles_Optimized(overlay, rect);
+
+        UI.globalAnkiButton?.classList.remove('is-hidden');
+        UI.globalEditButton?.classList.remove('is-hidden');
+    }
     function hideActiveOverlay() { if (!activeOverlay) return; activeOverlay.classList.remove('is-focused', 'has-manual-highlight', 'edit-mode-active'); activeOverlay.classList.add('is-inactive'); activeOverlay.querySelectorAll('.manual-highlight, .selected-for-merge').forEach(b => b.classList.remove('manual-highlight', 'selected-for-merge')); activeMergeSelections.delete(activeOverlay); UI.globalAnkiButton?.classList.add('is-hidden'); UI.globalEditButton?.classList.add('is-hidden'); UI.globalEditButton?.classList.remove('edit-active'); activeOverlay = null; activeImageForExport = null; }
     function handleTouchStart(event) { if (event.touches.length > 1) { longPressState.valid = false; return; } const targetImg = event.target.closest('img'); if (!targetImg || !managedElements.has(targetImg)) { longPressState.valid = false; return; } if (settings.activationMode === 'doubleTap') { const now = Date.now(); const lastTap = tapTracker.get(targetImg); if (lastTap && (now - lastTap.time) < DOUBLE_TAP_THRESHOLD) { event.preventDefault(); triggerOverlayToggle(targetImg); tapTracker.delete(targetImg); longPressState.valid = false; } else { tapTracker.set(targetImg, { time: now }); } return; } if (settings.activationMode === 'longPress') { longPressState = { valid: true, startX: event.touches[0].clientX, startY: event.touches[0].clientY, target: targetImg }; } }
     function handleTouchMove(event) { if (!longPressState.valid) return; const SCROLL_TOLERANCE = 10; const deltaX = Math.abs(longPressState.startX - event.touches[0].clientX); const deltaY = Math.abs(longPressState.startY - event.touches[0].clientY); if (deltaX > SCROLL_TOLERANCE || deltaY > SCROLL_TOLERANCE) longPressState.valid = false; }
@@ -114,7 +130,56 @@
     function handleMergeSelection(boxElement, overlay) { let currentSelection = activeMergeSelections.get(overlay); if (!currentSelection) { currentSelection = []; activeMergeSelections.set(overlay, currentSelection); } const indexInSelection = currentSelection.indexOf(boxElement); if (indexInSelection > -1) { currentSelection.splice(indexInSelection, 1); boxElement.classList.remove('selected-for-merge'); } else { currentSelection.push(boxElement); boxElement.classList.add('selected-for-merge'); } updateEditActionBar(overlay); }
     function finalizeMultipleMerge(selectedBoxes, sourceImage, overlay) { if (!selectedBoxes || selectedBoxes.length < 2) return; logDebug(`Finalizing merge for ${selectedBoxes.length} boxes in selection order.`); const indicesToDelete = new Set(); let newBoundingBox = null; let areAllVertical = true; const combinedTextParts = selectedBoxes.map(box => { indicesToDelete.add(box._ocrDataIndex); const b = box._ocrData.tightBoundingBox; if (newBoundingBox === null) { newBoundingBox = { x: b.x, y: b.y, width: b.width, height: b.height }; } else { const newRight = Math.max(newBoundingBox.x + newBoundingBox.width, b.x + b.width); const newBottom = Math.max(newBoundingBox.y + newBoundingBox.height, b.y + b.height); newBoundingBox.x = Math.min(newBoundingBox.x, b.x); newBoundingBox.y = Math.min(newBoundingBox.y, b.y); newBoundingBox.width = newRight - newBoundingBox.x; newBoundingBox.height = newBottom - newBoundingBox.y; } if (!box.classList.contains('gemini-ocr-text-vertical')) areAllVertical = false; return box.dataset.fullText || box.textContent; }); const combinedText = combinedTextParts.join(settings.addSpaceOnMerge ? ' ' : "\u200B"); const newOcrItem = { text: combinedText, tightBoundingBox: newBoundingBox, forcedOrientation: areAllVertical ? 'vertical' : 'auto', isMerged: true }; const originalData = ocrDataCache.get(sourceImage); const newData = originalData.filter((item, index) => !indicesToDelete.has(index)); newData.push(newOcrItem); ocrDataCache.set(sourceImage, newData); selectedBoxes.forEach(box => box.remove()); const newBoxElement = document.createElement('div'); newBoxElement.className = 'gemini-ocr-text-box'; newBoxElement.innerHTML = newOcrItem.text.replace(/\u200B/g, "<br>"); newBoxElement.dataset.fullText = newOcrItem.text; newBoxElement._ocrData = newOcrItem; newBoxElement._ocrDataIndex = newData.length - 1; newBoxElement.style.whiteSpace = 'normal'; newBoxElement.style.textAlign = 'start'; Object.assign(newBoxElement.style, { left: `${newOcrItem.tightBoundingBox.x*100}%`, top: `${newOcrItem.tightBoundingBox.y*100}%`, width: `${newOcrItem.tightBoundingBox.width*100}%`, height: `${newOcrItem.tightBoundingBox.height*100}%` }); overlay.appendChild(newBoxElement); calculateAndApplyStylesForSingleBox(newBoxElement, sourceImage.getBoundingClientRect()); activeMergeSelections.set(overlay, []); updateEditActionBar(overlay); }
     function handleOverlayInteraction(event) { const overlay = event.currentTarget; const clickedBox = event.target.closest('.gemini-ocr-text-box'); if (!clickedBox) return; event.stopPropagation(); const sourceImage = activeImageForExport; if (!sourceImage) return; if (overlay.classList.contains('edit-mode-active')) { handleMergeSelection(clickedBox, overlay); } else { overlay.classList.add('has-manual-highlight'); if (!clickedBox.classList.contains('manual-highlight')) { overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight')); clickedBox.classList.add('manual-highlight'); } } }
-    function displayOcrResults(targetImg) { if (managedElements.has(targetImg)) return; const data = ocrDataCache.get(targetImg); if (!data || data === 'pending' || !Array.isArray(data)) return; const overlay = document.createElement('div'); overlay.className = `gemini-ocr-decoupled-overlay is-inactive`; overlay.classList.toggle('solo-hover-mode', settings.soloHoverMode); data.forEach((item, index) => { const ocrBox = document.createElement('div'); ocrBox.className = 'gemini-ocr-text-box'; ocrBox.dataset.fullText = item.text; ocrBox._ocrData = item; ocrBox._ocrDataIndex = index; ocrBox.innerHTML = item.text.replace(/\u200B/g, "<br>"); if (item.isMerged) { ocrBox.style.whiteSpace = 'normal'; ocrBox.style.textAlign = 'start'; } Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x * 100}%`, top: `${item.tightBoundingBox.y * 100}%`, width: `${item.tightBoundingBox.width * 100}%`, height: `${item.tightBoundingBox.height * 100}%` }); overlay.appendChild(ocrBox); }); const editActionBar = document.createElement('div'); editActionBar.className = 'gemini-ocr-edit-action-bar'; const mergeButton = document.createElement('button'); mergeButton.className = 'edit-action-merge'; mergeButton.textContent = 'Merge'; const deleteButton = document.createElement('button'); deleteButton.className = 'edit-action-delete'; deleteButton.textContent = 'Delete'; editActionBar.append(deleteButton, mergeButton); overlay.appendChild(editActionBar); mergeButton.addEventListener('click', (e) => { e.stopPropagation(); finalizeMultipleMerge(activeMergeSelections.get(overlay) || [], targetImg, overlay); }); deleteButton.addEventListener('click', (e) => { e.stopPropagation(); const selection = activeMergeSelections.get(overlay) || []; selection.forEach(box => handleBoxDelete(box, targetImg)); activeMergeSelections.set(overlay, []); updateEditActionBar(overlay); }); document.body.appendChild(overlay); const state = { overlay, lastWidth: 0, lastHeight: 0 }; managedElements.set(targetImg, state); overlay.addEventListener('click', handleOverlayInteraction); updateOverlayDimensionsAndStyles(targetImg, state); resizeObserver.observe(targetImg); intersectionObserver.observe(targetImg); }
+    function displayOcrResults(targetImg) {
+        if (managedElements.has(targetImg)) return;
+        const data = ocrDataCache.get(targetImg);
+        if (!data || data === 'pending' || !Array.isArray(data)) return;
+        const overlay = document.createElement('div');
+        overlay.className = `gemini-ocr-decoupled-overlay is-inactive`;
+        overlay.classList.toggle('solo-hover-mode', settings.soloHoverMode);
+        data.forEach((item, index) => {
+            const ocrBox = document.createElement('div');
+            ocrBox.className = 'gemini-ocr-text-box';
+            ocrBox.dataset.fullText = item.text;
+            ocrBox._ocrData = item;
+            ocrBox._ocrDataIndex = index;
+            ocrBox.innerHTML = item.text.replace(/\u200B/g, "<br>");
+            if (item.isMerged) {
+                ocrBox.style.whiteSpace = 'normal';
+                ocrBox.style.textAlign = 'start';
+            }
+            Object.assign(ocrBox.style, {
+                left: `${item.tightBoundingBox.x * 100}%`, top: `${item.tightBoundingBox.y * 100}%`,
+                width: `${item.tightBoundingBox.width * 100}%`, height: `${item.tightBoundingBox.height * 100}%`
+            });
+            overlay.appendChild(ocrBox);
+        });
+        const editActionBar = document.createElement('div');
+        editActionBar.className = 'gemini-ocr-edit-action-bar';
+        const mergeButton = document.createElement('button');
+        mergeButton.className = 'edit-action-merge';
+        mergeButton.textContent = 'Merge';
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'edit-action-delete';
+        deleteButton.textContent = 'Delete';
+        editActionBar.append(deleteButton, mergeButton);
+        overlay.appendChild(editActionBar);
+        mergeButton.addEventListener('click', (e) => { e.stopPropagation(); finalizeMultipleMerge(activeMergeSelections.get(overlay) || [], targetImg, overlay); });
+        deleteButton.addEventListener('click', (e) => { e.stopPropagation(); const selection = activeMergeSelections.get(overlay) || []; selection.forEach(box => handleBoxDelete(box, targetImg)); activeMergeSelections.set(overlay, []); updateEditActionBar(overlay); });
+        document.body.appendChild(overlay);
+        const state = { overlay, lastWidth: 0, lastHeight: 0 };
+        managedElements.set(targetImg, state);
+        overlay.addEventListener('click', handleOverlayInteraction);
+
+        // --- FIX APPLIED HERE ---
+        // REMOVED `updateOverlayDimensionsAndStyles(targetImg, state);` from here.
+        // It was prematurely calculating font size while the overlay had display:none,
+        // resulting in an unreadably small font. The calculation is now correctly
+        // deferred to the showOverlay() function, which runs when the overlay is visible.
+
+        resizeObserver.observe(targetImg);
+        intersectionObserver.observe(targetImg);
+    }
 
     // --- Anki & Batch Processing (Synced with PC) ---
     async function ankiConnectRequest(action, params = {}) { return new Promise((resolve, reject) => { GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) }); }); }
@@ -128,9 +193,7 @@
     function applyTheme() { const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.blue; const cssVars = `:root { --accent: ${theme.accent}; --background: ${theme.background}; --modal-header-color: rgba(${theme.accent}, 1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; --ocr-focus-scale: ${settings.focusScaleMultiplier}; }`; let styleTag = document.getElementById('gemini-ocr-dynamic-styles'); if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); } styleTag.textContent = cssVars; document.body.className = document.body.className.replace(/\bocr-theme-\S+/g, ''); document.body.classList.add(`ocr-theme-${settings.colorTheme}`); document.body.classList.toggle('ocr-brightness-dark', settings.brightnessMode === 'dark'); document.body.classList.toggle('ocr-brightness-light', settings.brightnessMode === 'light'); }
     function createUI() {
         GM_addStyle(`
-            /* MODIFIED: Changed visibility/opacity logic to display: none for inactive state.
-               This completely removes the inactive overlay from the layout, preventing it from blocking
-               clicks or allowing text selection when it's supposed to be hidden. This is the fix for the reported issue. */
+            /* Corrected overlay visibility logic to prevent interaction when hidden */
             .gemini-ocr-decoupled-overlay {
                 position: fixed;
                 z-index: 9998;
@@ -158,7 +221,6 @@
             body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.manual-highlight, body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.selected-for-merge { background: rgba(var(--accent), 1); color: #FFFFFF; box-shadow: 0 0 0 0.1em rgba(var(--accent), 0.4), 0 0 0 0.2em rgba(var(--background), 1); }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
             .is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight { z-index: 1; transform: scale(var(--ocr-focus-scale)); overflow: visible !important; }
-            /* MODIFIED: Solo-hover-mode now controls dimming, but there is no initial invisible state. */
             .solo-hover-mode.is-focused:not(.edit-mode-active).has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); }
             .edit-mode-active .gemini-ocr-text-box { opacity: 0.6; border: 1px dashed rgba(255,255,255,0.5); }
             .gemini-ocr-text-box.selected-for-merge { opacity: 1 !important; outline: 3px solid #f1c40f !important; outline-offset: 2px; box-shadow: 0 0 12px #f1c40f; transform: scale(1.02); }
