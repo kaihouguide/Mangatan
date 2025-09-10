@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (PC Hybrid Engine) - Original Interaction
 // @namespace    http://tampermonkey.net/
-// @version      24.5.19-PC-Interaction-Revert-GhostFix-FFZWS
+// @version      24.5.20-PC-Interaction-Revert-GhostFix
 // @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling, advanced merging, and a new dark mode.
-// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini, Ghost-Fix by Gemini, Firefox ZWS Fix by Gemini)
+// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini, Ghost-Fix by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -346,7 +346,7 @@
         const findBestFitSize = (isVerticalSearch) => {
             measurementSpan.style.writingMode = isVerticalSearch ? 'vertical-rl' : 'horizontal-tb';
             if (isMerged) {
-                measurementSpan.textContent = text; // Use textContent from source data
+                measurementSpan.innerHTML = box.innerHTML;
                 measurementSpan.style.whiteSpace = 'normal';
             } else {
                 measurementSpan.textContent = text;
@@ -492,7 +492,7 @@
             ocrBox.dataset.fullText = item.text;
             ocrBox._ocrData = item;
             ocrBox._ocrDataIndex = index;
-            ocrBox.textContent = item.text; // Use textContent and keep ZWS
+            ocrBox.innerHTML = item.text.replace(/\u200B/g, "<br>");
             if (item.isMerged || item.text.includes("\u200B")) {
                 ocrBox.style.whiteSpace = 'normal';
                 ocrBox.style.textAlign = 'start';
@@ -619,7 +619,7 @@
         selectedBoxes.forEach(box => box.remove());
         const newBoxElement = document.createElement('div');
         newBoxElement.className = 'gemini-ocr-text-box';
-        newBoxElement.textContent = newOcrItem.text; // Use textContent and keep ZWS
+        newBoxElement.innerHTML = newOcrItem.text.replace(/\u200B/g, "<br>");
         newBoxElement.dataset.fullText = newOcrItem.text;
         newBoxElement._ocrData = newOcrItem;
         newBoxElement._ocrDataIndex = newData.length - 1;
