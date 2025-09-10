@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Automatic Content OCR (PC Hybrid Engine) - Original Interaction
 // @namespace    http://tampermonkey.net/
-// @version      24.5.21-PC-Stable
+// @version      24.5.21-PC-Stable-Fixes
 // @description  Adds a stable, inline OCR button with hotkey-based editing. Features a high-performance hybrid rendering engine for perfectly smooth scrolling, advanced merging, and a new dark mode.
-// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini, Ghost-Fix by Gemini)
+// @author       1Selxo (Probe Engine Port by Gemini, Hybrid Rendering & Hotkeys by Gemini, Hover Fix by Gemini, Merge-Space & Merge-Bugfix by Gemini, Multi-Merge & Auto-Merge by Gemini, Group-Merge & Theme-Update by Gemini, Dark-Mode & Unified-Themes by Gemini, Unified-Merging & Robust-Reset by Gemini, Interaction Revert by Gemini, Ghost-Fix by Gemini, Merge-Order & Overflow-Fix & Ghost-Fix-2 by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -135,6 +135,9 @@
         observeChapters();
     }
 
+    // GHOSTING FIX: This observer is more robust. It checks if any managed image
+    // is no longer connected to the page whenever any nodes are removed, reliably
+    // detecting navigation changes and triggering a cleanup.
     function setupNavigationObserver() {
         const contentRootSelector = activeSiteConfig?.contentRootSelector;
         if (!contentRootSelector) {
@@ -148,28 +151,24 @@
         }
 
         navigationObserver = new MutationObserver((mutations) => {
-            let navigationDetected = false;
-            for (const mutation of mutations) {
-                if (mutation.removedNodes.length > 0) {
-                    for (const node of mutation.removedNodes) {
-                        if (node.nodeType === 1) {
-                            if (managedContainers.has(node) || managedElements.has(node)) {
-                                navigationDetected = true;
-                                break;
-                            }
-                        }
+            const hasRemovals = mutations.some(m => m.removedNodes.length > 0);
+            if (hasRemovals) {
+                // Check if any of our managed images have been disconnected from the DOM.
+                // This is the most reliable way to detect if our content has been removed.
+                for (const img of managedElements.keys()) {
+                    if (!img.isConnected) {
+                        logDebug("Disconnected image detected by MutationObserver. Triggering full state reset.");
+                        fullCleanupAndReset();
+                        // Use a timeout to let the browser's DOM changes stabilize before re-scanning.
+                        setTimeout(reinitializeScript, 250);
+                        return; // Reset triggered, exit observer callback.
                     }
                 }
-                if (navigationDetected) break;
-            }
-
-            if (navigationDetected) {
-                fullCleanupAndReset();
-                setTimeout(reinitializeScript, 250);
             }
         });
+
         navigationObserver.observe(targetNode, { childList: true, subtree: true });
-        logDebug(`Robust navigation observer attached to ${targetNode.id || targetNode.className}.`);
+        logDebug(`Robust navigation observer (is-connected check) attached to ${targetNode.id || targetNode.className}.`);
     }
 
     // --- Hybrid Render Engine Core ---
@@ -479,27 +478,12 @@
         let data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || !Array.isArray(data)) return;
 
-        data.sort((a, b) => {
-            const a_y = a.tightBoundingBox.y;
-            const b_y = b.tightBoundingBox.y;
-            const a_x = a.tightBoundingBox.x;
-            const b_x = b.tightBoundingBox.x;
-            const ROW_TOLERANCE = 0.05;
-            if (Math.abs(a_y - b_y) < ROW_TOLERANCE) {
-                return b_x - a_x;
-            } else {
-                return a_y - b_y;
-            }
-        });
-
-
         if (settings.autoMergeEnabled) {
             data = autoMergeOcrData(data);
             ocrDataCache.set(targetImg, data);
         }
 
         const overlay = document.createElement('div');
-        // MODIFIED: Added 'is-inactive' class to start hidden, removed inline style for visibility
         overlay.className = `gemini-ocr-decoupled-overlay is-inactive interaction-mode-${settings.interactionMode}`;
         overlay.classList.toggle('solo-hover-mode', settings.soloHoverMode);
 
@@ -525,7 +509,6 @@
         const state = { overlay, lastWidth: 0, lastHeight: 0, srcStub: targetImg.src.slice(-30) };
         managedElements.set(targetImg, state);
 
-        // MODIFIED: show() now removes 'is-inactive' to make the overlay visible
         const show = () => {
             clearTimeout(hideButtonTimer);
             overlay.classList.remove('is-inactive');
@@ -533,7 +516,6 @@
             UI.globalAnkiButton?.classList.remove('is-hidden');
             activeImageForExport = targetImg;
         };
-        // MODIFIED: hide() now adds 'is-inactive' to make the overlay disappear
         const hide = () => {
             if (document.body.classList.contains('ocr-edit-mode-active')) return;
             hideButtonTimer = setTimeout(() => {
@@ -615,12 +597,10 @@
         const indicesToDelete = new Set();
         let newBoundingBox = null;
         let areAllVertical = true;
-        selectedBoxes.sort((a, b) => {
-            const rectA = a.getBoundingClientRect();
-            const rectB = b.getBoundingClientRect();
-             if (Math.abs(rectA.top - rectB.top) < 20) return rectA.left - rectB.left;
-            return rectA.top - rectB.top;
-        });
+
+        // MERGE ORDER FIX: The sort call that was here has been removed.
+        // The boxes will now be merged in the order the user clicked them.
+
         const combinedTextParts = selectedBoxes.map(box => {
             indicesToDelete.add(box._ocrDataIndex);
             const b = box._ocrData.tightBoundingBox;
@@ -754,7 +734,6 @@
         GM_addStyle(`
             html.ocr-scroll-fix-active { overflow: hidden !important; } html.ocr-scroll-fix-active body { overflow-y: auto !important; overflow-x: hidden !important; }
             .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; transition: opacity 0.2s, visibility 0.2s; }
-            /* ADDED: This new class handles hiding the overlay completely */
             .gemini-ocr-decoupled-overlay.is-inactive { opacity: 0; visibility: hidden; }
             ::selection { background-color: rgba(var(--accent), 1); color: #FFFFFF; }
             .gemini-ocr-text-box {
@@ -784,6 +763,7 @@
                 box-shadow: 0px 0px 0px 0.1em rgba(var(--accent), 0.4), 0px 0px 0px 0.2em rgba(var(--background), 1);
             }
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
+            /* OVERFLOW FIX: Added 'overflow: visible !important' to allow text to be fully visible on focus. */
             body:not(.ocr-edit-mode-active) .interaction-mode-hover.is-focused .gemini-ocr-text-box:hover,
             body:not(.ocr-edit-mode-active) .interaction-mode-click.is-focused .manual-highlight {
                 z-index: 1; transform: scale(var(--ocr-focus-scale)); overflow: visible !important;
@@ -925,16 +905,10 @@
         reinitializeScript();
         setupNavigationObserver();
 
-        setInterval(() => {
-            for (const [img] of managedElements.entries()) {
-                if (!img.isConnected) {
-                    logDebug("Detected disconnected image during periodic cleanup.");
-                    fullCleanupAndReset();
-                    setTimeout(reinitializeScript, 250);
-                    break;
-                }
-            }
-        }, 5000);
+        // GHOSTING FIX: The periodic check is no longer needed as the new
+        // MutationObserver handles cleanup much more effectively.
+        // setInterval(() => { ... }, 5000);
+
         setInterval(manageScrollFix, 500);
 
         window.addEventListener('keydown', handleModifierKeyDown);
