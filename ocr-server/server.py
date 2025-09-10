@@ -16,7 +16,6 @@ import time
 import requests
 from urllib.parse import quote
 from collections import defaultdict
-import math
 
 import aiohttp
 from engines import Engine, initialize_engine
@@ -31,35 +30,48 @@ CACHE_FILE_PATH = os.path.join(os.getcwd(), "ocr-cache.json")
 UPLOAD_FOLDER = "uploads"
 IMAGE_CACHE_FOLDER = "image_cache"
 AUTO_MERGE_CONFIG = {
-    "enabled": True, "dist_k": 1.2, "font_ratio": 1.3, "perp_tol": 0.5,
-    "overlap_min": 0.1, "min_line_ratio": 0.5, "font_ratio_for_mixed": 1.1,
-    "mixed_min_overlap_ratio": 0.5, "add_space_on_merge": False,
+    "enabled": True,
+    "dist_k": 1.2,
+    "font_ratio": 1.3,
+    "perp_tol": 0.5,
+    "overlap_min": 0.1,
+    "min_line_ratio": 0.5,
+    "font_ratio_for_mixed": 1.1,
+    "mixed_min_overlap_ratio": 0.5,
+    "add_space_on_merge": False,
 }
+# endregion
+
+# region Setup
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(IMAGE_CACHE_FOLDER, exist_ok=True)
+
 Image.MAX_IMAGE_PIXELS = None
+
+is_debug_mode = False
 ocr_cache = {}
 ocr_requests_processed = 0
 cache_lock = threading.Lock()
-ACTIVE_JOB_COUNT = 0
+active_job_count = 0
 active_job_lock = threading.Lock()
-is_debug_mode = False
 ocr_engine: Engine
 # endregion
 
 
 # region Auto-Merge Logic (Server-Side)
+
+
 class UnionFind:
     def __init__(self, size):
         self.parent = list(range(size))
         self.rank = [0] * size
+
     def find(self, i):
         if self.parent[i] == i:
             return i
         self.parent[i] = self.find(self.parent[i])
         return self.parent[i]
+
     def union(self, i, j):
         root_i = self.find(i)
         root_j = self.find(j)
@@ -74,6 +86,7 @@ class UnionFind:
             return True
         return False
 
+
 def _median(data):
     if not data:
         return 0
@@ -83,87 +96,169 @@ def _median(data):
         return (sorted_data[mid - 1] + sorted_data[mid]) / 2
     return sorted_data[mid]
 
+
 def auto_merge_ocr_data(lines, config):
     if not lines or len(lines) < 2:
         return lines
     scale = 1000
     processed_lines = []
+
     for i, line in enumerate(lines):
-        bbox = line['tightBoundingBox']
-        is_vertical = bbox['width'] <= bbox['height']
-        font_size = bbox['width'] * scale if is_vertical else bbox['height'] * scale
-        processed_lines.append({
-            **line,
-            'originalIndex': i,
-            'isVertical': is_vertical,
-            'fontSize': font_size,
-            'bbox': {
-                'x': bbox['x'] * scale, 'y': bbox['y'] * scale,
-                'width': bbox['width'] * scale, 'height': bbox['height'] * scale,
-                'right': (bbox['x'] + bbox['width']) * scale,
-                'bottom': (bbox['y'] + bbox['height']) * scale,
+        bbox = line["tightBoundingBox"]
+        is_vertical = bbox["width"] <= bbox["height"]
+        font_size = bbox["width"] * scale if is_vertical else bbox["height"] * scale
+        processed_lines.append(
+            {
+                **line,
+                "originalIndex": i,
+                "isVertical": is_vertical,
+                "fontSize": font_size,
+                "bbox": {
+                    "x": bbox["x"] * scale,
+                    "y": bbox["y"] * scale,
+                    "width": bbox["width"] * scale,
+                    "height": bbox["height"] * scale,
+                    "right": (bbox["x"] + bbox["width"]) * scale,
+                    "bottom": (bbox["y"] + bbox["height"]) * scale,
+                },
             }
-        })
-    horizontal_lines = [l for l in processed_lines if not l['isVertical']]
-    vertical_lines = [l for l in processed_lines if l['isVertical']]
-    h_median_height = _median([l['fontSize'] for l in horizontal_lines]) or 20
-    v_median_width = _median([l['fontSize'] for l in vertical_lines]) or 20
+        )
+
+    horizontal_lines = [line for line in processed_lines if not line["isVertical"]]
+    vertical_lines = [line for line in processed_lines if line["isVertical"]]
+    h_median_height = _median([line["fontSize"] for line in horizontal_lines]) or 20
+    v_median_width = _median([line["fontSize"] for line in vertical_lines]) or 20
     uf = UnionFind(len(processed_lines))
+
     for i in range(len(processed_lines)):
         for j in range(i + 1, len(processed_lines)):
             line_a, line_b = processed_lines[i], processed_lines[j]
-            if line_a['isVertical'] != line_b['isVertical']:
+
+            if line_a["isVertical"] != line_b["isVertical"]:
                 continue
-            font_ratio = max(line_a['fontSize'] / line_b['fontSize'], line_b['fontSize'] / line_a['fontSize'])
-            if font_ratio > config['font_ratio']:
+
+            font_ratio = max(
+                line_a["fontSize"] / line_b["fontSize"],
+                line_b["fontSize"] / line_a["fontSize"],
+            )
+
+            if font_ratio > config["font_ratio"]:
                 continue
-            dist_threshold = v_median_width * config['dist_k'] if line_a['isVertical'] else h_median_height * config['dist_k']
-            perp_tol = h_median_height * config['perp_tol'] if line_a['isVertical'] else v_median_width * config['perp_tol']
-            if line_a['isVertical']:
-                reading_gap = max(0, max(line_a['bbox']['x'], line_b['bbox']['x']) - min(line_a['bbox']['right'], line_b['bbox']['right']))
-                perp_overlap = max(0, min(line_a['bbox']['bottom'], line_b['bbox']['bottom']) - max(line_a['bbox']['y'], line_b['bbox']['y']))
-                perp_offset = abs((line_a['bbox']['y'] + line_a['bbox']['height'] / 2) - (line_b['bbox']['y'] + line_b['bbox']['height'] / 2))
+
+            dist_threshold = (
+                v_median_width * config["dist_k"]
+                if line_a["isVertical"]
+                else h_median_height * config["dist_k"]
+            )
+            perp_tol = (
+                h_median_height * config["perp_tol"]
+                if line_a["isVertical"]
+                else v_median_width * config["perp_tol"]
+            )
+
+            if line_a["isVertical"]:
+                reading_gap = max(
+                    0,
+                    max(line_a["bbox"]["x"], line_b["bbox"]["x"])
+                    - min(line_a["bbox"]["right"], line_b["bbox"]["right"]),
+                )
+                perp_overlap = max(
+                    0,
+                    min(line_a["bbox"]["bottom"], line_b["bbox"]["bottom"])
+                    - max(line_a["bbox"]["y"], line_b["bbox"]["y"]),
+                )
+                perp_offset = abs(
+                    (line_a["bbox"]["y"] + line_a["bbox"]["height"] / 2)
+                    - (line_b["bbox"]["y"] + line_b["bbox"]["height"] / 2)
+                )
             else:
-                reading_gap = max(0, max(line_a['bbox']['y'], line_b['bbox']['y']) - min(line_a['bbox']['bottom'], line_b['bbox']['bottom']))
-                perp_overlap = max(0, min(line_a['bbox']['right'], line_b['bbox']['right']) - max(line_a['bbox']['x'], line_b['bbox']['x']))
-                perp_offset = abs((line_a['bbox']['x'] + line_a['bbox']['width'] / 2) - (line_b['bbox']['x'] + line_b['bbox']['width'] / 2))
+                reading_gap = max(
+                    0,
+                    max(line_a["bbox"]["y"], line_b["bbox"]["y"])
+                    - min(line_a["bbox"]["bottom"], line_b["bbox"]["bottom"]),
+                )
+                perp_overlap = max(
+                    0,
+                    min(line_a["bbox"]["right"], line_b["bbox"]["right"])
+                    - max(line_a["bbox"]["x"], line_b["bbox"]["x"]),
+                )
+                perp_offset = abs(
+                    (line_a["bbox"]["x"] + line_a["bbox"]["width"] / 2)
+                    - (line_b["bbox"]["x"] + line_b["bbox"]["width"] / 2)
+                )
+
             if reading_gap > dist_threshold:
                 continue
-            smaller_perp_size = min(line_a['bbox']['height'], line_b['bbox']['height']) if line_a['isVertical'] else min(line_a['bbox']['width'], line_b['bbox']['width'])
-            if perp_offset > perp_tol and (smaller_perp_size == 0 or perp_overlap / smaller_perp_size < config['overlap_min']):
+
+            smaller_perp_size = (
+                min(line_a["bbox"]["height"], line_b["bbox"]["height"])
+                if line_a["isVertical"]
+                else min(line_a["bbox"]["width"], line_b["bbox"]["width"])
+            )
+
+            if perp_offset > perp_tol and (
+                smaller_perp_size == 0
+                or perp_overlap / smaller_perp_size < config["overlap_min"]
+            ):
                 continue
+
             uf.union(i, j)
+
     groups = defaultdict(list)
+
     for i in range(len(processed_lines)):
         groups[uf.find(i)].append(processed_lines[i])
+
     final_merged_data = []
+
     for root_id, group in groups.items():
         if len(group) == 1:
-            final_merged_data.append(lines[group[0]['originalIndex']])
+            final_merged_data.append(lines[group[0]["originalIndex"]])
         else:
-            is_vertical = group[0]['isVertical']
-            group.sort(key=lambda l: (-l['bbox']['x'], l['bbox']['y']) if is_vertical else (l['bbox']['y'], l['bbox']['x']))
-            join_char = " " if config['add_space_on_merge'] else "\u200B"
-            combined_text = join_char.join([l['text'] for l in group])
-            min_x, min_y = min(l['bbox']['x'] for l in group), min(l['bbox']['y'] for l in group)
-            max_r, max_b = max(l['bbox']['right'] for l in group), max(l['bbox']['bottom'] for l in group)
-            final_merged_data.append({
-                "text": combined_text,
-                "isMerged": True,
-                "forcedOrientation": "vertical" if is_vertical else "horizontal",
-                "tightBoundingBox": {
-                    "x": min_x / scale,
-                    "y": min_y / scale,
-                    "width": (max_r - min_x) / scale,
-                    "height": (max_b - min_y) / scale
+            is_vertical = group[0]["isVertical"]
+            group.sort(
+                key=lambda line: (-line["bbox"]["x"], line["bbox"]["y"])
+                if is_vertical
+                else (line["bbox"]["y"], line["bbox"]["x"])
+            )
+            join_char = " " if config["add_space_on_merge"] else "\u200b"
+            combined_text = join_char.join([line["text"] for line in group])
+            min_x, min_y = (
+                min(line["bbox"]["x"] for line in group),
+                min(line["bbox"]["y"] for line in group),
+            )
+            max_r, max_b = (
+                max(line["bbox"]["right"] for line in group),
+                max(line["bbox"]["bottom"] for line in group),
+            )
+            final_merged_data.append(
+                {
+                    "text": combined_text,
+                    "isMerged": True,
+                    "forcedOrientation": "vertical" if is_vertical else "horizontal",
+                    "tightBoundingBox": {
+                        "x": min_x / scale,
+                        "y": min_y / scale,
+                        "width": (max_r - min_x) / scale,
+                        "height": (max_b - min_y) / scale,
+                    },
                 }
-            })
+            )
+
     if len(final_merged_data) < len(lines):
-        print(f"[AutoMerge] Finished. Initial: {len(lines)}, Final: {len(final_merged_data)}")
+        print(
+            f"[AutoMerge] Finished. Initial: {len(lines)}, Final: {len(final_merged_data)}"
+        )
+
     return final_merged_data
+
+
 # endregion
 
+
 # region Utility
+
+
 def load_cache():
     global ocr_cache
     if os.path.exists(CACHE_FILE_PATH):
@@ -176,6 +271,7 @@ def load_cache():
     else:
         print("[Cache] No cache file found. Starting fresh.")
 
+
 def save_cache():
     if is_debug_mode:
         print("[DEBUG] Saving OCR cache...")
@@ -183,15 +279,22 @@ def save_cache():
         json.dump(ocr_cache, f, indent=2, ensure_ascii=False)
     if is_debug_mode:
         print("[DEBUG] OCR cache saved successfully.")
+
+
 # endregion
 
+
 # region Background Job
+
+
 def run_chapter_processing_job(base_url, auth_user, auth_pass, context):
-    global ACTIVE_JOB_COUNT
+    global active_job_count
     with active_job_lock:
-        ACTIVE_JOB_COUNT += 1
-    
-    print(f"[JobRunner] [{context}] Started job for ...{base_url[-40:]}. Active jobs: {ACTIVE_JOB_COUNT}")
+        active_job_count += 1
+
+    print(
+        f"[JobRunner] [{context}] Started job for ...{base_url[-40:]}. Active jobs: {active_job_count}"
+    )
 
     page_index, consecutive_errors = 0, 0
     CONSECUTIVE_ERROR_THRESHOLD = 3
@@ -205,10 +308,12 @@ def run_chapter_processing_job(base_url, auth_user, auth_pass, context):
                 page_index += 1
                 consecutive_errors = 0
                 continue
-        
+
         encoded_url = quote(image_url, safe="")
         encoded_context = quote(context, safe="")
-        target_url = f"{SERVER_URL_BASE}/ocr?url={encoded_url}&context={encoded_context}"
+        target_url = (
+            f"{SERVER_URL_BASE}/ocr?url={encoded_url}&context={encoded_context}"
+        )
         if auth_user:
             target_url += f"&user={auth_user}&pass={auth_pass}"
 
@@ -219,36 +324,48 @@ def run_chapter_processing_job(base_url, auth_user, auth_pass, context):
                 consecutive_errors = 0
             else:
                 consecutive_errors += 1
-                print(f"[JobRunner] [{context}] Got non-200 status ({response.status_code}) for {image_url}. Errors: {consecutive_errors}")
+                print(
+                    f"[JobRunner] [{context}] Got non-200 status ({response.status_code}) for {image_url}. Errors: {consecutive_errors}"
+                )
                 if response.status_code == 404:
                     print("[JobRunner] (Page not found, likely end of chapter)")
         except requests.exceptions.RequestException as e:
             consecutive_errors += 1
-            print(f"[JobRunner] [{context}] Request failed for {image_url}. Errors: {consecutive_errors}. Details: {e}")
-        
+            print(
+                f"[JobRunner] [{context}] Request failed for {image_url}. Errors: {consecutive_errors}. Details: {e}"
+            )
+
         page_index += 1
         time.sleep(0.1)
 
-    print(f"[JobRunner] [{context}] Finished job for ...{base_url[-40:]}. Reached {consecutive_errors} errors.")
+    print(
+        f"[JobRunner] [{context}] Finished job for ...{base_url[-40:]}. Reached {consecutive_errors} errors."
+    )
     with active_job_lock:
-        ACTIVE_JOB_COUNT -= 1
+        active_job_count -= 1
+
+
 # endregion
 
 # region Endpoints
+
 
 @app.route("/")
 def status_endpoint():
     with cache_lock:
         num_requests, num_cache_items = ocr_requests_processed, len(ocr_cache)
     with active_job_lock:
-        active_jobs = ACTIVE_JOB_COUNT
-    return jsonify({
-        "status": "running",
-        "message": "Python OCR server is active.",
-        "requests_processed": num_requests,
-        "items_in_cache": num_cache_items,
-        "active_preprocess_jobs": active_jobs
-    })
+        active_jobs = active_job_count
+    return jsonify(
+        {
+            "status": "running",
+            "message": "Python OCR server is active.",
+            "requests_processed": num_requests,
+            "items_in_cache": num_cache_items,
+            "active_preprocess_jobs": active_jobs,
+        }
+    )
+
 
 @app.route("/ocr")
 async def ocr_endpoint():
@@ -266,7 +383,7 @@ async def ocr_endpoint():
             cached_entry = ocr_cache[image_url]
             if isinstance(cached_entry, dict) and "data" in cached_entry:
                 return jsonify(cached_entry["data"])
-            else: # Fallback for old cache format that might be in memory
+            else:  # Fallback for old cache format that might be in memory
                 return jsonify(cached_entry)
 
     print(f"[OCR] [{context}] Processing: {image_url}")
@@ -274,61 +391,74 @@ async def ocr_endpoint():
         auth_headers = {}
         if auth_user := request.args.get("user"):
             auth_pass = request.args.get("pass", "")
-            auth_base64 = base64.b64encode(f"{auth_user}:{auth_pass}".encode("utf-8")).decode("utf-8")
+            auth_base64 = base64.b64encode(
+                f"{auth_user}:{auth_pass}".encode("utf-8")
+            ).decode("utf-8")
             auth_headers["Authorization"] = f"Basic {auth_base64}"
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url, headers=auth_headers) as response:
                 response.raise_for_status()
                 image_bytes = await response.read()
-        
+
         pil_image = Image.open(io.BytesIO(image_bytes))
         raw_results = await ocr_engine.ocr(pil_image.convert("RGB"))
-        final_results = auto_merge_ocr_data(raw_results, AUTO_MERGE_CONFIG) if AUTO_MERGE_CONFIG["enabled"] and raw_results else raw_results
-        
+        final_results = (
+            auto_merge_ocr_data(raw_results, AUTO_MERGE_CONFIG)
+            if AUTO_MERGE_CONFIG["enabled"] and raw_results
+            else raw_results
+        )
+
         # Store data in the new object structure {context, data}
         with cache_lock:
-            ocr_cache[image_url] = {
-                "context": context,
-                "data": final_results
-            }
+            ocr_cache[image_url] = {"context": context, "data": final_results}
             ocr_requests_processed += 1
             save_cache()
-            
+
         print(f"[OCR] [{context}] Successful for: {image_url}")
+
         # Return only the data array to the client.
         return jsonify(final_results)
 
     except aiohttp.ClientResponseError as e:
         print(f"[OCR] [{context}] ERROR fetching {image_url}: Status {e.status}")
-        return jsonify({"error": f"Failed to fetch image from URL, status: {e.status}"}), e.status
+        return jsonify(
+            {"error": f"Failed to fetch image from URL, status: {e.status}"}
+        ), e.status
     except Exception as e:
         print(f"[OCR] [{context}] ERROR on {image_url}: {e}")
         if is_debug_mode:
             traceback.print_exc()
         return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
 
+
 @app.route("/preprocess-chapter", methods=["POST"])
 def preprocess_chapter_endpoint():
     data = request.json
     if data is None:
         return jsonify({"error": "Invalid JSON payload"}), 400
-    
+
     base_url = data.get("baseUrl")
     context = data.get("context", "No Context")
-    
+
     if not base_url:
         return jsonify({"error": "baseUrl is required"}), 400
-    
+
     job_thread = threading.Thread(
         target=run_chapter_processing_job,
         args=(base_url, data.get("user"), data.get("pass"), context),
-        daemon=True
+        daemon=True,
     )
     job_thread.start()
-    
+
     print(f"[Queue] [{context}] Job started in new thread for ...{base_url[-40:]}")
-    return jsonify({"status": "accepted", "message": "Chapter pre-processing job has been started."}), 202
+    return jsonify(
+        {
+            "status": "accepted",
+            "message": "Chapter pre-processing job has been started.",
+        }
+    ), 202
+
 
 @app.route("/purge-cache", methods=["POST"])
 def purge_cache_endpoint():
@@ -337,13 +467,19 @@ def purge_cache_endpoint():
         ocr_cache.clear()
         save_cache()
         print(f"[Cache] Purged. Removed {count} items.")
-    return jsonify({"status": "success", "message": f"Cache purged. Removed {count} items."})
+    return jsonify(
+        {"status": "success", "message": f"Cache purged. Removed {count} items."}
+    )
+
 
 @app.route("/export-cache")
 def export_cache_endpoint():
     if not os.path.exists(CACHE_FILE_PATH):
         return jsonify({"error": "No cache file to export."}), 404
-    return send_file(CACHE_FILE_PATH, as_attachment=True, download_name="ocr-cache.json")
+    return send_file(
+        CACHE_FILE_PATH, as_attachment=True, download_name="ocr-cache.json"
+    )
+
 
 @app.route("/import-cache", methods=["POST"])
 def import_cache_endpoint():
@@ -369,25 +505,47 @@ def import_cache_endpoint():
                         # New format. Use it directly.
                         ocr_cache[key] = value
                     else:
-                        continue # Skip invalid entries
+                        continue  # Skip invalid entries
                     new_items += 1
             if new_items > 0:
                 save_cache()
             total_items = len(ocr_cache)
-        return jsonify({"message": f"Import successful. Added {new_items} new items.", "total_items_in_cache": total_items})
+        return jsonify(
+            {
+                "message": f"Import successful. Added {new_items} new items.",
+                "total_items_in_cache": total_items,
+            }
+        )
     except Exception as e:
         return jsonify({"error": f"Import failed: {e}"}), 500
+
 
 # endregion
 
 # region Main
+
+
 def main():
     global ocr_engine, is_debug_mode
     parser = argparse.ArgumentParser(description="Run the Python OCR Server.")
-    parser.add_argument("-d", "--debug", action="store_true", help="enable debug mode for more verbose output")
-    parser.add_argument("-e", "--engine", type=str, default="lens", help="OCR engine to use. Default is lens. Available: 'lens', 'oneocr'")
+    parser.add_argument(
+        "-d",
+        "--debug",
+        action="store_true",
+        help="enable debug mode for more verbose output",
+    )
+    parser.add_argument(
+        "-e",
+        "--engine",
+        type=str,
+        default="lens",
+        help="OCR engine to use. Default is lens. Available: 'lens', 'oneocr'",
+    )
     args = parser.parse_args()
     is_debug_mode = args.debug
+
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(IMAGE_CACHE_FOLDER, exist_ok=True)
 
     print(f"[Engine] Initializing {args.engine}...")
     try:
@@ -396,9 +554,9 @@ def main():
     except Exception as e:
         print(f"[Engine] Failed to initialize {args.engine}: {e}")
         raise SystemExit(1)
-    
+
     load_cache()
-    
+
     if is_debug_mode:
         print("--- Starting Flask Development Server in DEBUG MODE ---")
         app.run(host=IP_ADDRESS, port=PORT, debug=True, use_reloader=False)
@@ -407,6 +565,8 @@ def main():
         print(f"URL: http://{IP_ADDRESS}:{PORT}")
         serve(app, host=IP_ADDRESS, port=PORT)
 
+
 if __name__ == "__main__":
     main()
+
 # endregion
