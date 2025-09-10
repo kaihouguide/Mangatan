@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine) - Synced
 // @namespace    http://tampermonkey.net/
-// @version      24.5.22-M-Server-Synced
-// @description  A mobile-optimized OCR overlay. Now uses server-side auto-merging and sends page context for logging, creating a lighter, fully synced experience with the PC version.
+// @version      24.5.23-M-Server-Synced-MergeFix
+// @description  A mobile-optimized OCR overlay. Now uses server-side auto-merging, sends page context, and respects selection order for manual merging.
 // @author       1Selxo (PC Base by 1Selxo, Mobile Port & Sync by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -38,7 +38,7 @@
         soloHoverMode: false, addSpaceOnMerge: false, colorTheme: 'blue', brightnessMode: 'light'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v24_m_server_synced'; // New key for synced version
+    const SETTINGS_KEY = 'gemini_ocr_settings_v24_m_server_synced';
     const ocrDataCache = new WeakMap();
     const managedElements = new Map(), managedContainers = new Map(), attachedAttributeObservers = new Map();
     let activeSiteConfig = null, measurementSpan = null, activeImageForExport = null, activeOverlay = null;
@@ -210,11 +210,8 @@
         if (ocrDataCache.has(img)) { displayOcrResults(img); return; }
         logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`);
         ocrDataCache.set(img, 'pending');
-        
-        // MODIFIED: Send context with the request
         const context = document.title;
         let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}&context=${encodeURIComponent(context)}`;
-        
         if (settings.imageServerUser) ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`;
         GM_xmlhttpRequest({
             method: 'GET', url: ocrRequestUrl, timeout: 45000,
@@ -248,8 +245,7 @@
             while (low <= high) {
                 const mid = Math.floor((low + high) / 2); if (mid <= 0) break;
                 measurementSpan.style.fontSize = `${mid}px`;
-                const fits = isMerged ? (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) :
-                                        (isVerticalSearch ? measurementSpan.offsetHeight <= availableHeight : measurementSpan.offsetWidth <= availableWidth);
+                const fits = isMerged ? (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) : (isVerticalSearch ? measurementSpan.offsetHeight <= availableHeight : measurementSpan.offsetWidth <= availableWidth);
                 if (fits) { bestSize = mid; low = mid + 1; } else { high = mid - 1; }
             }
             return bestSize;
@@ -274,7 +270,7 @@
         for (const box of boxes) calculateAndApplyStylesForSingleBox(box, imgRect);
         measurementSpan.style.writingMode = 'horizontal-tb';
     }
-    
+
     // --- Mobile Touch, Interaction & Multi-Merge/Delete Logic ---
     function triggerOverlayToggle(targetImg) { const overlayState = managedElements.get(targetImg); if (overlayState?.overlay) { if (overlayState.overlay === activeOverlay) hideActiveOverlay(); else showOverlay(overlayState.overlay, targetImg); } }
     function showOverlay(overlay, image) { if (activeOverlay && activeOverlay !== overlay) hideActiveOverlay(); activeOverlay = overlay; activeImageForExport = image; overlay.classList.remove('is-inactive'); overlay.classList.add('is-focused'); UI.globalAnkiButton?.classList.remove('is-hidden'); UI.globalEditButton?.classList.remove('is-hidden'); }
@@ -287,19 +283,67 @@
     function updateEditActionBar(overlay) { const selection = activeMergeSelections.get(overlay) || []; const mergeBtn = overlay.querySelector('.edit-action-merge'); const deleteBtn = overlay.querySelector('.edit-action-delete'); if (mergeBtn) mergeBtn.disabled = selection.length < 2; if (deleteBtn) deleteBtn.disabled = selection.length === 0; }
     function handleBoxDelete(boxElement, sourceImage) { const data = ocrDataCache.get(sourceImage); if (!data) return; const updatedData = data.filter((item, index) => index !== boxElement._ocrDataIndex); ocrDataCache.set(sourceImage, updatedData); boxElement.remove(); }
     function handleMergeSelection(boxElement, overlay) { let currentSelection = activeMergeSelections.get(overlay); if (!currentSelection) { currentSelection = []; activeMergeSelections.set(overlay, currentSelection); } const indexInSelection = currentSelection.indexOf(boxElement); if (indexInSelection > -1) { currentSelection.splice(indexInSelection, 1); boxElement.classList.remove('selected-for-merge'); } else { currentSelection.push(boxElement); boxElement.classList.add('selected-for-merge'); } updateEditActionBar(overlay); }
-    function finalizeMultipleMerge(selectedBoxes, sourceImage, overlay) { if (!selectedBoxes || selectedBoxes.length < 2) return; logDebug(`Finalizing merge for ${selectedBoxes.length} boxes.`); const indicesToDelete = new Set(); let newBoundingBox = null; let areAllVertical = true; selectedBoxes.sort((a, b) => { const rectA = a.getBoundingClientRect(); const rectB = b.getBoundingClientRect(); if (Math.abs(rectA.top - rectB.top) < 20) return rectA.left - rectB.left; return rectA.top - rectB.top; }); const combinedTextParts = selectedBoxes.map(box => { indicesToDelete.add(box._ocrDataIndex); const b = box._ocrData.tightBoundingBox; if (newBoundingBox === null) { newBoundingBox = { x: b.x, y: b.y, width: b.width, height: b.height }; } else { const newRight = Math.max(newBoundingBox.x + newBoundingBox.width, b.x + b.width); const newBottom = Math.max(newBoundingBox.y + newBoundingBox.height, b.y + b.height); newBoundingBox.x = Math.min(newBoundingBox.x, b.x); newBoundingBox.y = Math.min(newBoundingBox.y, b.y); newBoundingBox.width = newRight - newBoundingBox.x; newBoundingBox.height = newBottom - newBoundingBox.y; } if (!box.classList.contains('gemini-ocr-text-vertical')) { areAllVertical = false; } return box.dataset.fullText || box.textContent; }); const combinedText = combinedTextParts.join(settings.addSpaceOnMerge ? ' ' : "\u200B"); const newOcrItem = { text: combinedText, tightBoundingBox: newBoundingBox, forcedOrientation: areAllVertical ? 'vertical' : 'auto', isMerged: true }; const originalData = ocrDataCache.get(sourceImage); const newData = originalData.filter((item, index) => !indicesToDelete.has(index)); newData.push(newOcrItem); ocrDataCache.set(sourceImage, newData); selectedBoxes.forEach(box => box.remove()); const newBoxElement = document.createElement('div'); newBoxElement.className = 'gemini-ocr-text-box'; newBoxElement.innerHTML = newOcrItem.text.replace(/\u200B/g, "<br>"); newBoxElement.dataset.fullText = newOcrItem.text; newBoxElement._ocrData = newOcrItem; newBoxElement._ocrDataIndex = newData.length - 1; newBoxElement.style.whiteSpace = 'normal'; newBoxElement.style.textAlign = 'start'; Object.assign(newBoxElement.style, { left: `${newOcrItem.tightBoundingBox.x*100}%`, top: `${newOcrItem.tightBoundingBox.y*100}%`, width: `${newOcrItem.tightBoundingBox.width*100}%`, height: `${newOcrItem.tightBoundingBox.height*100}%` }); overlay.appendChild(newBoxElement); calculateAndApplyStylesForSingleBox(newBoxElement, sourceImage.getBoundingClientRect()); activeMergeSelections.set(overlay, []); updateEditActionBar(overlay); }
+    
+    // MODIFIED: Merge order now respects selection sequence.
+    function finalizeMultipleMerge(selectedBoxes, sourceImage, overlay) {
+        if (!selectedBoxes || selectedBoxes.length < 2) return;
+        logDebug(`Finalizing merge for ${selectedBoxes.length} boxes in selection order.`);
+        
+        const indicesToDelete = new Set();
+        let newBoundingBox = null;
+        let areAllVertical = true;
+        
+        // REMOVED: No more sorting. The array `selectedBoxes` is already in the correct user-selected order.
+        
+        const combinedTextParts = selectedBoxes.map(box => {
+            indicesToDelete.add(box._ocrDataIndex);
+            const b = box._ocrData.tightBoundingBox;
+            if (newBoundingBox === null) {
+                newBoundingBox = { x: b.x, y: b.y, width: b.width, height: b.height };
+            } else {
+                const newRight = Math.max(newBoundingBox.x + newBoundingBox.width, b.x + b.width);
+                const newBottom = Math.max(newBoundingBox.y + newBoundingBox.height, b.y + b.height);
+                newBoundingBox.x = Math.min(newBoundingBox.x, b.x);
+                newBoundingBox.y = Math.min(newBoundingBox.y, b.y);
+                newBoundingBox.width = newRight - newBoundingBox.x;
+                newBoundingBox.height = newBottom - newBoundingBox.y;
+            }
+            if (!box.classList.contains('gemini-ocr-text-vertical')) areAllVertical = false;
+            return box.dataset.fullText || box.textContent;
+        });
+        
+        const combinedText = combinedTextParts.join(settings.addSpaceOnMerge ? ' ' : "\u200B");
+        const newOcrItem = { text: combinedText, tightBoundingBox: newBoundingBox, forcedOrientation: areAllVertical ? 'vertical' : 'auto', isMerged: true };
+        const originalData = ocrDataCache.get(sourceImage);
+        const newData = originalData.filter((item, index) => !indicesToDelete.has(index));
+        newData.push(newOcrItem);
+        ocrDataCache.set(sourceImage, newData);
+        selectedBoxes.forEach(box => box.remove());
+        
+        const newBoxElement = document.createElement('div');
+        newBoxElement.className = 'gemini-ocr-text-box';
+        newBoxElement.innerHTML = newOcrItem.text.replace(/\u200B/g, "<br>");
+        newBoxElement.dataset.fullText = newOcrItem.text;
+        newBoxElement._ocrData = newOcrItem;
+        newBoxElement._ocrDataIndex = newData.length - 1;
+        newBoxElement.style.whiteSpace = 'normal';
+        newBoxElement.style.textAlign = 'start';
+        Object.assign(newBoxElement.style, { left: `${newOcrItem.tightBoundingBox.x*100}%`, top: `${newOcrItem.tightBoundingBox.y*100}%`, width: `${newOcrItem.tightBoundingBox.width*100}%`, height: `${newOcrItem.tightBoundingBox.height*100}%` });
+        overlay.appendChild(newBoxElement);
+        calculateAndApplyStylesForSingleBox(newBoxElement, sourceImage.getBoundingClientRect());
+        activeMergeSelections.set(overlay, []);
+        updateEditActionBar(overlay);
+    }
+    
     function handleOverlayInteraction(event) { const overlay = event.currentTarget; const clickedBox = event.target.closest('.gemini-ocr-text-box'); if (!clickedBox) return; event.stopPropagation(); const sourceImage = activeImageForExport; if (!sourceImage) return; if (overlay.classList.contains('edit-mode-active')) { handleMergeSelection(clickedBox, overlay); } else { overlay.classList.add('has-manual-highlight'); if (!clickedBox.classList.contains('manual-highlight')) { overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight')); clickedBox.classList.add('manual-highlight'); } } }
 
     function displayOcrResults(targetImg) {
         if (managedElements.has(targetImg)) return;
         const data = ocrDataCache.get(targetImg);
         if (!data || data === 'pending' || !Array.isArray(data)) return;
-        // REMOVED: Auto-merging is now done by the server.
-
         const overlay = document.createElement('div');
         overlay.className = `gemini-ocr-decoupled-overlay is-inactive`;
         overlay.classList.toggle('solo-hover-mode', settings.soloHoverMode);
-
         data.forEach((item, index) => {
             const ocrBox = document.createElement('div');
             ocrBox.className = 'gemini-ocr-text-box'; ocrBox.dataset.fullText = item.text; ocrBox._ocrData = item; ocrBox._ocrDataIndex = index;
@@ -308,7 +352,6 @@
             Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x * 100}%`, top: `${item.tightBoundingBox.y * 100}%`, width: `${item.tightBoundingBox.width * 100}%`, height: `${item.tightBoundingBox.height * 100}%` });
             overlay.appendChild(ocrBox);
         });
-
         const editActionBar = document.createElement('div');
         editActionBar.className = 'gemini-ocr-edit-action-bar';
         const mergeButton = document.createElement('button');
@@ -317,10 +360,8 @@
         deleteButton.className = 'edit-action-delete'; deleteButton.textContent = 'Delete';
         editActionBar.append(deleteButton, mergeButton);
         overlay.appendChild(editActionBar);
-
         mergeButton.addEventListener('click', (e) => { e.stopPropagation(); finalizeMultipleMerge(activeMergeSelections.get(overlay) || [], targetImg, overlay); });
         deleteButton.addEventListener('click', (e) => { e.stopPropagation(); const selection = activeMergeSelections.get(overlay) || []; selection.forEach(box => handleBoxDelete(box, targetImg)); activeMergeSelections.set(overlay, []); updateEditActionBar(overlay); });
-
         document.body.appendChild(overlay);
         const state = { overlay, lastWidth: 0, lastHeight: 0 };
         managedElements.set(targetImg, state);
@@ -335,15 +376,7 @@
     async function runProbingProcess(baseUrl, btn) {
         logDebug(`Requesting SERVER-SIDE job for: ${baseUrl}`);
         const originalText = btn.textContent; btn.disabled = true; btn.textContent = 'Starting...';
-        
-        // MODIFIED: Send context with the request
-        const postData = {
-            baseUrl: baseUrl,
-            user: settings.imageServerUser,
-            pass: settings.imageServerPassword,
-            context: document.title
-        };
-        
+        const postData = { baseUrl: baseUrl, user: settings.imageServerUser, pass: settings.imageServerPassword, context: document.title };
         GM_xmlhttpRequest({ method: 'POST', url: `${settings.ocrServerUrl}/preprocess-chapter`, headers: { 'Content-Type': 'application/json' }, data: JSON.stringify(postData), timeout: 10000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (res.status === 202 && data.status === 'accepted') { logDebug(`Chapter job accepted by server.`); btn.textContent = 'Accepted'; btn.style.borderColor = '#3498db'; checkServerStatus(); } else { throw new Error(data.error || `Server responded with status ${res.status}`); } } catch (e) { logDebug(`Error starting chapter job: ${e.message}`); btn.textContent = 'Error!'; btn.style.borderColor = '#c032b'; alert(`Failed to start chapter job: ${e.message}`); } }, onerror: () => { logDebug('Connection error.'); btn.textContent = 'Conn. Error!'; btn.style.borderColor = '#c0392b'; }, ontimeout: () => { logDebug('Timeout.'); btn.textContent = 'Timeout!'; btn.style.borderColor = '#c0392b'; }, onloadend: () => { setTimeout(() => { if (btn.isConnected) { btn.textContent = originalText; btn.style.borderColor = ''; btn.disabled = false; } }, 3500); } });
     }
     async function batchProcessCurrentChapterFromURL() { const btn = UI.batchChapterBtn; const urlMatch = window.location.pathname.match(/\/manga\/\d+\/chapter\/\d+/); if (!urlMatch) { alert(`Error: URL does not match '.../manga/ID/chapter/ID'.`); return; } const baseUrl = `${window.location.origin}/api/v1${urlMatch[0]}/page/`; await runProbingProcess(baseUrl, btn); }
@@ -354,34 +387,17 @@
     function applyTheme() { const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.blue; const cssVars = `:root { --accent: ${theme.accent}; --background: ${theme.background}; --modal-header-color: rgba(${theme.accent}, 1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; --ocr-focus-scale: ${settings.focusScaleMultiplier}; }`; let styleTag = document.getElementById('gemini-ocr-dynamic-styles'); if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); } styleTag.textContent = cssVars; document.body.className = document.body.className.replace(/\bocr-theme-\S+/g, ''); document.body.classList.add(`ocr-theme-${settings.colorTheme}`); document.body.classList.toggle('ocr-brightness-dark', settings.brightnessMode === 'dark'); document.body.classList.toggle('ocr-brightness-light', settings.brightnessMode === 'light'); }
     function createUI() {
         GM_addStyle(`
-            .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; transition: opacity 0.2s, visibility 0.2s; visibility: hidden; opacity: 0; -webkit-tap-highlight-color: transparent; }
-            .gemini-ocr-decoupled-overlay.is-inactive { opacity: 0; visibility: hidden; }
-            .gemini-ocr-decoupled-overlay.is-focused { visibility: visible; opacity: 1; pointer-events: auto; background-color: rgba(0,0,0,0.2); }
-            .gemini-ocr-text-box, .gemini-ocr-edit-action-bar { pointer-events: auto; }
-            ::selection { background-color: rgba(var(--accent), 1); color: #FFFFFF; }
+            .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; transition: opacity 0.2s, visibility 0.2s; visibility: hidden; opacity: 0; -webkit-tap-highlight-color: transparent; } .is-inactive { opacity: 0; visibility: hidden; } .is-focused { visibility: visible; opacity: 1; pointer-events: auto; background-color: rgba(0,0,0,0.2); } .gemini-ocr-text-box, .gemini-ocr-edit-action-bar { pointer-events: auto; } ::selection { background-color: rgba(var(--accent), 1); color: #FFFFFF; }
             .gemini-ocr-text-box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; user-select: text; cursor: pointer; transition: all 0.2s ease-in-out; overflow: hidden; font-family: 'Noto Sans JP', sans-serif; font-weight: 600; padding: 4px; border-radius: 4px; border: none; text-shadow: none; }
-            body.ocr-brightness-light .gemini-ocr-text-box { background: rgba(var(--background), 1); color: rgba(var(--accent), 0.5); box-shadow: 0px 0px 0px 0.1em rgba(var(--background), 1); }
-            .is-focused .gemini-ocr-text-box.manual-highlight, .is-focused .gemini-ocr-text-box.selected-for-merge { background: rgba(var(--background), 1); color: rgba(var(--accent), 1); box-shadow: 0px 0px 0px 0.1em rgba(var(--background), 1), 0px 0px 0px 0.2em rgba(var(--accent), 1); }
-            body.ocr-brightness-dark .gemini-ocr-text-box { background: rgba(29, 34, 39, 0.9); color: rgba(var(--background), 0.7); box-shadow: 0px 0px 0px 0.1em rgba(var(--accent), 0.4); backdrop-filter: blur(2px); }
-            body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.manual-highlight, body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.selected-for-merge { background: rgba(var(--accent), 1); color: #FFFFFF; box-shadow: 0px 0px 0px 0.1em rgba(var(--accent), 0.4), 0px 0px 0px 0.2em rgba(var(--background), 1); }
-            .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
-            .is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight { z-index: 1; transform: scale(var(--ocr-focus-scale)); overflow: visible !important; }
-            .solo-hover-mode.is-focused:not(.edit-mode-active).has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); }
-            .edit-mode-active .gemini-ocr-text-box { opacity: 0.6; border: 1px dashed rgba(255,255,255,0.5); }
-            .gemini-ocr-text-box.selected-for-merge { opacity: 1 !important; outline: 3px solid #f1c40f !important; outline-offset: 2px; box-shadow: 0 0 12px #f1c40f; transform: scale(1.02); }
-            .gemini-ocr-edit-action-bar { position: absolute; bottom: 0; left: 0; right: 0; display: none; justify-content: center; align-items: center; gap: 15px; padding: 10px; background: rgba(26,29,33,0.8); backdrop-filter: blur(8px); border-top: 1px solid rgba(255,255,255,0.1); }
-            .edit-mode-active .gemini-ocr-edit-action-bar { display: flex; }
-            .gemini-ocr-edit-action-bar button { padding: 10px 20px; font-size: 1rem; font-weight: bold; border-radius: 20px; border: none; cursor: pointer; color: white; }
-            .gemini-ocr-edit-action-bar .edit-action-merge { background-color: #3498db; } .gemini-ocr-edit-action-bar .edit-action-delete { background-color: #e74c3c; } .gemini-ocr-edit-action-bar button:disabled { background-color: #7f8c8d; opacity: 0.6; }
-            #gemini-ocr-settings-button, #gemini-ocr-global-anki-export-btn, #gemini-ocr-global-edit-btn { position: fixed; z-index: 2147483647; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: clamp(48px, 12vw, 60px); height: clamp(48px, 12vw, 60px); font-size: clamp(26px, 6vw, 32px); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); user-select: none; -webkit-user-select: none; transition: all 0.2s ease-in-out; backdrop-filter: blur(5px); }
-            #gemini-ocr-settings-button { bottom: clamp(15px, 4vw, 30px); right: clamp(15px, 4vw, 30px); background: rgba(26, 29, 33, 0.8); color: #EAEAEA; }
-            #gemini-ocr-global-edit-btn { bottom: clamp(15px, 4vw, 30px); right: clamp(75px, 18vw, 100px); background: rgba(52, 152, 219, 0.8); color: white; }
-            #gemini-ocr-global-edit-btn.edit-active { background-color: #f1c40f; color: black; transform: scale(1.1); }
-            #gemini-ocr-global-anki-export-btn { bottom: clamp(75px, 18vw, 100px); right: clamp(15px, 4vw, 30px); background-color: rgba(46, 204, 113, 0.9); color: white; }
-            #gemini-ocr-global-anki-export-btn.is-hidden, #gemini-ocr-global-edit-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
-            .gemini-ocr-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(20, 20, 25, 0.6); backdrop-filter: blur(8px); z-index: 2147483646; color: #EAEAEA; display: flex; align-items: center; justify-content: center; } .gemini-ocr-modal.is-hidden { display: none; } .gemini-ocr-modal-container { width: clamp(320px, 95vw, 700px); max-height: 90vh; background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; } .gemini-ocr-modal-header { padding: clamp(15px, 4vw, 20px) clamp(15px, 5vw, 25px); border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); } .gemini-ocr-modal-content { padding: clamp(5px, 2vw, 10px) clamp(15px, 5vw, 25px); overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: clamp(10px, 3vw, 15px) clamp(15px, 5vw, 25px); border-top: 1px solid #444; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 10px; align-items: center; } .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; } .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: clamp(15px, 4vw, 20px) 0 clamp(8px, 2vw, 10px) 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); } .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: clamp(10px, 3vw, 12px) clamp(10px, 3vw, 15px); align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); } .full-width { grid-column: 1 / -1; } .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: clamp(8px, 2.5vw, 12px); box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; } .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); } #gemini-ocr-server-status { padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; } #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
+            body.ocr-brightness-light .gemini-ocr-text-box { background: rgba(var(--background), 1); color: rgba(var(--accent), 0.5); box-shadow: 0 0 0 0.1em rgba(var(--background), 1); } .is-focused .gemini-ocr-text-box.manual-highlight, .is-focused .gemini-ocr-text-box.selected-for-merge { background: rgba(var(--background), 1); color: rgba(var(--accent), 1); box-shadow: 0 0 0 0.1em rgba(var(--background), 1), 0 0 0 0.2em rgba(var(--accent), 1); }
+            body.ocr-brightness-dark .gemini-ocr-text-box { background: rgba(29, 34, 39, 0.9); color: rgba(var(--background), 0.7); box-shadow: 0 0 0 0.1em rgba(var(--accent), 0.4); backdrop-filter: blur(2px); } body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.manual-highlight, body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.selected-for-merge { background: rgba(var(--accent), 1); color: #FFFFFF; box-shadow: 0 0 0 0.1em rgba(var(--accent), 0.4), 0 0 0 0.2em rgba(var(--background), 1); }
+            .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; } .is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight { z-index: 1; transform: scale(var(--ocr-focus-scale)); overflow: visible !important; } .solo-hover-mode.is-focused:not(.edit-mode-active).has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); }
+            .edit-mode-active .gemini-ocr-text-box { opacity: 0.6; border: 1px dashed rgba(255,255,255,0.5); } .gemini-ocr-text-box.selected-for-merge { opacity: 1 !important; outline: 3px solid #f1c40f !important; outline-offset: 2px; box-shadow: 0 0 12px #f1c40f; transform: scale(1.02); }
+            .gemini-ocr-edit-action-bar { position: absolute; bottom: 0; left: 0; right: 0; display: none; justify-content: center; align-items: center; gap: 15px; padding: 10px; background: rgba(26,29,33,0.8); backdrop-filter: blur(8px); border-top: 1px solid rgba(255,255,255,0.1); } .edit-mode-active .gemini-ocr-edit-action-bar { display: flex; } .gemini-ocr-edit-action-bar button { padding: 10px 20px; font-size: 1rem; font-weight: bold; border-radius: 20px; border: none; cursor: pointer; color: white; } .gemini-ocr-edit-action-bar .edit-action-merge { background-color: #3498db; } .gemini-ocr-edit-action-bar .edit-action-delete { background-color: #e74c3c; } .gemini-ocr-edit-action-bar button:disabled { background-color: #7f8c8d; opacity: 0.6; }
+            #gemini-ocr-settings-button, #gemini-ocr-global-anki-export-btn, #gemini-ocr-global-edit-btn { position: fixed; z-index: 2147483647; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: clamp(48px, 12vw, 60px); height: clamp(48px, 12vw, 60px); font-size: clamp(26px, 6vw, 32px); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); user-select: none; -webkit-user-select: none; transition: all 0.2s; backdrop-filter: blur(5px); }
+            #gemini-ocr-settings-button { bottom: clamp(15px, 4vw, 30px); right: clamp(15px, 4vw, 30px); background: rgba(26, 29, 33, 0.8); color: #EAEAEA; } #gemini-ocr-global-edit-btn { bottom: clamp(15px, 4vw, 30px); right: clamp(75px, 18vw, 100px); background: rgba(52, 152, 219, 0.8); color: white; } #gemini-ocr-global-edit-btn.edit-active { background-color: #f1c40f; color: black; transform: scale(1.1); } #gemini-ocr-global-anki-export-btn { bottom: clamp(75px, 18vw, 100px); right: clamp(15px, 4vw, 30px); background-color: rgba(46, 204, 113, 0.9); color: white; } #gemini-ocr-global-anki-export-btn.is-hidden, #gemini-ocr-global-edit-btn.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transform: scale(0.5); }
+            .gemini-ocr-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(20, 20, 25, 0.6); backdrop-filter: blur(8px); z-index: 2147483646; color: #EAEAEA; display: flex; align-items: center; justify-content: center; } .is-hidden { display: none; } .gemini-ocr-modal-container { width: clamp(320px, 95vw, 700px); max-height: 90vh; background-color: #1A1D21; border: 1px solid var(--modal-header-color); border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; } .gemini-ocr-modal-header { padding: clamp(15px, 4vw, 20px) clamp(15px, 5vw, 25px); border-bottom: 1px solid #444; } .gemini-ocr-modal-header h2 { margin: 0; color: var(--modal-header-color); font-size: clamp(1.1rem, 4vw, 1.3rem); } .gemini-ocr-modal-content { padding: clamp(5px, 2vw, 10px) clamp(15px, 5vw, 25px); overflow-y: auto; flex-grow: 1; } .gemini-ocr-modal-footer { padding: clamp(10px, 3vw, 15px) clamp(15px, 5vw, 25px); border-top: 1px solid #444; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 10px; align-items: center; } .gemini-ocr-modal-footer button:last-of-type { margin-left: auto; } .gemini-ocr-modal h3 { font-size: clamp(1rem, 3.5vw, 1.1rem); margin: clamp(15px, 4vw, 20px) 0 clamp(8px, 2vw, 10px) 0; border-bottom: 1px solid #333; padding-bottom: 8px; color: var(--modal-header-color); } .gemini-ocr-settings-grid { display: grid; grid-template-columns: max-content 1fr; gap: clamp(10px, 3vw, 12px) clamp(10px, 3vw, 15px); align-items: center; font-size: clamp(0.9rem, 3vw, 1rem); } .full-width { grid-column: 1 / -1; } .gemini-ocr-modal input, .gemini-ocr-modal textarea, .gemini-ocr-modal select { width: 100%; padding: clamp(8px, 2.5vw, 12px); box-sizing: border-box; font-size: 1rem; background-color: #2a2a2e; border: 1px solid #555; border-radius: 8px; color: #EAEAEA; } .gemini-ocr-modal button { padding: 10px 18px; border: none; border-radius: 8px; color: #1A1D21; cursor: pointer; font-weight: bold; font-size: clamp(0.9rem, 3vw, 1rem); } #gemini-ocr-server-status { padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; } #gemini-ocr-server-status.status-ok { background-color: #27ae60; } #gemini-ocr-server-status.status-error { background-color: #c0392b; } #gemini-ocr-server-status.status-checking { background-color: #3498db; }
         `);
-        // REMOVED: Auto-merge settings from the HTML string.
         document.body.insertAdjacentHTML('beforeend', ` <button id="gemini-ocr-global-anki-export-btn" class="is-hidden" title="Export Screenshot to Anki">✚</button> <button id="gemini-ocr-global-edit-btn" class="is-hidden" title="Toggle Edit Mode">✏️</button> <button id="gemini-ocr-settings-button" title="OCR Settings">⚙️</button> <div id="gemini-ocr-settings-modal" class="gemini-ocr-modal is-hidden"> <div class="gemini-ocr-modal-container"> <div class="gemini-ocr-modal-header"><h2>Automatic Content OCR Settings (Mobile)</h2></div> <div class="gemini-ocr-modal-content"> <h3>OCR & Image Source</h3><div class="gemini-ocr-settings-grid full-width"> <label for="gemini-ocr-server-url">OCR Server URL:</label><input type="text" id="gemini-ocr-server-url"> <label for="gemini-image-server-user">Image Source Username:</label><input type="text" id="gemini-image-server-user" autocomplete="username" placeholder="Optional"> <label for="gemini-image-server-password">Image Source Password:</label><input type="password" id="gemini-image-server-password" autocomplete="current-password" placeholder="Optional"> </div> <div id="gemini-ocr-server-status" class="full-width" style="margin-top: 10px;">Click to check server status</div> <h3>Anki Integration</h3><div class="gemini-ocr-settings-grid"> <label for="gemini-ocr-anki-url">Anki-Connect URL:</label><input type="text" id="gemini-ocr-anki-url"> <label for="gemini-ocr-anki-field">Image Field Name:</label><input type="text" id="gemini-ocr-anki-field" placeholder="e.g., Image"> </div> <h3>Interaction & Display</h3><div class="gemini-ocr-settings-grid"> <label for="ocr-activation-mode">Activation Gesture:</label><select id="ocr-activation-mode"><option value="longPress">Long Press</option><option value="doubleTap">Double Tap</option></select> <label for="ocr-brightness-mode">Theme Mode:</label><select id="ocr-brightness-mode"><option value="light">Light</option><option value="dark">Dark</option></select> <label for="ocr-color-theme">Color Theme:</label><select id="ocr-color-theme">${Object.keys(COLOR_THEMES).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select> <label for="ocr-focus-scale-multiplier">Focus Scale Multiplier:</label><input type="number" id="ocr-focus-scale-multiplier" min="1" max="3" step="0.05"> <label for="ocr-dimmed-opacity">Dimmed Box Opacity (%):</label><input type="number" id="ocr-dimmed-opacity" min="0" max="100" step="5"> <label for="ocr-text-orientation">Text Orientation:</label><select id="ocr-text-orientation"><option value="smart">Smart</option><option value="forceHorizontal">Horizontal</option><option value="forceVertical">Vertical</option></select> <label for="ocr-font-multiplier-horizontal">H. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-horizontal" min="0.1" max="5" step="0.1"> <label for="ocr-font-multiplier-vertical">V. Font Multiplier:</label><input type="number" id="ocr-font-multiplier-vertical" min="0.1" max="5" step="0.1"> <label for="ocr-bounding-box-adjustment-input">Box Adjustment (px):</label><input type="number" id="ocr-bounding-box-adjustment-input" min="0" max="100" step="1"> </div><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-solo-hover-mode"> Enable dimming effect</label><label><input type="checkbox" id="gemini-ocr-add-space-on-merge"> Add space on merge</label></div> <h3>Advanced</h3><div class="gemini-ocr-settings-grid full-width"><label><input type="checkbox" id="gemini-ocr-debug-mode"> Debug Mode</label></div> <div class="gemini-ocr-settings-grid full-width"><label for="gemini-ocr-sites-config">Site Configurations (URL; Containers...; Root)</label><textarea id="gemini-ocr-sites-config" rows="4"></textarea></div> </div> <div class="gemini-ocr-modal-footer"> <button id="gemini-ocr-purge-cache-btn" style="background-color: #c0392b;">Purge Cache</button> <button id="gemini-ocr-batch-chapter-btn" style="background-color: #3498db;">Pre-process Chapter</button> <button id="gemini-ocr-debug-btn" style="background-color: #777;">Debug</button> <button id="gemini-ocr-close-btn" style="background-color: #555;">Close</button> <button id="gemini-ocr-save-btn" style="background-color: #3ad602;">Save & Reload</button> </div> </div> </div> <div id="gemini-ocr-debug-modal" class="gemini-ocr-modal is-hidden"><div class="gemini-ocr-modal-container"><div class="gemini-ocr-modal-header"><h2>Debug Log</h2></div><div class="gemini-ocr-modal-content"><textarea id="gemini-ocr-debug-log" readonly style="width:100%; height: 100%; resize:none;"></textarea></div><div class="gemini-ocr-modal-footer"><button id="gemini-ocr-close-debug-btn" style="background-color: #555;">Close</button></div></div></div> `);
     }
     function bindUIEvents() {
