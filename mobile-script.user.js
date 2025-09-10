@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine) - Synced
 // @namespace    http://tampermonkey.net/
-// @version      24.5.25-M-OverlayDimFix
-// @description  A mobile-optimized OCR overlay. Server-side merging, context logging, and respects merge order. Removed the dark overlay background to match the PC version.
+// @version      24.5.25-M-OverlayInteractionFix
+// @description  A mobile-optimized OCR overlay. Server-side merging, context logging, and respects merge order. Fixes interaction with inactive overlays.
 // @author       1Selxo (PC Base by 1Selxo, Mobile Port & Sync by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -128,9 +128,27 @@
     function applyTheme() { const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.blue; const cssVars = `:root { --accent: ${theme.accent}; --background: ${theme.background}; --modal-header-color: rgba(${theme.accent}, 1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; --ocr-focus-scale: ${settings.focusScaleMultiplier}; }`; let styleTag = document.getElementById('gemini-ocr-dynamic-styles'); if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); } styleTag.textContent = cssVars; document.body.className = document.body.className.replace(/\bocr-theme-\S+/g, ''); document.body.classList.add(`ocr-theme-${settings.colorTheme}`); document.body.classList.toggle('ocr-brightness-dark', settings.brightnessMode === 'dark'); document.body.classList.toggle('ocr-brightness-light', settings.brightnessMode === 'light'); }
     function createUI() {
         GM_addStyle(`
-            .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; pointer-events: none; transition: opacity 0.2s, visibility 0.2s; visibility: hidden; opacity: 0; -webkit-tap-highlight-color: transparent; }
-            .gemini-ocr-decoupled-overlay.is-inactive { opacity: 0; visibility: hidden; pointer-events: none; }
-            .gemini-ocr-decoupled-overlay.is-focused { visibility: visible; opacity: 1; pointer-events: auto; background-color: transparent; } /* MODIFIED: Removed background-color */
+            /* MODIFIED: Changed visibility/opacity logic to display: none for inactive state.
+               This completely removes the inactive overlay from the layout, preventing it from blocking
+               clicks or allowing text selection when it's supposed to be hidden. This is the fix for the reported issue. */
+            .gemini-ocr-decoupled-overlay {
+                position: fixed;
+                z-index: 9998;
+                display: none; /* Start completely hidden and out of the layout */
+                opacity: 0;
+                transition: opacity 0.2s ease-in-out;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .gemini-ocr-decoupled-overlay.is-inactive {
+                display: none; /* Explicitly ensure it's gone */
+                pointer-events: none;
+            }
+            .gemini-ocr-decoupled-overlay.is-focused {
+                display: block; /* Bring it into the layout */
+                opacity: 1; /* Trigger the fade-in */
+                pointer-events: auto;
+                background-color: transparent;
+            }
             .gemini-ocr-text-box, .gemini-ocr-edit-action-bar { pointer-events: auto; }
             ::selection { background-color: rgba(var(--accent), 1); color: #FFFFFF; }
             .gemini-ocr-text-box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; user-select: text; cursor: pointer; transition: all 0.2s ease-in-out; overflow: hidden; font-family: 'Noto Sans JP', sans-serif; font-weight: 600; padding: 4px; border-radius: 4px; border: none; text-shadow: none; }
