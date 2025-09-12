@@ -1,8 +1,12 @@
 ## Please add \n to nothing in your yomitan replacement patterns under Translation for now
-Welcome! This guide provides the steps to get your Google Lens-powered OCR server running for a seamless reading experience.
+Welcome! This guide provides the steps to get your OCR server running for a seamless reading experience.
+
+This project relies on [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) which is a free, open source, and cross-platform manga reader server that runs extensions built for Mihon (Tachiyomi).
+
+With manga from Suwayomi, Mangatan will automatically make each pages' text scannable for Yomitan and other dictionary software.
 
 ## Choose Your Platform:
-*   [**💻 Combined Server(Recommended)**](#Combined-Server) | Combines the below 2 methods into one easy to use script. 
+*   [**💻 Combined Server(Recommended)**](#combined-server) | Combines the below 2 methods into one easy to use script. 
 *   [**💻 For PC/Desktop (Node.js)**](#for-pc-desktop) | The old method, still up-to-date and works just fine.
 *   [**🐍 For PC - Local OCR (Alternative Python Server)**](#for-pc-local-ocr) | Locally run ocr server instead of google lens.
 *   [**📱 For Android**](#for-android) | Host Mangatan and Suwayomi on your mobile device! 
@@ -12,7 +16,7 @@ Welcome! This guide provides the steps to get your Google Lens-powered OCR serve
 
  There are multiple ways to run the OCR itself, the recommneded way is using the simplified combined server below.
 
-## Combined Server
+## <a id="combined-server"></a>Combined Server
 
 1.  **Suwayomi-Server**
     *   First, download and set up the **[Suwayomi-Server](https://github.com/Suwayomi/Suwayomi-Server)**.
