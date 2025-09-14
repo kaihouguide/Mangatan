@@ -50,7 +50,7 @@
     const visibleImages = new Set();
     let animationFrameId = null;
 
-	const textSeparator = '\u200B'; // ZWS \u200B  SHY \u00AD
+	const textSeparator = '\u200AD'; // ZWS \u200B  SHY \u00AD
 
 	const cropModifierKey = 'Shift'; // better move this to settings
 
