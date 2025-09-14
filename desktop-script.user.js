@@ -50,6 +50,10 @@
     const visibleImages = new Set();
     let animationFrameId = null;
 
+	const textSeparator = '\u200B'; // ZWS \u200B  SHY \u00AD
+
+	const cropModifierKey = 'Shift'; // better move this to settings
+
     const COLOR_THEMES = {
         blue: { accent: '72,144,255', background: '229,243,255' }, red: { accent: '255,72,75', background: '255,229,230' },
         green: { accent: '34,119,49', background: '239,255,229' }, orange: { accent: '243,156,18', background: '255,245,229' },
@@ -204,7 +208,7 @@
         const ocrData = box._ocrData, text = ocrData.text || '';
         const availableWidth = box.offsetWidth + settings.boundingBoxAdjustment, availableHeight = box.offsetHeight + settings.boundingBoxAdjustment;
         if (!text || availableWidth <= 0 || availableHeight <= 0) return;
-        const isMerged = ocrData.isMerged || text.includes('\u200B');
+        const isMerged = ocrData.isMerged || text.includes(textSeparator);
         const findBestFitSize = (isVerticalSearch) => {
             measurementSpan.style.writingMode = isVerticalSearch ? 'vertical-rl' : 'horizontal-tb';
             measurementSpan.style.whiteSpace = isMerged ? 'normal' : 'nowrap';
@@ -267,7 +271,7 @@
 
         const targetData = targetBox._ocrData;
         const sourceData = sourceBox._ocrData;
-        const combinedText = (targetData.text || '') + (settings.addSpaceOnMerge ? ' ' : "\u200B") + (sourceData.text || '');
+        const combinedText = (targetData.text || '') + (settings.addSpaceOnMerge ? ' ' : textSeparator) + (sourceData.text || '');
 
         const tb = targetData.tightBoundingBox;
         const sb = sourceData.tightBoundingBox;
@@ -290,7 +294,10 @@
 
         const newBoxElement = document.createElement('div');
         newBoxElement.className = 'gemini-ocr-text-box';
-        newBoxElement.innerHTML = newOcrItem.text.replace(/\u200B/g, "<br>");
+
+		const sepRe1 = new RegExp(textSeparator, 'g');
+
+        newBoxElement.innerHTML = newOcrItem.text.replace(sepRe1, "<br>");
         newBoxElement.dataset.fullText = newOcrItem.text;
         newBoxElement._ocrData = newOcrItem;
         newBoxElement._ocrDataIndex = newData.length - 1;
@@ -316,7 +323,10 @@
             ocrBox.className = 'gemini-ocr-text-box';
             ocrBox.dataset.fullText = item.text;
             ocrBox._ocrData = item; ocrBox._ocrDataIndex = index;
-            ocrBox.innerHTML = item.text.replace(/\u200B/g, "<br>");
+
+			const sepRe2 = new RegExp(textSeparator, 'g');
+
+            ocrBox.innerHTML = item.text.replace(sepRe2, "<br>");
             if (item.isMerged) { ocrBox.style.whiteSpace = 'normal'; ocrBox.style.textAlign = 'start'; }
             Object.assign(ocrBox.style, { left: `${item.tightBoundingBox.x*100}%`, top: `${item.tightBoundingBox.y*100}%`, width: `${item.tightBoundingBox.width*100}%`, height: `${item.tightBoundingBox.height*100}%` });
             overlay.appendChild(ocrBox);
@@ -349,6 +359,9 @@
                 } else if (mergeState.anchorBox !== clickedBox) {
                     handleBoxMerge(mergeState.anchorBox, clickedBox, targetImg, overlay);
                 }
+            } else if (isModifierPressed(e, cropModifierKey)) {
+				logDebug('Pressed');
+                exportCropImageToAnki(activeImageForExport);
             } else if (settings.interactionMode === 'click') {
                 overlay.querySelectorAll('.manual-highlight').forEach(b => b.classList.remove('manual-highlight'));
                 clickedBox.classList.add('manual-highlight');
@@ -363,6 +376,209 @@
     // --- Anki & Batch Processing ---
     async function ankiConnectRequest(action, params = {}) { return new Promise((resolve, reject) => { GM_xmlhttpRequest({ method: 'POST', url: settings.ankiConnectUrl, data: JSON.stringify({ action, version: 6, params }), headers: { 'Content-Type': 'application/json; charset=UTF-8' }, timeout: 15000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) reject(new Error(data.error)); else resolve(data.result); } catch (e) { reject(new Error('Failed to parse Anki-Connect response.')); } }, onerror: () => reject(new Error('Connection to Anki-Connect failed.')), ontimeout: () => reject(new Error('Anki-Connect request timed out.')) }); }); }
     async function exportImageToAnki(targetImg) { if (!settings.ankiImageField) { alert('Anki Image Field is not set.'); return false; } if (!targetImg?.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: Image not valid.'); return false; } try { const canvas = document.createElement('canvas'); canvas.width = targetImg.naturalWidth; canvas.height = targetImg.naturalHeight; const ctx = canvas.getContext('2d'); ctx.drawImage(targetImg, 0, 0); const base64data = canvas.toDataURL('image/png').split(',')[1]; if (!base64data) throw new Error("Canvas toDataURL failed."); const filename = `screenshot_${Date.now()}.png`; await ankiConnectRequest('storeMediaFile', { filename, data: base64data }); const notes = await ankiConnectRequest('findNotes', { query: 'added:1' }); if (!notes?.length) throw new Error('No recently added cards found. Create one first.'); const lastNoteId = notes.sort((a, b) => b - a)[0]; await ankiConnectRequest('updateNoteFields', { note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } } }); return true; } catch (error) { logDebug(`Anki Export Error: ${error.message}`); alert(`Anki Export Failed: ${error.message}`); return false; } }
+
+	// Shift+click to crop image
+	async function exportCropImageToAnki(targetImg) {
+		if (!settings.ankiImageField) { alert('Anki Image Field is not set in settings.'); return false; }
+		if (!targetImg || !targetImg.complete || !targetImg.naturalHeight) { alert('Anki Export Failed: Image not valid or loaded.'); return false; }
+
+		try {
+			// === 1. Build popup dynamically ===
+			const overlay = document.createElement('div');
+			Object.assign(overlay.style, {
+				position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+				background: 'rgba(0,0,0,0.6)',
+				display: 'flex', justifyContent: 'center', alignItems: 'center',
+				zIndex: 9999
+			});
+
+			const wrapper = document.createElement('div');
+			wrapper.style.background = '#fff';
+			wrapper.style.padding = '10px';
+			wrapper.style.borderRadius = '8px';
+			wrapper.style.textAlign = 'center';
+
+			const canvas = document.createElement('canvas');
+			canvas.width = targetImg.naturalWidth;
+			canvas.height = targetImg.naturalHeight;
+			canvas.style.maxWidth = '80vw';
+			canvas.style.maxHeight = '80vh';
+			canvas.style.cursor = 'crosshair';
+			const ctx = canvas.getContext('2d');
+			ctx.drawImage(targetImg, 0, 0);
+
+			const cropBtn = document.createElement('button');
+			cropBtn.textContent = 'Crop & Continue';
+			cropBtn.style.margin = '5px';
+
+			const cancelBtn = document.createElement('button');
+			cancelBtn.textContent = 'Cancel';
+			cancelBtn.style.margin = '5px';
+
+			wrapper.appendChild(canvas);
+			wrapper.appendChild(document.createElement('br'));
+			wrapper.appendChild(cropBtn);
+			wrapper.appendChild(cancelBtn);
+			overlay.appendChild(wrapper);
+			document.body.appendChild(overlay);
+
+			// === 2. Cropping state ===
+			let selection = null; // {x,y,w,h}
+			let dragMode = null;  // "move", "resize", or null
+			let dragOffset = {x: 0, y: 0};
+			let activeHandle = null; // which corner/side we are resizing from
+
+			const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.blue;
+
+			function getScale() {
+				const rect = canvas.getBoundingClientRect();
+				return {
+					scaleX: canvas.width / rect.width,
+					scaleY: canvas.height / rect.height,
+					rect
+				};
+			}
+
+			function redraw() {
+				ctx.drawImage(targetImg, 0, 0);
+				if (selection) {
+					ctx.strokeStyle = `rgba(${theme.accent}, 1)`;
+					ctx.lineWidth = 2;
+					ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
+					ctx.fillStyle = `rgba(${theme.background}, 0.5)`;
+					ctx.fillRect(selection.x, selection.y, selection.w, selection.h);
+					drawHandles();
+				}
+			}
+
+			function drawHandles() {
+				const size = 20;
+				ctx.fillStyle = `rgba(${theme.accent}, 1)`;
+				const {x, y, w, h} = selection;
+				const points = [
+					[x, y], [x + w / 2, y], [x + w, y],
+					[x, y + h / 2], [x + w, y + h / 2],
+					[x, y + h], [x + w / 2, y + h], [x + w, y + h]
+				];
+				points.forEach(([px, py]) => ctx.fillRect(px - size/2, py - size/2, size, size));
+			}
+
+			function pointInSelection(px, py) {
+				return px >= selection.x && px <= selection.x + selection.w &&
+					   py >= selection.y && py <= selection.y + selection.h;
+			}
+
+			function getHandleUnderCursor(px, py) {
+				if (!selection) return null;
+				const handleSize = 30;
+				const {x, y, w, h} = selection;
+				const handles = [
+					{name: 'nw', cx: x, cy: y},
+					{name: 'n',  cx: x + w/2, cy: y},
+					{name: 'ne', cx: x + w, cy: y},
+					{name: 'w',  cx: x, cy: y + h/2},
+					{name: 'e',  cx: x + w, cy: y + h/2},
+					{name: 'sw', cx: x, cy: y + h},
+					{name: 's',  cx: x + w/2, cy: y + h},
+					{name: 'se', cx: x + w, cy: y + h}
+				];
+				return handles.find(h => Math.abs(px - h.cx) <= handleSize/2 && Math.abs(py - h.cy) <= handleSize/2);
+			}
+
+			// === 3. Mouse events ===
+			canvas.addEventListener('mousedown', e => {
+				const {scaleX, scaleY, rect} = getScale();
+				const px = (e.clientX - rect.left) * scaleX;
+				const py = (e.clientY - rect.top) * scaleY;
+
+				if (selection) {
+					const handle = getHandleUnderCursor(px, py);
+					if (handle) {
+						dragMode = 'resize';
+						activeHandle = handle.name;
+						return;
+					}
+					if (pointInSelection(px, py)) {
+						dragMode = 'move';
+						dragOffset.x = px - selection.x;
+						dragOffset.y = py - selection.y;
+						return;
+					}
+				}
+				// Start new selection
+				selection = {x: px, y: py, w: 0, h: 0};
+				dragMode = 'new';
+			});
+
+			canvas.addEventListener('mousemove', e => {
+				if (!dragMode) return;
+				const {scaleX, scaleY, rect} = getScale();
+				const px = (e.clientX - rect.left) * scaleX;
+				const py = (e.clientY - rect.top) * scaleY;
+
+				if (dragMode === 'new') {
+					selection.w = px - selection.x;
+					selection.h = py - selection.y;
+				} else if (dragMode === 'move') {
+					selection.x = px - dragOffset.x;
+					selection.y = py - dragOffset.y;
+				} else if (dragMode === 'resize') {
+					const {x, y, w, h} = selection;
+					let nx = x, ny = y, nw = w, nh = h;
+					if (activeHandle.includes('n')) { nh += (ny - py); ny = py; }
+					if (activeHandle.includes('s')) { nh = py - ny; }
+					if (activeHandle.includes('w')) { nw += (nx - px); nx = px; }
+					if (activeHandle.includes('e')) { nw = px - nx; }
+					selection.x = nx; selection.y = ny; selection.w = nw; selection.h = nh;
+				}
+				redraw();
+			});
+
+			canvas.addEventListener('mouseup', () => dragMode = null);
+			canvas.addEventListener('mouseout', () => dragMode = null);
+
+			redraw();
+
+			// === 4. Wait for crop or cancel ===
+			const croppedData = await new Promise((resolve, reject) => {
+				cropBtn.addEventListener('click', () => {
+					if (!selection) { alert('Please select an area first!'); return; }
+					let sx = selection.x, sy = selection.y, sw = selection.w, sh = selection.h;
+					if (sw < 0) { sx += sw; sw = Math.abs(sw); }
+					if (sh < 0) { sy += sh; sh = Math.abs(sh); }
+					if (sw < 1 || sh < 1) { alert('Selection too small!'); return; }
+
+					const croppedCanvas = document.createElement('canvas');
+					croppedCanvas.width = sw;
+					croppedCanvas.height = sh;
+					croppedCanvas.getContext('2d').drawImage(targetImg, sx, sy, sw, sh, 0, 0, sw, sh);
+
+					const data = croppedCanvas.toDataURL('image/png').split(',')[1];
+					document.body.removeChild(overlay);
+					resolve(data);
+				});
+
+				cancelBtn.addEventListener('click', () => {
+					document.body.removeChild(overlay);
+					reject(new Error('User cancelled cropping.'));
+				});
+			});
+
+			// === 5. Continue with original Anki export ===
+			const filename = `screenshot_${Date.now()}.png`;
+			await ankiConnectRequest('storeMediaFile', { filename, data: croppedData });
+			const notes = await ankiConnectRequest('findNotes', { query: 'added:1' });
+			if (!notes || notes.length === 0) throw new Error('No recently added cards found. Create a card first.');
+			const lastNoteId = notes.sort((a, b) => b - a)[0];
+			await ankiConnectRequest('updateNoteFields', {
+				note: { id: lastNoteId, fields: { [settings.ankiImageField]: `<img src="${filename}">` } }
+			});
+
+			return true;
+
+		} catch (error) { logDebug(`Anki Export Error: ${error.message}`); alert(`Anki Export Failed: ${error.message}`); return false; }
+	}
+
     async function runProbingProcess(baseUrl, btn) {
         logDebug(`Requesting SERVER-SIDE job for: ${baseUrl}`); const originalText = btn.textContent; btn.disabled = true; btn.textContent = 'Starting...';
         const postData = { baseUrl: baseUrl, user: settings.imageServerUser, pass: settings.imageServerPassword, context: document.title };
