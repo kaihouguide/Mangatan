@@ -221,7 +221,7 @@ def auto_merge_ocr_data(lines, config):
                 if is_vertical
                 else (line["bbox"]["y"], line["bbox"]["x"])
             )
-            join_char = " " if config["add_space_on_merge"] else "\u200AD"
+            join_char = " " if config["add_space_on_merge"] else "\u00AD"
             combined_text = join_char.join([line["text"] for line in group])
             min_x, min_y = (
                 min(line["bbox"]["x"] for line in group),
