@@ -24,7 +24,7 @@ from PIL import Image
 from waitress import serve
 
 # region Config
-IP_ADDRESS = "127.0.0.1"
+IP_ADDRESS = "0.0.0.0"
 PORT = 3000
 CACHE_FILE_PATH = os.path.join(os.getcwd(), "ocr-cache.json")
 UPLOAD_FOLDER = "uploads"
