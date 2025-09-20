@@ -1,0 +1,8 @@
+version: "3.9"
+services:
+  ocr-server:
+    image: ghcr.io/kaihouguide/mangatan:latest
+    ports:
+      - "3000:3000"
+    pull_policy: always
+    restart: unless-stopped
