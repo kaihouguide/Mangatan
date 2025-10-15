@@ -6,7 +6,7 @@ import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
 import { program } from 'commander';
-import * as Jimp from 'jimp'; // Use a namespace import to handle CommonJS module
+import Jimp from 'jimp'; // CORRECTED: Use a default import for Jimp
 
 const app = express();
 
@@ -311,7 +311,7 @@ app.get('/ocr', async (req, res) => {
         const imageBuffer = Buffer.from(await response.arrayBuffer());
 
         // ** THE FIX IS HERE **
-        const image = await Jimp.default.read(imageBuffer);
+        const image = await Jimp.read(imageBuffer); // CORRECTED: Call Jimp.read directly
         const fullWidth = image.bitmap.width;
         const fullHeight = image.bitmap.height;
         const MAX_CHUNK_HEIGHT = 3000;
