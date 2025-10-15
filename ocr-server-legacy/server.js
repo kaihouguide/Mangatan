@@ -1,4 +1,4 @@
-// server.js - V5.0 with Advanced Auto-Merging, Robust Sorting, and True Chunk Processing
+// server.js - V5.1 with Jimp for Dependency-Free Chunking
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
@@ -6,8 +6,7 @@ import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
 import { program } from 'commander';
-import { createCanvas, loadImage } from 'canvas'; // For image chunking
-import sizeOf from 'image-size'; // For getting image dimensions
+import Jimp from 'jimp'; // Using Jimp for image processing
 
 const app = express();
 
@@ -30,7 +29,7 @@ let ocrCache = new Map();
 let ocrRequestsProcessed = 0;
 let activeJobCount = 0;
 
-// --- Auto-Merge Configuration (Ported from Python Server) ---
+// --- Auto-Merge Configuration ---
 const AUTO_MERGE_CONFIG = {
     enabled: true,
     dist_k: 1.2,
@@ -43,7 +42,7 @@ const AUTO_MERGE_CONFIG = {
     add_space_on_merge: false,
 };
 
-// --- Advanced Auto-Merge Logic (Direct Port from Python) ---
+// --- Advanced Auto-Merge Logic ---
 
 class UnionFind {
     constructor(size) {
@@ -76,7 +75,6 @@ function median(data) {
 
 function groupOcrData(lines, naturalWidth, naturalHeight, config) {
     if (!lines || lines.length < 2 || !naturalWidth || !naturalHeight) return lines.map(line => [line]);
-
     const CHUNK_MAX_HEIGHT = 3000;
     const processedLines = lines.map((line, index) => {
         const bbox = line.tightBoundingBox;
@@ -95,16 +93,12 @@ function groupOcrData(lines, naturalWidth, naturalHeight, config) {
         const fontSize = isVertical ? normalizedBbox.width : normalizedBbox.height;
         return { originalIndex: index, isVertical, fontSize, bbox: normalizedBbox, pixelTop, pixelBottom };
     });
-
     processedLines.sort((a, b) => a.pixelTop - b.pixelTop);
-
     const allGroups = [];
     let currentLineIndex = 0;
-
     while (currentLineIndex < processedLines.length) {
         let chunkStartIndex = currentLineIndex;
         let chunkEndIndex = processedLines.length - 1;
-
         if (naturalHeight > CHUNK_MAX_HEIGHT) {
             const chunkTopY = processedLines[chunkStartIndex].pixelTop;
             for (let i = chunkStartIndex + 1; i < processedLines.length; i++) {
@@ -115,7 +109,6 @@ function groupOcrData(lines, naturalWidth, naturalHeight, config) {
                 }
             }
         }
-
         const chunkLines = processedLines.slice(chunkStartIndex, chunkEndIndex + 1);
         const uf = new UnionFind(chunkLines.length);
         const horizontalLines = chunkLines.filter(l => !l.isVertical);
@@ -126,7 +119,6 @@ function groupOcrData(lines, naturalWidth, naturalHeight, config) {
         const primaryV = verticalLines.filter(l => l.bbox.width >= initialMedianW * config.min_line_ratio);
         const robustMedianH = median(primaryH.map(l => l.bbox.height)) || initialMedianH || 20;
         const robustMedianW = median(primaryV.map(l => l.bbox.width)) || initialMedianW || 20;
-
         for (let i = 0; i < chunkLines.length; i++) {
             for (let j = i + 1; j < chunkLines.length; j++) {
                 const lineA = chunkLines[i], lineB = chunkLines[j];
@@ -158,7 +150,6 @@ function groupOcrData(lines, naturalWidth, naturalHeight, config) {
             if (!tempGroups[root]) tempGroups[root] = [];
             tempGroups[root].push(line);
         });
-
         Object.values(tempGroups).forEach(group => {
             allGroups.push(group.map(processedLine => lines[processedLine.originalIndex]));
         });
@@ -169,32 +160,22 @@ function groupOcrData(lines, naturalWidth, naturalHeight, config) {
 
 function autoMergeOcrData(lines, naturalWidth, naturalHeight, config) {
     if (!config.enabled || !lines || lines.length < 2) return lines;
-    
     const groups = groupOcrData(lines, naturalWidth, naturalHeight, config);
     const finalMergedData = [];
-
     for (const group of groups) {
         if (group.length === 1) {
             finalMergedData.push(group[0]);
             continue;
         }
-
         const verticalCount = group.filter(l => l.tightBoundingBox.height > l.tightBoundingBox.width).length;
         const isVerticalGroup = verticalCount > (group.length / 2);
-
         group.sort((a, b) => {
-            const boxA = a.tightBoundingBox;
-            const boxB = b.tightBoundingBox;
-            const centerAx = boxA.x + boxA.width / 2;
-            const centerAy = boxA.y + boxA.height / 2;
-            const centerBx = boxB.x + boxB.width / 2;
-            const centerBy = boxB.y + boxB.height / 2;
-            if (isVerticalGroup) {
-                return (centerBx - centerAx) || (centerAy - centerBy);
-            }
+            const boxA = a.tightBoundingBox, boxB = b.tightBoundingBox;
+            const centerAx = boxA.x + boxA.width / 2, centerAy = boxA.y + boxA.height / 2;
+            const centerBx = boxB.x + boxB.width / 2, centerBy = boxB.y + boxB.height / 2;
+            if (isVerticalGroup) return (centerBx - centerAx) || (centerAy - centerBy);
             return (centerAy - centerBy) || (centerAx - centerBx);
         });
-
         const joinChar = config.add_space_on_merge ? ' ' : '\u200B';
         const combinedText = group.map(l => l.text).join(joinChar);
         const bbox = group.reduce((acc, line) => ({
@@ -203,13 +184,11 @@ function autoMergeOcrData(lines, naturalWidth, naturalHeight, config) {
             maxX: Math.max(acc.maxX, line.tightBoundingBox.x + line.tightBoundingBox.width),
             maxY: Math.max(acc.maxY, line.tightBoundingBox.y + line.tightBoundingBox.height)
         }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
-
         finalMergedData.push({
             text: combinedText, isMerged: true, forcedOrientation: isVerticalGroup ? 'vertical' : 'horizontal',
             tightBoundingBox: { x: bbox.minX, y: bbox.minY, width: bbox.maxX - bbox.minX, height: bbox.maxY - bbox.minY }
         });
     }
-
     if (finalMergedData.length < lines.length) console.log(`[AutoMerge] Finished. Initial: ${lines.length}, Final: ${finalMergedData.length}`);
     return finalMergedData;
 }
@@ -331,32 +310,30 @@ app.get('/ocr', async (req, res) => {
         if (!response.ok) throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
 
-        const { width: fullWidth, height: fullHeight } = sizeOf(imageBuffer);
+        const image = await Jimp.read(imageBuffer);
+        const fullWidth = image.bitmap.width;
+        const fullHeight = image.bitmap.height;
         const MAX_CHUNK_HEIGHT = 3000;
         let allFinalResults = [];
 
         if (fullHeight > MAX_CHUNK_HEIGHT) {
-            console.log(`[OCR] [${context}] Image is tall (${fullHeight}px). Processing in chunks.`);
-            const sourceImage = await loadImage(imageBuffer);
+            console.log(`[OCR] [${context}] Image is tall (${fullHeight}px). Processing in chunks with jimp.`);
             let yOffset = 0;
             while (yOffset < fullHeight) {
                 const chunkHeight = Math.min(MAX_CHUNK_HEIGHT, fullHeight - yOffset);
-                const canvas = createCanvas(fullWidth, chunkHeight);
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(sourceImage, 0, yOffset, fullWidth, chunkHeight, 0, 0, fullWidth, chunkHeight);
-                const dataUrl = canvas.toDataURL();
-
                 console.log(`[OCR] [${context}] Processing chunk at y=${yOffset} (size: ${fullWidth}x${chunkHeight})`);
+                
+                const chunkImage = image.clone().crop(0, yOffset, fullWidth, chunkHeight);
+                const dataUrl = await chunkImage.getBase64Async(Jimp.MIME_PNG);
+
                 const rawResult = await lens.scanByURL(dataUrl);
                 const rawChunkResults = transformOcrData(rawResult);
                 const mergedChunkResults = autoMergeOcrData(rawChunkResults, fullWidth, chunkHeight, AUTO_MERGE_CONFIG);
 
                 for (const result of mergedChunkResults) {
                     const bbox = result.tightBoundingBox;
-                    const yGlobal = (bbox.y * chunkHeight + yOffset) / fullHeight;
-                    const hGlobal = (bbox.height * chunkHeight) / fullHeight;
-                    result.tightBoundingBox.y = yGlobal;
-                    result.tightBoundingBox.height = hGlobal;
+                    result.tightBoundingBox.y = (bbox.y * chunkHeight + yOffset) / fullHeight;
+                    result.tightBoundingBox.height = (bbox.height * chunkHeight) / fullHeight;
                     allFinalResults.push(result);
                 }
                 yOffset += MAX_CHUNK_HEIGHT;
@@ -433,8 +410,8 @@ app.listen(port, host, (err) => {
         console.error('Error starting server:', err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V5.0 listening at http://${host}:${port}`);
+        console.log(`Local OCR Server V5.1 (Jimp) listening at http://${host}:${port}`);
         console.log(`Cache file path: ${CACHE_FILE_PATH}`);
-        console.log('Features: Advanced Merging, Robust Sorting, True Chunking, Context Logging, Caching, Import/Export, Auth, Pre-processing');
+        console.log('Features: Advanced Merging, Robust Sorting, Dependency-Free Chunking, Caching, Auth, Pre-processing');
     }
 });
