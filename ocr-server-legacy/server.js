@@ -1,4 +1,4 @@
-// server.js - V5.1 Synced with Python Server Enhancements & Robust Chunking
+// server.js - V5.2 With Sharp Instance Cloning Fix for Chunking
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
@@ -213,11 +213,9 @@ function autoMergeOcrData(lines, naturalWidth, naturalHeight, config) {
             continue;
         }
 
-        // --- ROBUST ORIENTATION DETECTION (THE FIX) ---
         const verticalCount = group.filter(l => l.tightBoundingBox.height > l.tightBoundingBox.width).length;
         const isVerticalGroup = verticalCount > group.length / 2;
 
-        // --- STABLE SORTING LOGIC ---
         group.sort((a, b) => {
             const boxA = a.tightBoundingBox;
             const boxB = b.tightBoundingBox;
@@ -394,25 +392,19 @@ app.get('/ocr', async (req, res) => {
         if (fullHeight > MAX_CHUNK_HEIGHT) {
             console.log(`[OCR] [${context}] Image is tall (${fullHeight}px). Processing in chunks.`);
             for (let yOffset = 0; yOffset < fullHeight; yOffset += MAX_CHUNK_HEIGHT) {
-                // --- START: ROBUST CHUNK CALCULATION (THE FIX) ---
                 const currentTop = Math.round(yOffset);
-
-                // Safety break if the offset is already past the image height
                 if (currentTop >= fullHeight) continue;
 
                 let chunkHeight = Math.min(MAX_CHUNK_HEIGHT, fullHeight - currentTop);
-
-                // Critical check to prevent "bad extract area" error by ensuring the chunk does not exceed image boundaries
                 if (currentTop + chunkHeight > fullHeight) {
-                    console.warn(`[OCR] [${context}] Correcting final chunk height to fit within image boundaries.`);
                     chunkHeight = fullHeight - currentTop;
                 }
-                
-                // Ensure chunkHeight is a positive integer before attempting to extract
                 if (chunkHeight <= 0) continue;
-                // --- END: ROBUST CHUNK CALCULATION (THE FIX) ---
 
-                const chunkBuffer = await image.extract({ left: 0, top: currentTop, width: fullWidth, height: chunkHeight }).toBuffer();
+                // --- THE FIX: Clone the sharp instance before each extraction ---
+                // This prevents the "instance consumed" error on subsequent loop iterations.
+                const chunkBuffer = await image.clone().extract({ left: 0, top: currentTop, width: fullWidth, height: chunkHeight }).toBuffer();
+                
                 const mimeType = metadata.format === 'jpeg' ? 'image/jpeg' : 'image/png';
                 const dataUrl = `data:${mimeType};base64,${chunkBuffer.toString('base64')}`;
 
@@ -427,8 +419,8 @@ app.get('/ocr', async (req, res) => {
                 mergedChunkResults.forEach(result => {
                     const bbox = result.tightBoundingBox;
                     const yGlobalPx = (bbox.y * chunkHeight) + currentTop;
-                    bbox.y = yGlobalPx / fullHeight; // Normalize y-coordinate based on the full image height
-                    bbox.height = (bbox.height * chunkHeight) / fullHeight; // Normalize height based on the full image height
+                    bbox.y = yGlobalPx / fullHeight;
+                    bbox.height = (bbox.height * chunkHeight) / fullHeight;
                     allFinalResults.push(result);
                 });
             }
@@ -509,8 +501,8 @@ app.listen(port, host, (err) => {
         console.error('Error starting server:', err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V5.1 listening at http://${host}:${port}`);
+        console.log(`Local OCR Server V5.2 listening at http://${host}:${port}`);
         console.log(`Cache file path: ${CACHE_FILE_PATH}`);
-        console.log('Features: Upgraded Auto-Merging, Tall Image Chunking (w/ Robustness Fix), Context Logging, Persistent Caching, Import/Export, Auth, Chapter Pre-processing');
+        console.log('Features: Upgraded Auto-Merging, Tall Image Chunking (w/ Cloning Fix), Context Logging, Persistent Caching, Import/Export, Auth, Chapter Pre-processing');
     }
 });
