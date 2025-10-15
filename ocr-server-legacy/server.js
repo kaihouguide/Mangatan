@@ -1,4 +1,4 @@
-// server.js - V5.2 with Jimp and CommonJS Interop Fix
+// server.js - V5.3 with Correct Jimp ES Module Import
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
@@ -6,12 +6,7 @@ import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
 import { program } from 'commander';
-
-// --- FIX for CommonJS Module Import ---
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const Jimp = require('jimp');
-// ------------------------------------
+import * as Jimp from 'jimp'; // Use a namespace import to handle CommonJS module
 
 const app = express();
 
@@ -315,7 +310,8 @@ app.get('/ocr', async (req, res) => {
         if (!response.ok) throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
 
-        const image = await Jimp.read(imageBuffer);
+        // ** THE FIX IS HERE **
+        const image = await Jimp.default.read(imageBuffer);
         const fullWidth = image.bitmap.width;
         const fullHeight = image.bitmap.height;
         const MAX_CHUNK_HEIGHT = 3000;
@@ -415,7 +411,7 @@ app.listen(port, host, (err) => {
         console.error('Error starting server:', err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V5.2 (Jimp) listening at http://${host}:${port}`);
+        console.log(`Local OCR Server V5.3 (Jimp) listening at http://${host}:${port}`);
         console.log(`Cache file path: ${CACHE_FILE_PATH}`);
         console.log('Features: Advanced Merging, Robust Sorting, Dependency-Free Chunking, Caching, Auth, Pre-processing');
     }
