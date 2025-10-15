@@ -1,4 +1,4 @@
-// server.js - V5.1 with Jimp for Dependency-Free Chunking
+// server.js - V5.2 with Jimp and CommonJS Interop Fix
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
@@ -6,7 +6,12 @@ import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
 import { program } from 'commander';
-import Jimp from 'jimp'; // Using Jimp for image processing
+
+// --- FIX for CommonJS Module Import ---
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const Jimp = require('jimp');
+// ------------------------------------
 
 const app = express();
 
@@ -410,7 +415,7 @@ app.listen(port, host, (err) => {
         console.error('Error starting server:', err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V5.1 (Jimp) listening at http://${host}:${port}`);
+        console.log(`Local OCR Server V5.2 (Jimp) listening at http://${host}:${port}`);
         console.log(`Cache file path: ${CACHE_FILE_PATH}`);
         console.log('Features: Advanced Merging, Robust Sorting, Dependency-Free Chunking, Caching, Auth, Pre-processing');
     }
