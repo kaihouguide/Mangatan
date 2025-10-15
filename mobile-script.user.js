@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Automatic Content OCR (Mobile Hybrid Engine) - Synced
 // @namespace    http://tampermonkey.net/
-// @version      24.5.26-M-FocusColorFix
-// @description  A mobile-optimized OCR overlay. Fixes visual bugs caused by the focus color option. Restores default text box backgrounds for readability and correctly applies color overrides.
+// @version      24.5.26-M-OCRErrorResilience-Synced
+// @description  A mobile-optimized OCR overlay. Includes superior font-size calculation and resilience against OCR errors causing text overflow. Fixes visual bugs caused by the focus color option.
 // @author       1Selxo (PC Base by 1Selxo, Mobile Port & Sync by Gemini)
 // @match        *://127.0.0.1*/*
 // @grant        GM_setValue
@@ -36,10 +36,10 @@
         debugMode: true, textOrientation: 'smart', activationMode: 'longPress', dimmedOpacity: 0.3,
         fontMultiplierHorizontal: 1.0, fontMultiplierVertical: 1.0, boundingBoxAdjustment: 5, focusScaleMultiplier: 1.1,
         soloHoverMode: false, addSpaceOnMerge: false, colorTheme: 'blue', brightnessMode: 'light',
-        focusFontColor: 'default' // Can be 'default', 'black', 'white', or 'difference'
+        focusFontColor: 'default'
     };
     let debugLog = [];
-    const SETTINGS_KEY = 'gemini_ocr_settings_v24_m_server_synced';
+    const SETTINGS_KEY = 'gemini_ocr_settings_v24_m_ocr_error_resilience'; // Updated Key
     const ocrDataCache = new WeakMap();
     const managedElements = new Map(), managedContainers = new Map(), attachedAttributeObservers = new Map();
     let activeSiteConfig = null, measurementSpan = null, activeImageForExport = null, activeOverlay = null;
@@ -99,8 +99,95 @@
     function primeImageForOcr(img) { if (managedElements.has(img) || ocrDataCache.get(img) === 'pending') return; const doProcess = () => { img.crossOrigin = "anonymous"; processImage(img, img.src); }; if (img.complete && img.naturalHeight > 0) doProcess(); else img.addEventListener('load', doProcess, { once: true }); }
     function processImage(img, sourceUrl) { if (ocrDataCache.has(img)) { displayOcrResults(img); return; } logDebug(`Requesting OCR for ...${sourceUrl.slice(-30)}`); ocrDataCache.set(img, 'pending'); const context = document.title; let ocrRequestUrl = `${settings.ocrServerUrl}/ocr?url=${encodeURIComponent(sourceUrl)}&context=${encodeURIComponent(context)}`; if (settings.imageServerUser) ocrRequestUrl += `&user=${encodeURIComponent(settings.imageServerUser)}&pass=${encodeURIComponent(settings.imageServerPassword)}`; GM_xmlhttpRequest({ method: 'GET', url: ocrRequestUrl, timeout: 45000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.error) throw new Error(data.error); if (!Array.isArray(data)) throw new Error('Server response not a valid OCR data array.'); ocrDataCache.set(img, data); displayOcrResults(img); } catch (e) { logDebug(`OCR Error for ${sourceUrl.slice(-30)}: ${e.message}`); ocrDataCache.delete(img); } }, onerror: () => { logDebug(`Connection error.`); ocrDataCache.delete(img); }, ontimeout: () => { logDebug(`Request timed out.`); ocrDataCache.delete(img); } }); }
 
-    // --- Rendering & Merging Logic ---
-    function calculateAndApplyStylesForSingleBox(box, imgRect) { if (!measurementSpan || !box || !imgRect || imgRect.width === 0 || imgRect.height === 0) return; const ocrData = box._ocrData, text = ocrData.text || ''; const availableWidth = box.offsetWidth + settings.boundingBoxAdjustment, availableHeight = box.offsetHeight + settings.boundingBoxAdjustment; if (!text || availableWidth <= 0 || availableHeight <= 0) return; const isMerged = ocrData.isMerged || text.includes('\u200B'); const findBestFitSize = (isVerticalSearch) => { measurementSpan.style.writingMode = isVerticalSearch ? 'vertical-rl' : 'horizontal-tb'; measurementSpan.style.whiteSpace = isMerged ? 'normal' : 'nowrap'; measurementSpan.innerHTML = isMerged ? box.innerHTML : ''; if (!isMerged) measurementSpan.textContent = text; let low = 1, high = 200, bestSize = 1; while (low <= high) { const mid = Math.floor((low + high) / 2); if (mid <= 0) break; measurementSpan.style.fontSize = `${mid}px`; const fits = isMerged ? (measurementSpan.offsetWidth <= availableWidth && measurementSpan.offsetHeight <= availableHeight) : (isVerticalSearch ? measurementSpan.offsetHeight <= availableHeight : measurementSpan.offsetWidth <= availableWidth); if (fits) { bestSize = mid; low = mid + 1; } else { high = mid - 1; } } return bestSize; }; const horizontalFitSize = findBestFitSize(false), verticalFitSize = findBestFitSize(true); let finalFontSize = 0, isVertical = false; if (ocrData.forcedOrientation === 'vertical') { isVertical = true; finalFontSize = verticalFitSize; } else if (ocrData.forcedOrientation === 'horizontal') { isVertical = false; finalFontSize = horizontalFitSize; } else if (settings.textOrientation === 'forceVertical') { isVertical = true; finalFontSize = verticalFitSize; } else if (settings.textOrientation === 'forceHorizontal') { isVertical = false; finalFontSize = horizontalFitSize; } else { isVertical = verticalFitSize > horizontalFitSize; finalFontSize = isVertical ? verticalFitSize : horizontalFitSize; } const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal; box.style.fontSize = `${finalFontSize * multiplier}px`; box.classList.toggle('gemini-ocr-text-vertical', isVertical); }
+    // --- [PORTED FROM PC] Rendering & Merging Logic ---
+    function calculateAndApplyStylesForSingleBox(box, imgRect) {
+        if (!measurementSpan || !box || !imgRect || imgRect.width === 0 || imgRect.height === 0) return;
+        const ocrData = box._ocrData, text = ocrData.text || '';
+        const availableWidth = box.offsetWidth + settings.boundingBoxAdjustment;
+        const availableHeight = box.offsetHeight + settings.boundingBoxAdjustment;
+
+        if (!text || availableWidth <= 0 || availableHeight <= 0) return;
+
+        const isMerged = ocrData.isMerged || text.includes('\u200B');
+
+        const findBestFitSize = (isVerticalSearch) => {
+            measurementSpan.style.writingMode = isVerticalSearch ? 'vertical-rl' : 'horizontal-tb';
+            measurementSpan.style.whiteSpace = isMerged ? 'normal' : 'nowrap';
+            measurementSpan.textContent = text;
+            if (isMerged && !isVerticalSearch) {
+                 measurementSpan.innerHTML = text.replace(/\u200B/g, "<br>");
+            } else if (isMerged && isVerticalSearch) {
+                 measurementSpan.innerHTML = text.replace(/\u200B/g, "<br>");
+            } else {
+                 measurementSpan.textContent = text;
+                 measurementSpan.innerHTML = '';
+                 measurementSpan.appendChild(document.createTextNode(text));
+            }
+
+            let low = 1, high = 200, bestSize = 1;
+            while (low <= high) {
+                const mid = Math.floor((low + high) / 2);
+                if (mid <= 0) break;
+                measurementSpan.style.fontSize = `${mid}px`;
+
+                const fitsWidth = measurementSpan.offsetWidth <= availableWidth;
+                const fitsHeight = measurementSpan.offsetHeight <= availableHeight;
+                const fits = fitsWidth && fitsHeight;
+
+                if (fits) {
+                    bestSize = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+            return bestSize;
+        };
+
+        const horizontalFitSize = findBestFitSize(false);
+        const verticalFitSize = findBestFitSize(true);
+
+        let finalFontSize = 0, isVertical = false;
+        if (ocrData.forcedOrientation === 'vertical') {
+            isVertical = true;
+            finalFontSize = verticalFitSize;
+        } else if (ocrData.forcedOrientation === 'horizontal') {
+            isVertical = false;
+            finalFontSize = horizontalFitSize;
+        } else if (settings.textOrientation === 'forceVertical') {
+            isVertical = true;
+            finalFontSize = verticalFitSize;
+        } else if (settings.textOrientation === 'forceHorizontal') {
+            isVertical = false;
+            finalFontSize = horizontalFitSize;
+        } else {
+            isVertical = verticalFitSize > horizontalFitSize;
+            finalFontSize = isVertical ? verticalFitSize : horizontalFitSize;
+        }
+
+        // --- OCR ERROR RESILIENCE CHECK ---
+        const minReadableFontSize = 8;
+        let effectiveFinalFontSize = finalFontSize;
+
+        if (effectiveFinalFontSize < minReadableFontSize) {
+            logDebug(`Potentially problematic OCR text detected for box: "${text.substring(0, 20)}..." (Calculated size: ${finalFontSize}, enforced min: ${minReadableFontSize})`);
+            effectiveFinalFontSize = minReadableFontSize;
+        }
+        // --- END OCR ERROR RESILIENCE CHECK ---
+
+        const multiplier = isVertical ? settings.fontMultiplierVertical : settings.fontMultiplierHorizontal;
+        box.style.fontSize = `${effectiveFinalFontSize * multiplier}px`;
+
+        box.classList.toggle('gemini-ocr-text-vertical', isVertical);
+
+        if (isMerged) {
+            box.style.whiteSpace = 'normal';
+            box.style.textAlign = 'start';
+        } else {
+             box.style.whiteSpace = 'nowrap';
+        }
+    }
+
     function calculateAndApplyOptimalStyles_Optimized(overlay, imgRect) { if (!measurementSpan || imgRect.width === 0 || imgRect.height === 0) return; const boxes = Array.from(overlay.querySelectorAll('.gemini-ocr-text-box')); if (boxes.length === 0) return; const baseStyle = getComputedStyle(boxes[0]); Object.assign(measurementSpan.style, { fontFamily: baseStyle.fontFamily, fontWeight: baseStyle.fontWeight, letterSpacing: baseStyle.letterSpacing }); for (const box of boxes) calculateAndApplyStylesForSingleBox(box, imgRect); measurementSpan.style.writingMode = 'horizontal-tb'; }
     function triggerOverlayToggle(targetImg) { const overlayState = managedElements.get(targetImg); if (overlayState?.overlay) { if (overlayState.overlay === activeOverlay) hideActiveOverlay(); else showOverlay(overlayState.overlay, targetImg); } }
     function showOverlay(overlay, image) {
@@ -136,7 +223,7 @@
     function handleMergeSelection(boxElement, overlay) { let currentSelection = activeMergeSelections.get(overlay); if (!currentSelection) { currentSelection = []; activeMergeSelections.set(overlay, currentSelection); } const indexInSelection = currentSelection.indexOf(boxElement); if (indexInSelection > -1) { currentSelection.splice(indexInSelection, 1); boxElement.classList.remove('selected-for-merge'); } else { currentSelection.push(boxElement); boxElement.classList.add('selected-for-merge'); } updateEditActionBar(overlay); }
     function finalizeMultipleMerge(selectedBoxes, sourceImage, overlay) { if (!selectedBoxes || selectedBoxes.length < 2) return; logDebug(`Finalizing merge for ${selectedBoxes.length} boxes in selection order.`); const indicesToDelete = new Set(); let newBoundingBox = null; let areAllVertical = true; const combinedTextParts = selectedBoxes.map(box => { indicesToDelete.add(box._ocrDataIndex); const b = box._ocrData.tightBoundingBox; if (newBoundingBox === null) { newBoundingBox = { x: b.x, y: b.y, width: b.width, height: b.height }; } else { const newRight = Math.max(newBoundingBox.x + newBoundingBox.width, b.x + b.width); const newBottom = Math.max(newBoundingBox.y + newBoundingBox.height, b.y + b.height); newBoundingBox.x = Math.min(newBoundingBox.x, b.x); newBoundingBox.y = Math.min(newBoundingBox.y, b.y); newBoundingBox.width = newRight - newBoundingBox.x; newBoundingBox.height = newBottom - newBoundingBox.y; } if (!box.classList.contains('gemini-ocr-text-vertical')) areAllVertical = false; return box.dataset.fullText || box.textContent; }); const combinedText = combinedTextParts.join(settings.addSpaceOnMerge ? ' ' : "\u200B"); const newOcrItem = { text: combinedText, tightBoundingBox: newBoundingBox, forcedOrientation: areAllVertical ? 'vertical' : 'auto', isMerged: true }; const originalData = ocrDataCache.get(sourceImage); const newData = originalData.filter((item, index) => !indicesToDelete.has(index)); newData.push(newOcrItem); ocrDataCache.set(sourceImage, newData); selectedBoxes.forEach(box => box.remove()); const newBoxElement = document.createElement('div'); newBoxElement.className = 'gemini-ocr-text-box'; newBoxElement.innerHTML = newOcrItem.text.replace(/\u200B/g, "<br>"); newBoxElement.dataset.fullText = newOcrItem.text; newBoxElement._ocrData = newOcrItem; newBoxElement._ocrDataIndex = newData.length - 1; newBoxElement.style.whiteSpace = 'normal'; newBoxElement.style.textAlign = 'start'; Object.assign(newBoxElement.style, { left: `${newOcrItem.tightBoundingBox.x*100}%`, top: `${newOcrItem.tightBoundingBox.y*100}%`, width: `${newOcrItem.tightBoundingBox.width*100}%`, height: `${newOcrItem.tightBoundingBox.height*100}%` }); overlay.appendChild(newBoxElement); calculateAndApplyStylesForSingleBox(newBoxElement, sourceImage.getBoundingClientRect()); activeMergeSelections.set(overlay, []); updateEditActionBar(overlay); }
 
-    // --- [CORRECTED] --- This function now handles the new focus color classes properly.
+    // --- [MOBILE] Overlay Interaction ---
     function handleOverlayInteraction(event) {
         const overlay = event.currentTarget;
         const clickedBox = event.target.closest('.gemini-ocr-text-box');
@@ -150,13 +237,11 @@
         } else {
             overlay.classList.add('has-manual-highlight');
             if (!clickedBox.classList.contains('manual-highlight')) {
-                // Clear previous highlight and ALL its modifier classes
                 overlay.querySelectorAll('.manual-highlight').forEach(b => {
                     b.classList.remove('manual-highlight', 'ocr-focus-color-black', 'ocr-focus-color-white', 'ocr-focus-color-difference');
-                    b.style.mixBlendMode = ''; // Explicitly reset blend mode
+                    b.style.mixBlendMode = '';
                 });
                 clickedBox.classList.add('manual-highlight');
-                // Apply the correct focus color class based on settings
                 if (settings.focusFontColor !== 'default') {
                     clickedBox.classList.add(`ocr-focus-color-${settings.focusFontColor}`);
                 }
@@ -214,7 +299,7 @@
     // --- UI, Styles and Initialization ---
     function applyTheme() { const theme = COLOR_THEMES[settings.colorTheme] || COLOR_THEMES.blue; const cssVars = `:root { --accent: ${theme.accent}; --background: ${theme.background}; --modal-header-color: rgba(${theme.accent}, 1); --ocr-dimmed-opacity: ${settings.dimmedOpacity}; --ocr-focus-scale: ${settings.focusScaleMultiplier}; }`; let styleTag = document.getElementById('gemini-ocr-dynamic-styles'); if (!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'gemini-ocr-dynamic-styles'; document.head.appendChild(styleTag); } styleTag.textContent = cssVars; document.body.className = document.body.className.replace(/\bocr-theme-\S+/g, ''); document.body.classList.add(`ocr-theme-${settings.colorTheme}`); document.body.classList.toggle('ocr-brightness-dark', settings.brightnessMode === 'dark'); document.body.classList.toggle('ocr-brightness-light', settings.brightnessMode === 'light'); }
     
-    // --- [CORRECTED] --- This entire style block is replaced with the fixed version.
+    // --- [MOBILE] Styles ---
     function createUI() {
         GM_addStyle(`
             .gemini-ocr-decoupled-overlay { position: fixed; z-index: 9998; display: none; opacity: 0; transition: opacity 0.2s ease-in-out; -webkit-tap-highlight-color: transparent; }
@@ -223,22 +308,15 @@
             .gemini-ocr-text-box, .gemini-ocr-edit-action-bar { pointer-events: auto; }
             ::selection { background-color: rgba(var(--accent), 1); color: #FFFFFF; }
             .gemini-ocr-text-box { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; user-select: text; cursor: pointer; transition: all 0.2s ease-in-out; overflow: hidden; font-family: 'Noto Sans JP', sans-serif; font-weight: 600; padding: 4px; border-radius: 4px; border: none; text-shadow: none; }
-
-            /* --- RESTORED LOGIC: Default backgrounds for readability --- */
             body.ocr-brightness-light .gemini-ocr-text-box { background: rgba(var(--background), 1); color: rgba(var(--accent), 0.5); box-shadow: 0 0 0 0.1em rgba(var(--background), 1); }
             body.ocr-brightness-dark .gemini-ocr-text-box { background: rgba(29, 34, 39, 0.9); color: rgba(var(--background), 0.7); box-shadow: 0 0 0 0.1em rgba(var(--accent), 0.4); backdrop-filter: blur(2px); }
-
-            /* --- RESTORED LOGIC: Default highlight/focus styles --- */
             body.ocr-brightness-light .is-focused .gemini-ocr-text-box.manual-highlight,
             body.ocr-brightness-light .is-focused .gemini-ocr-text-box.selected-for-merge { background: rgba(var(--background), 1); color: rgba(var(--accent), 1); box-shadow: 0 0 0 0.1em rgba(var(--background), 1), 0 0 0 0.2em rgba(var(--accent), 1); }
             body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.manual-highlight,
             body.ocr-brightness-dark .is-focused .gemini-ocr-text-box.selected-for-merge { background: rgba(var(--accent), 1); color: #FFFFFF; box-shadow: 0 0 0 0.1em rgba(var(--accent), 0.4), 0 0 0 0.2em rgba(var(--background), 1); }
-
-            /* --- NEW & REFINED LOGIC: Non-destructive focus color overrides --- */
             .is-focused .gemini-ocr-text-box.manual-highlight.ocr-focus-color-black { color: #000 !important; text-shadow: 0 0 2px #FFF, 0 0 4px #FFF, 0 0 6px #FFF; }
             .is-focused .gemini-ocr-text-box.manual-highlight.ocr-focus-color-white { color: #FFF !important; text-shadow: 0 0 2px #000, 0 0 4px #000, 0 0 6px #000; }
             .is-focused .gemini-ocr-text-box.manual-highlight.ocr-focus-color-difference { color: white !important; background: transparent !important; box-shadow: none !important; mix-blend-mode: difference; text-shadow: none; }
-
             .gemini-ocr-text-vertical { writing-mode: vertical-rl; text-orientation: upright; }
             .is-focused:not(.edit-mode-active) .gemini-ocr-text-box.manual-highlight { z-index: 1; transform: scale(var(--ocr-focus-scale)); overflow: visible !important; }
             .solo-hover-mode.is-focused:not(.edit-mode-active).has-manual-highlight .gemini-ocr-text-box:not(.manual-highlight) { opacity: var(--ocr-dimmed-opacity); }
@@ -275,12 +353,20 @@
     }
     function checkServerStatus() { const serverUrl = UI.serverUrlInput.value.trim(); if (!serverUrl) return; UI.statusDiv.className = 'status-checking'; UI.statusDiv.textContent = 'Checking...'; GM_xmlhttpRequest({ method: 'GET', url: serverUrl, timeout: 5000, onload: (res) => { try { const data = JSON.parse(res.responseText); if (data.status === 'running') { UI.statusDiv.className = 'status-ok'; const jobs = data.active_preprocess_jobs ?? 'N/A'; UI.statusDiv.textContent = `Connected (Cache: ${data.items_in_cache} | Jobs: ${jobs})`; } else { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Server Unresponsive'; } } catch (e) { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Invalid Response'; } }, onerror: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Connection Failed'; }, ontimeout: () => { UI.statusDiv.className = 'status-error'; UI.statusDiv.textContent = 'Timed Out'; } }); }
     function purgeServerCache() { if (!confirm("Permanently delete all items from the server's OCR cache?")) return; const btn = UI.purgeCacheBtn; const originalText = btn.textContent; btn.disabled = true; btn.textContent = 'Purging...'; GM_xmlhttpRequest({ method: 'POST', url: `${settings.ocrServerUrl}/purge-cache`, timeout: 10000, onload: (res) => { try { const data = JSON.parse(res.responseText); alert(data.message || data.error); checkServerStatus(); } catch (e) { alert('Failed to parse server response.'); } }, onerror: () => alert('Failed to connect to server to purge cache.'), ontimeout: () => alert('Request to purge cache timed out.'), onloadend: () => { btn.disabled = false; btn.textContent = originalText; } }); }
-    function createMeasurementSpan() { if (measurementSpan) return; measurementSpan = document.createElement('span'); measurementSpan.style.cssText = `position:fixed!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:nowrap!important;z-index:-1!important;top:-9999px;left:-9999px;padding:0!important;border:0!important;margin:0!important;`; document.body.appendChild(measurementSpan); }
+    
+    // --- [UPDATED] Synced with PC for better multi-line measurement ---
+    function createMeasurementSpan() {
+        if (measurementSpan) return;
+        measurementSpan = document.createElement('span');
+        measurementSpan.style.cssText = `position:fixed!important;visibility:hidden!important;height:auto!important;width:auto!important;white-space:normal!important;z-index:-1!important;top:-9999px;left:-9999px;padding:0!important;border:0!important;margin:0!important;`;
+        document.body.appendChild(measurementSpan);
+    }
+    
     async function init() {
         const loadedSettings = await GM_getValue(SETTINGS_KEY);
         if (loadedSettings) { try { settings = { ...settings, ...JSON.parse(loadedSettings) }; } catch (e) { logDebug("Could not parse saved settings."); } }
         createUI(); bindUIEvents(); applyTheme(); createMeasurementSpan();
-        logDebug("Initializing MOBILE HYBRID engine (FocusColor Fix).");
+        logDebug("Initializing MOBILE HYBRID engine (OCR Error Resilience Synced).");
         resizeObserver = new ResizeObserver(handleResize);
         intersectionObserver = new IntersectionObserver(handleIntersection, { rootMargin: '100px 0px' });
         setupMutationObservers();
