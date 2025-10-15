@@ -1,7 +1,7 @@
 # --- START OF FILE server.py ---
 
 # TODO: cache purge <-- DONE
-# TODO: auto-merge logic <-- DONE
+# TODO: auto-merge logic <-- UPGRADED WITH ROBUST SORTING
 # TODO: Add context logging <-- DONE
 # TODO: Save context to cache file <-- DONE
 
@@ -58,7 +58,7 @@ ocr_engine: Engine
 # endregion
 
 
-# region Auto-Merge Logic (Server-Side)
+# region Auto-Merge Logic (Ported from UserScript)
 
 
 class UnionFind:
@@ -93,165 +93,188 @@ def _median(data):
     sorted_data = sorted(data)
     mid = len(sorted_data) // 2
     if len(sorted_data) % 2 == 0:
-        return (sorted_data[mid - 1] + sorted_data[mid]) / 2
+        return (sorted_data[mid - 1] + sorted_data[mid]) / 2.0
     return sorted_data[mid]
 
 
-def auto_merge_ocr_data(lines, config):
-    if not lines or len(lines) < 2:
-        return lines
-    scale = 1000
+def _group_ocr_data(lines, natural_width, natural_height, config):
+    if not lines or len(lines) < 2 or not natural_width or not natural_height:
+        return [[line] for line in lines]
+
+    CHUNK_MAX_HEIGHT = 3000
     processed_lines = []
-
-    for i, line in enumerate(lines):
+    for index, line in enumerate(lines):
         bbox = line["tightBoundingBox"]
-        is_vertical = bbox["width"] <= bbox["height"]
-        font_size = bbox["width"] * scale if is_vertical else bbox["height"] * scale
-        processed_lines.append(
-            {
-                **line,
-                "originalIndex": i,
-                "isVertical": is_vertical,
-                "fontSize": font_size,
-                "bbox": {
-                    "x": bbox["x"] * scale,
-                    "y": bbox["y"] * scale,
-                    "width": bbox["width"] * scale,
-                    "height": bbox["height"] * scale,
-                    "right": (bbox["x"] + bbox["width"]) * scale,
-                    "bottom": (bbox["y"] + bbox["height"]) * scale,
-                },
-            }
-        )
+        pixel_top = bbox["y"] * natural_height
+        pixel_bottom = (bbox["y"] + bbox["height"]) * natural_height
+        norm_scale = 1000 / natural_width
 
-    horizontal_lines = [line for line in processed_lines if not line["isVertical"]]
-    vertical_lines = [line for line in processed_lines if line["isVertical"]]
-    h_median_height = _median([line["fontSize"] for line in horizontal_lines]) or 20
-    v_median_width = _median([line["fontSize"] for line in vertical_lines]) or 20
-    uf = UnionFind(len(processed_lines))
+        normalized_bbox = {
+            "x": (bbox["x"] * natural_width) * norm_scale,
+            "y": (bbox["y"] * natural_height) * norm_scale,
+            "width": (bbox["width"] * natural_width) * norm_scale,
+            "height": (bbox["height"] * natural_height) * norm_scale,
+        }
+        normalized_bbox["right"] = normalized_bbox["x"] + normalized_bbox["width"]
+        normalized_bbox["bottom"] = normalized_bbox["y"] + normalized_bbox["height"]
 
-    for i in range(len(processed_lines)):
-        for j in range(i + 1, len(processed_lines)):
-            line_a, line_b = processed_lines[i], processed_lines[j]
+        is_vertical = normalized_bbox["width"] <= normalized_bbox["height"]
+        font_size = normalized_bbox["width"] if is_vertical else normalized_bbox["height"]
 
-            if line_a["isVertical"] != line_b["isVertical"]:
-                continue
+        processed_lines.append({
+            "original_index": index,
+            "is_vertical": is_vertical,
+            "font_size": font_size,
+            "bbox": normalized_bbox,
+            "pixel_top": pixel_top,
+            "pixel_bottom": pixel_bottom,
+        })
 
-            font_ratio = max(
-                line_a["fontSize"] / line_b["fontSize"],
-                line_b["fontSize"] / line_a["fontSize"],
-            )
+    processed_lines.sort(key=lambda p: p["pixel_top"])
 
-            if font_ratio > config["font_ratio"]:
-                continue
+    all_groups = []
+    current_line_index = 0
+    chunks_processed = 0
 
-            dist_threshold = (
-                v_median_width * config["dist_k"]
-                if line_a["isVertical"]
-                else h_median_height * config["dist_k"]
-            )
-            perp_tol = (
-                h_median_height * config["perp_tol"]
-                if line_a["isVertical"]
-                else v_median_width * config["perp_tol"]
-            )
+    while current_line_index < len(processed_lines):
+        chunks_processed += 1
+        chunk_start_index = current_line_index
+        chunk_end_index = len(processed_lines) - 1
 
-            if line_a["isVertical"]:
-                reading_gap = max(
-                    0,
-                    max(line_a["bbox"]["x"], line_b["bbox"]["x"])
-                    - min(line_a["bbox"]["right"], line_b["bbox"]["right"]),
-                )
-                perp_overlap = max(
-                    0,
-                    min(line_a["bbox"]["bottom"], line_b["bbox"]["bottom"])
-                    - max(line_a["bbox"]["y"], line_b["bbox"]["y"]),
-                )
-                perp_offset = abs(
-                    (line_a["bbox"]["y"] + line_a["bbox"]["height"] / 2)
-                    - (line_b["bbox"]["y"] + line_b["bbox"]["height"] / 2)
-                )
-            else:
-                reading_gap = max(
-                    0,
-                    max(line_a["bbox"]["y"], line_b["bbox"]["y"])
-                    - min(line_a["bbox"]["bottom"], line_b["bbox"]["bottom"]),
-                )
-                perp_overlap = max(
-                    0,
-                    min(line_a["bbox"]["right"], line_b["bbox"]["right"])
-                    - max(line_a["bbox"]["x"], line_b["bbox"]["x"]),
-                )
-                perp_offset = abs(
-                    (line_a["bbox"]["x"] + line_a["bbox"]["width"] / 2)
-                    - (line_b["bbox"]["x"] + line_b["bbox"]["width"] / 2)
-                )
+        if natural_height > CHUNK_MAX_HEIGHT:
+            chunk_top_y = processed_lines[chunk_start_index]["pixel_top"]
+            for i in range(chunk_start_index + 1, len(processed_lines)):
+                if (processed_lines[i]["pixel_bottom"] - chunk_top_y) <= CHUNK_MAX_HEIGHT:
+                    chunk_end_index = i
+                else:
+                    break
 
-            if reading_gap > dist_threshold:
-                continue
+        chunk_lines = processed_lines[chunk_start_index : chunk_end_index + 1]
+        uf = UnionFind(len(chunk_lines))
 
-            smaller_perp_size = (
-                min(line_a["bbox"]["height"], line_b["bbox"]["height"])
-                if line_a["isVertical"]
-                else min(line_a["bbox"]["width"], line_b["bbox"]["width"])
-            )
+        horizontal_lines = [l for l in chunk_lines if not l["is_vertical"]]
+        vertical_lines = [l for l in chunk_lines if l["is_vertical"]]
 
-            if perp_offset > perp_tol and (
-                smaller_perp_size == 0
-                or perp_overlap / smaller_perp_size < config["overlap_min"]
-            ):
-                continue
+        initial_median_h = _median([l["bbox"]["height"] for l in horizontal_lines])
+        initial_median_w = _median([l["bbox"]["width"] for l in vertical_lines])
 
-            uf.union(i, j)
+        primary_h = [l for l in horizontal_lines if l["bbox"]["height"] >= initial_median_h * config["min_line_ratio"]]
+        primary_v = [l for l in vertical_lines if l["bbox"]["width"] >= initial_median_w * config["min_line_ratio"]]
+        
+        robust_median_h = _median([l["bbox"]["height"] for l in primary_h]) or initial_median_h or 20
+        robust_median_w = _median([l["bbox"]["width"] for l in primary_v]) or initial_median_w or 20
 
-    groups = defaultdict(list)
+        for i in range(len(chunk_lines)):
+            for j in range(i + 1, len(chunk_lines)):
+                line_a, line_b = chunk_lines[i], chunk_lines[j]
+                if line_a["is_vertical"] != line_b["is_vertical"]:
+                    continue
 
-    for i in range(len(processed_lines)):
-        groups[uf.find(i)].append(processed_lines[i])
+                is_a_primary = line_a["font_size"] >= (robust_median_w if line_a["is_vertical"] else robust_median_h) * config["min_line_ratio"]
+                is_b_primary = line_b["font_size"] >= (robust_median_w if line_b["is_vertical"] else robust_median_h) * config["min_line_ratio"]
+                
+                font_ratio_threshold = config["font_ratio"]
+                if is_a_primary != is_b_primary:
+                    font_ratio_threshold = config["font_ratio_for_mixed"]
+                
+                font_ratio = max(line_a["font_size"] / line_b["font_size"], line_b["font_size"] / line_a["font_size"])
+                if font_ratio > font_ratio_threshold:
+                    continue
 
+                dist_threshold = (robust_median_w if line_a["is_vertical"] else robust_median_h) * config["dist_k"]
+                
+                if line_a["is_vertical"]:
+                    reading_gap = max(0, max(line_a["bbox"]["x"], line_b["bbox"]["x"]) - min(line_a["bbox"]["right"], line_b["bbox"]["right"]))
+                    perp_overlap = max(0, min(line_a["bbox"]["bottom"], line_b["bbox"]["bottom"]) - max(line_a["bbox"]["y"], line_b["bbox"]["y"]))
+                else:
+                    reading_gap = max(0, max(line_a["bbox"]["y"], line_b["bbox"]["y"]) - min(line_a["bbox"]["bottom"], line_b["bbox"]["bottom"]))
+                    perp_overlap = max(0, min(line_a["bbox"]["right"], line_b["bbox"]["right"]) - max(line_a["bbox"]["x"], line_b["bbox"]["x"]))
+
+                smaller_perp_size = min(line_a["bbox"]["height"] if line_a["is_vertical"] else line_a["bbox"]["width"],
+                                        line_b["bbox"]["height"] if line_b["is_vertical"] else line_b["bbox"]["width"])
+
+                if reading_gap > dist_threshold:
+                    continue
+                if smaller_perp_size > 0 and perp_overlap / smaller_perp_size < config["overlap_min"]:
+                    continue
+                if is_a_primary != is_b_primary and smaller_perp_size > 0 and (perp_overlap / smaller_perp_size < config["mixed_min_overlap_ratio"]):
+                    continue
+                
+                uf.union(i, j)
+
+        temp_groups = defaultdict(list)
+        for i in range(len(chunk_lines)):
+            root = uf.find(i)
+            temp_groups[root].append(chunk_lines[i])
+
+        chunk_final_groups = [
+            [lines[p_line["original_index"]] for p_line in group]
+            for group in temp_groups.values()
+        ]
+        all_groups.extend(chunk_final_groups)
+        current_line_index = chunk_end_index + 1
+
+    if is_debug_mode:
+        print(f"[AutoMerge] Grouping finished. Initial: {len(lines)}, Final groups: {len(all_groups)} (in {chunks_processed} chunk(s))")
+    return all_groups
+
+
+def auto_merge_ocr_data(lines, natural_width, natural_height, config):
+    groups = _group_ocr_data(lines, natural_width, natural_height, config)
     final_merged_data = []
 
-    for root_id, group in groups.items():
+    for group in groups:
         if len(group) == 1:
-            final_merged_data.append(lines[group[0]["originalIndex"]])
+            final_merged_data.append(group[0])
+            continue
+
+        # --- ROBUST ORIENTATION DETECTION (THE FIX) ---
+        # Determine group orientation by a "majority vote" of the lines inside it.
+        vertical_lines_count = sum(1 for line in group if line["tightBoundingBox"]['height'] > line["tightBoundingBox"]['width'])
+        horizontal_lines_count = len(group) - vertical_lines_count
+        is_vertical_group = vertical_lines_count > horizontal_lines_count
+
+        # --- STABLE SORTING LOGIC ---
+        if is_vertical_group:
+            # Sort by the horizontal center of the box (descending for right-to-left)
+            # then by the vertical center (ascending for top-to-bottom).
+            group.sort(key=lambda line: (
+                -(line["tightBoundingBox"]["x"] + line["tightBoundingBox"]["width"] / 2), 
+                line["tightBoundingBox"]["y"] + line["tightBoundingBox"]["height"] / 2
+            ))
         else:
-            is_vertical = group[0]["isVertical"]
-            group.sort(
-                key=lambda line: (-line["bbox"]["x"], line["bbox"]["y"])
-                if is_vertical
-                else (line["bbox"]["y"], line["bbox"]["x"])
-            )
-            join_char = " " if config["add_space_on_merge"] else "\u200b"
-            combined_text = join_char.join([line["text"] for line in group])
-            min_x, min_y = (
-                min(line["bbox"]["x"] for line in group),
-                min(line["bbox"]["y"] for line in group),
-            )
-            max_r, max_b = (
-                max(line["bbox"]["right"] for line in group),
-                max(line["bbox"]["bottom"] for line in group),
-            )
-            final_merged_data.append(
-                {
-                    "text": combined_text,
-                    "isMerged": True,
-                    "forcedOrientation": "vertical" if is_vertical else "horizontal",
-                    "tightBoundingBox": {
-                        "x": min_x / scale,
-                        "y": min_y / scale,
-                        "width": (max_r - min_x) / scale,
-                        "height": (max_b - min_y) / scale,
-                    },
-                }
-            )
+            # Sort by the vertical center, then by the horizontal center.
+            group.sort(key=lambda line: (
+                line["tightBoundingBox"]["y"] + line["tightBoundingBox"]["height"] / 2, 
+                line["tightBoundingBox"]["x"] + line["tightBoundingBox"]["width"] / 2
+            ))
+        
+        join_char = " " if config["add_space_on_merge"] else "\u200b"
+        combined_text = join_char.join([line["text"] for line in group])
+
+        # Calculate final bounding box for the merged group
+        group_bboxes = [line["tightBoundingBox"] for line in group]
+        min_x = min(b["x"] for b in group_bboxes)
+        min_y = min(b["y"] for b in group_bboxes)
+        max_r = max(b["x"] + b["width"] for b in group_bboxes)
+        max_b = max(b["y"] + b["height"] for b in group_bboxes)
+
+        final_merged_data.append({
+            "text": combined_text,
+            "isMerged": True,
+            "forcedOrientation": "vertical" if is_vertical_group else "horizontal",
+            "tightBoundingBox": {
+                "x": min_x,
+                "y": min_y,
+                "width": max_r - min_x,
+                "height": max_b - min_y,
+            },
+        })
 
     if len(final_merged_data) < len(lines):
-        print(
-            f"[AutoMerge] Finished. Initial: {len(lines)}, Final: {len(final_merged_data)}"
-        )
+        print(f"[AutoMerge] Finished. Initial lines: {len(lines)}, Final merged lines: {len(final_merged_data)}")
 
     return final_merged_data
-
 
 # endregion
 
@@ -292,9 +315,7 @@ def run_chapter_processing_job(base_url, auth_user, auth_pass, context):
     with active_job_lock:
         active_job_count += 1
 
-    print(
-        f"[JobRunner] [{context}] Started job for ...{base_url[-40:]}. Active jobs: {active_job_count}"
-    )
+    print(f"[JobRunner] [{context}] Started job for ...{base_url[-40:]}. Active jobs: {active_job_count}")
 
     page_index, consecutive_errors = 0, 0
     CONSECUTIVE_ERROR_THRESHOLD = 3
@@ -311,9 +332,7 @@ def run_chapter_processing_job(base_url, auth_user, auth_pass, context):
 
         encoded_url = quote(image_url, safe="")
         encoded_context = quote(context, safe="")
-        target_url = (
-            f"{SERVER_URL_BASE}/ocr?url={encoded_url}&context={encoded_context}"
-        )
+        target_url = (f"{SERVER_URL_BASE}/ocr?url={encoded_url}&context={encoded_context}")
         if auth_user:
             target_url += f"&user={auth_user}&pass={auth_pass}"
 
@@ -324,23 +343,17 @@ def run_chapter_processing_job(base_url, auth_user, auth_pass, context):
                 consecutive_errors = 0
             else:
                 consecutive_errors += 1
-                print(
-                    f"[JobRunner] [{context}] Got non-200 status ({response.status_code}) for {image_url}. Errors: {consecutive_errors}"
-                )
+                print(f"[JobRunner] [{context}] Got non-200 status ({response.status_code}) for {image_url}. Errors: {consecutive_errors}")
                 if response.status_code == 404:
                     print("[JobRunner] (Page not found, likely end of chapter)")
         except requests.exceptions.RequestException as e:
             consecutive_errors += 1
-            print(
-                f"[JobRunner] [{context}] Request failed for {image_url}. Errors: {consecutive_errors}. Details: {e}"
-            )
+            print(f"[JobRunner] [{context}] Request failed for {image_url}. Errors: {consecutive_errors}. Details: {e}")
 
         page_index += 1
         time.sleep(0.1)
 
-    print(
-        f"[JobRunner] [{context}] Finished job for ...{base_url[-40:]}. Reached {consecutive_errors} errors."
-    )
+    print(f"[JobRunner] [{context}] Finished job for ...{base_url[-40:]}. Reached {consecutive_errors} errors.")
     with active_job_lock:
         active_job_count -= 1
 
@@ -356,15 +369,13 @@ def status_endpoint():
         num_requests, num_cache_items = ocr_requests_processed, len(ocr_cache)
     with active_job_lock:
         active_jobs = active_job_count
-    return jsonify(
-        {
-            "status": "running",
-            "message": "Python OCR server is active.",
-            "requests_processed": num_requests,
-            "items_in_cache": num_cache_items,
-            "active_preprocess_jobs": active_jobs,
-        }
-    )
+    return jsonify({
+        "status": "running",
+        "message": "Python OCR server is active.",
+        "requests_processed": num_requests,
+        "items_in_cache": num_cache_items,
+        "active_preprocess_jobs": active_jobs,
+    })
 
 
 @app.route("/ocr")
@@ -378,22 +389,15 @@ async def ocr_endpoint():
 
     with cache_lock:
         if image_url in ocr_cache:
-            # Cache now stores an object. Extract the 'data' part for the response.
-            # This keeps the API response consistent for the userscript.
             cached_entry = ocr_cache[image_url]
-            if isinstance(cached_entry, dict) and "data" in cached_entry:
-                return jsonify(cached_entry["data"])
-            else:  # Fallback for old cache format that might be in memory
-                return jsonify(cached_entry)
+            return jsonify(cached_entry.get("data", cached_entry))
 
     print(f"[OCR] [{context}] Processing: {image_url}")
     try:
         auth_headers = {}
         if auth_user := request.args.get("user"):
             auth_pass = request.args.get("pass", "")
-            auth_base64 = base64.b64encode(
-                f"{auth_user}:{auth_pass}".encode("utf-8")
-            ).decode("utf-8")
+            auth_base64 = base64.b64encode(f"{auth_user}:{auth_pass}".encode("utf-8")).decode("utf-8")
             auth_headers["Authorization"] = f"Basic {auth_base64}"
 
         async with aiohttp.ClientSession() as session:
@@ -402,29 +406,61 @@ async def ocr_endpoint():
                 image_bytes = await response.read()
 
         pil_image = Image.open(io.BytesIO(image_bytes))
-        raw_results = await ocr_engine.ocr(pil_image.convert("RGB"))
-        final_results = (
-            auto_merge_ocr_data(raw_results, AUTO_MERGE_CONFIG)
-            if AUTO_MERGE_CONFIG["enabled"] and raw_results
-            else raw_results
-        )
+        rgb_image = pil_image.convert("RGB")
+        
+        full_width, full_height = rgb_image.size
+        all_final_results = []
+        MAX_CHUNK_HEIGHT = 3000
 
-        # Store data in the new object structure {context, data}
+        if full_height > MAX_CHUNK_HEIGHT:
+            print(f"[OCR] [{context}] Image is tall ({full_height}px). Processing in chunks.")
+            y_offset = 0
+            while y_offset < full_height:
+                box = (0, y_offset, full_width, min(y_offset + MAX_CHUNK_HEIGHT, full_height))
+                chunk_image = rgb_image.crop(box)
+                chunk_width, chunk_height = chunk_image.size
+                print(f"[OCR] [{context}] Processing chunk at y={y_offset} (size: {chunk_width}x{chunk_height})")
+
+                raw_chunk_results = await ocr_engine.ocr(chunk_image)
+                
+                merged_chunk_results = raw_chunk_results
+                if AUTO_MERGE_CONFIG["enabled"] and raw_chunk_results:
+                    merged_chunk_results = auto_merge_ocr_data(raw_chunk_results, chunk_width, chunk_height, AUTO_MERGE_CONFIG)
+
+                for result in merged_chunk_results:
+                    bbox = result['tightBoundingBox']
+                    x_local_px = bbox['x'] * chunk_width
+                    y_local_px = bbox['y'] * chunk_height
+                    width_px = bbox['width'] * chunk_width
+                    height_px = bbox['height'] * chunk_height
+
+                    y_global_px = y_local_px + y_offset
+                    result['tightBoundingBox'] = {
+                        'x': x_local_px / full_width,
+                        'y': y_global_px / full_height,
+                        'width': width_px / full_width,
+                        'height': height_px / full_height
+                    }
+                    all_final_results.append(result)
+                
+                y_offset += MAX_CHUNK_HEIGHT
+        else:
+            raw_results = await ocr_engine.ocr(rgb_image)
+            all_final_results = raw_results
+            if AUTO_MERGE_CONFIG["enabled"] and raw_results:
+                all_final_results = auto_merge_ocr_data(raw_results, full_width, full_height, AUTO_MERGE_CONFIG)
+        
         with cache_lock:
-            ocr_cache[image_url] = {"context": context, "data": final_results}
+            ocr_cache[image_url] = {"context": context, "data": all_final_results}
             ocr_requests_processed += 1
             save_cache()
 
         print(f"[OCR] [{context}] Successful for: {image_url}")
-
-        # Return only the data array to the client.
-        return jsonify(final_results)
+        return jsonify(all_final_results)
 
     except aiohttp.ClientResponseError as e:
         print(f"[OCR] [{context}] ERROR fetching {image_url}: Status {e.status}")
-        return jsonify(
-            {"error": f"Failed to fetch image from URL, status: {e.status}"}
-        ), e.status
+        return jsonify({"error": f"Failed to fetch image from URL, status: {e.status}"}), e.status
     except Exception as e:
         print(f"[OCR] [{context}] ERROR on {image_url}: {e}")
         if is_debug_mode:
@@ -452,12 +488,10 @@ def preprocess_chapter_endpoint():
     job_thread.start()
 
     print(f"[Queue] [{context}] Job started in new thread for ...{base_url[-40:]}")
-    return jsonify(
-        {
-            "status": "accepted",
-            "message": "Chapter pre-processing job has been started.",
-        }
-    ), 202
+    return jsonify({
+        "status": "accepted",
+        "message": "Chapter pre-processing job has been started.",
+    }), 202
 
 
 @app.route("/purge-cache", methods=["POST"])
@@ -467,18 +501,14 @@ def purge_cache_endpoint():
         ocr_cache.clear()
         save_cache()
         print(f"[Cache] Purged. Removed {count} items.")
-    return jsonify(
-        {"status": "success", "message": f"Cache purged. Removed {count} items."}
-    )
+    return jsonify({"status": "success", "message": f"Cache purged. Removed {count} items."})
 
 
 @app.route("/export-cache")
 def export_cache_endpoint():
     if not os.path.exists(CACHE_FILE_PATH):
         return jsonify({"error": "No cache file to export."}), 404
-    return send_file(
-        CACHE_FILE_PATH, as_attachment=True, download_name="ocr-cache.json"
-    )
+    return send_file(CACHE_FILE_PATH, as_attachment=True, download_name="ocr-cache.json")
 
 
 @app.route("/import-cache", methods=["POST"])
@@ -496,26 +526,20 @@ def import_cache_endpoint():
             new_items = 0
             for key, value in imported_data.items():
                 if key not in ocr_cache:
-                    # Handle both old and new cache formats for backward compatibility.
                     if isinstance(value, list):
-                        # Old format: value is just the OCR data array.
-                        # Convert it to the new format with a placeholder context.
                         ocr_cache[key] = {"context": "Imported Data", "data": value}
                     elif isinstance(value, dict) and "data" in value:
-                        # New format. Use it directly.
                         ocr_cache[key] = value
                     else:
-                        continue  # Skip invalid entries
+                        continue 
                     new_items += 1
             if new_items > 0:
                 save_cache()
             total_items = len(ocr_cache)
-        return jsonify(
-            {
-                "message": f"Import successful. Added {new_items} new items.",
-                "total_items_in_cache": total_items,
-            }
-        )
+        return jsonify({
+            "message": f"Import successful. Added {new_items} new items.",
+            "total_items_in_cache": total_items,
+        })
     except Exception as e:
         return jsonify({"error": f"Import failed: {e}"}), 500
 
@@ -528,19 +552,8 @@ def import_cache_endpoint():
 def main():
     global ocr_engine, is_debug_mode
     parser = argparse.ArgumentParser(description="Run the Python OCR Server.")
-    parser.add_argument(
-        "-d",
-        "--debug",
-        action="store_true",
-        help="enable debug mode for more verbose output",
-    )
-    parser.add_argument(
-        "-e",
-        "--engine",
-        type=str,
-        default="lens",
-        help="OCR engine to use. Default is lens. Available: 'lens', 'oneocr'",
-    )
+    parser.add_argument("-d", "--debug", action="store_true", help="enable debug mode")
+    parser.add_argument("-e", "--engine", type=str, default="lens", help="OCR engine to use: 'lens', 'oneocr'")
     args = parser.parse_args()
     is_debug_mode = args.debug
 
