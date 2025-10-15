@@ -1,11 +1,11 @@
-// server.js - V5.0 - Upgraded with Python's advanced features
+// server.js - V5.2 - Full Python features with pure JS 'jimp' library
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
-import sharp from 'sharp'; // <-- ADDED: For advanced image processing
+import Jimp from 'jimp'; // <-- ADDED: Replaces sharp for all image processing
 import { program } from 'commander';
 
 const app = express();
@@ -213,11 +213,9 @@ function autoMergeOcrData(lines, naturalWidth, naturalHeight, config) {
             continue;
         }
 
-        // --- ROBUST ORIENTATION DETECTION (THE FIX) ---
         const verticalCount = group.filter(l => l.tightBoundingBox.height > l.tightBoundingBox.width).length;
         const isVerticalGroup = verticalCount > group.length / 2;
         
-        // --- STABLE SORTING LOGIC ---
         group.sort((a, b) => {
             const boxA = a.tightBoundingBox;
             const boxB = b.tightBoundingBox;
@@ -394,10 +392,9 @@ app.get('/ocr', async (req, res) => {
         if (!response.ok) throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
 
-        const image = sharp(imageBuffer);
-        const metadata = await image.metadata();
-        const fullWidth = metadata.width;
-        const fullHeight = metadata.height;
+        const image = await Jimp.read(imageBuffer);
+        const fullWidth = image.getWidth();
+        const fullHeight = image.getHeight();
 
         let allFinalResults = [];
         const MAX_CHUNK_HEIGHT = 3000;
@@ -407,11 +404,11 @@ app.get('/ocr', async (req, res) => {
             for (let yOffset = 0; yOffset < fullHeight; yOffset += MAX_CHUNK_HEIGHT) {
                 const chunkHeight = Math.min(MAX_CHUNK_HEIGHT, fullHeight - yOffset);
                 console.log(`[OCR] [${context}] Processing chunk at y=${yOffset} (size: ${fullWidth}x${chunkHeight})`);
-                
-                const chunkBuffer = await image.extract({ left: 0, top: yOffset, width: fullWidth, height: chunkHeight }).toBuffer();
-                const mimeType = metadata.format === 'jpeg' ? 'image/jpeg' : 'image/png';
-                const dataUrl = `data:${mimeType};base64,${chunkBuffer.toString('base64')}`;
 
+                const chunkImage = image.clone().crop(0, yOffset, fullWidth, chunkHeight);
+                const chunkBuffer = await chunkImage.getBufferAsync(Jimp.MIME_PNG);
+                const dataUrl = `data:${Jimp.MIME_PNG};base64,${chunkBuffer.toString('base64')}`;
+                
                 const rawChunkResult = await lens.scanByURL(dataUrl);
                 const transformedChunkResult = transformOcrData(rawChunkResult);
                 
@@ -420,7 +417,6 @@ app.get('/ocr', async (req, res) => {
                     mergedChunkResults = autoMergeOcrData(transformedChunkResult, fullWidth, chunkHeight, AUTO_MERGE_CONFIG);
                 }
 
-                // Remap coordinates to be relative to the full image
                 for (const result of mergedChunkResults) {
                     const bbox = result.tightBoundingBox;
                     const yGlobalPx = (bbox.y * chunkHeight) + yOffset;
@@ -430,8 +426,7 @@ app.get('/ocr', async (req, res) => {
                 }
             }
         } else {
-            const mimeType = metadata.format === 'jpeg' ? 'image/jpeg' : 'image/png';
-            const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+            const dataUrl = await image.getBase64Async(image.getMIME());
             const rawResult = await lens.scanByURL(dataUrl);
             const transformedResult = transformOcrData(rawResult);
 
@@ -474,7 +469,7 @@ app.post("/purge-cache", (req, res) => {
 
 app.get('/export-cache', (req, res) => {
     if (fs.existsSync(CACHE_FILE_PATH)) res.download(CACHE_FILE_PATH, 'ocr-cache.json');
-    else res.status(404).json({ error: 'No cache file to export.' });
+    else res.status(4.04).json({ error: 'No cache file to export.' });
 });
 
 app.post('/import-cache', upload.single('cacheFile'), (req, res) => {
@@ -509,8 +504,8 @@ app.listen(port, host, (err) => {
         console.error('Error starting server:', err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V5.0 listening at http://${host}:${port}`);
+        console.log(`Local OCR Server V5.2 listening at http://${host}:${port}`);
         console.log(`Cache file path: ${CACHE_FILE_PATH}`);
-        console.log('Features: Upgraded Auto-Merging, Tall Image Chunking, Context Logging, Persistent Caching, Import/Export, Auth, Chapter Pre-processing');
+        console.log('Features: Upgraded Auto-Merging, Tall Image Chunking (w/ Jimp), Context Logging, Caching, Import/Export, Auth, Pre-processing');
     }
 });
