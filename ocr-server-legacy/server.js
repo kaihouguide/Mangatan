@@ -1,10 +1,11 @@
-// server.js - V4.0 with Auto-Merging, Context Logging, and Configurable Host/Port
+// server.js - V5.0 - Upgraded with Python's advanced features
 import express from 'express';
 import LensCore from 'chrome-lens-ocr/src/core.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
 import fetch from 'node-fetch';
+import sharp from 'sharp'; // <-- ADDED: For advanced image processing
 import { program } from 'commander';
 
 const app = express();
@@ -41,7 +42,7 @@ const AUTO_MERGE_CONFIG = {
     add_space_on_merge: false, // Use Zero-Width-Space for line breaks
 };
 
-// --- Auto-Merge Logic (Ported from Python Server) ---
+// --- Auto-Merge Logic (Upgraded - Ported from Python) ---
 
 class UnionFind {
     constructor(size) {
@@ -72,86 +73,199 @@ function median(data) {
     return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-function autoMergeOcrData(lines, config) {
-    if (!config.enabled || !lines || lines.length < 2) return lines;
+function groupOcrData(lines, naturalWidth, naturalHeight, config) {
+    if (!lines || lines.length < 2 || !naturalWidth || !naturalHeight) {
+        return lines.map(line => [line]);
+    }
 
-    const scale = 1000;
-    const processedLines = lines.map((line, i) => {
+    const CHUNK_MAX_HEIGHT = 3000;
+    const normScale = 1000 / naturalWidth;
+
+    let processedLines = lines.map((line, index) => {
         const bbox = line.tightBoundingBox;
-        const isVertical = bbox.width <= bbox.height;
-        const fontSize = (isVertical ? bbox.width : bbox.height) * scale;
+        const pixelTop = bbox.y * naturalHeight;
+        const pixelBottom = (bbox.y + bbox.height) * naturalHeight;
+
+        const normalizedBbox = {
+            x: (bbox.x * naturalWidth) * normScale,
+            y: (bbox.y * naturalHeight) * normScale,
+            width: (bbox.width * naturalWidth) * normScale,
+            height: (bbox.height * naturalHeight) * normScale,
+        };
+        normalizedBbox.right = normalizedBbox.x + normalizedBbox.width;
+        normalizedBbox.bottom = normalizedBbox.y + normalizedBbox.height;
+
+        const isVertical = normalizedBbox.width <= normalizedBbox.height;
+        const fontSize = isVertical ? normalizedBbox.width : normalizedBbox.height;
+
         return {
-            ...line,
-            originalIndex: i, isVertical, fontSize,
-            bbox: {
-                x: bbox.x * scale, y: bbox.y * scale, width: bbox.width * scale, height: bbox.height * scale,
-                right: (bbox.x + bbox.width) * scale, bottom: (bbox.y + bbox.height) * scale,
-            }
+            originalIndex: index,
+            isVertical,
+            fontSize,
+            bbox: normalizedBbox,
+            pixelTop,
+            pixelBottom,
         };
     });
 
-    const horizontalLines = processedLines.filter(l => !l.isVertical);
-    const verticalLines = processedLines.filter(l => l.isVertical);
-    const hMedianHeight = median(horizontalLines.map(l => l.fontSize)) || 20;
-    const vMedianWidth = median(verticalLines.map(l => l.fontSize)) || 20;
+    processedLines.sort((a, b) => a.pixelTop - b.pixelTop);
 
-    const uf = new UnionFind(processedLines.length);
-    for (let i = 0; i < processedLines.length; i++) {
-        for (let j = i + 1; j < processedLines.length; j++) {
-            const lineA = processedLines[i], lineB = processedLines[j];
-            if (lineA.isVertical !== lineB.isVertical) continue;
-            const fontRatio = Math.max(lineA.fontSize / lineB.fontSize, lineB.fontSize / lineA.fontSize);
-            if (fontRatio > config.font_ratio) continue;
+    const allGroups = [];
+    let currentLineIndex = 0;
 
-            const distThreshold = lineA.isVertical ? vMedianWidth * config.dist_k : hMedianHeight * config.dist_k;
-            const perpTol = lineA.isVertical ? hMedianHeight * config.perp_tol : vMedianWidth * config.perp_tol;
-            let readingGap, perpOverlap, perpOffset;
-            if (lineA.isVertical) {
-                readingGap = Math.max(0, Math.max(lineA.bbox.x, lineB.bbox.x) - Math.min(lineA.bbox.right, lineB.bbox.right));
-                perpOverlap = Math.max(0, Math.min(lineA.bbox.bottom, lineB.bbox.bottom) - Math.max(lineA.bbox.y, lineB.bbox.y));
-                perpOffset = Math.abs((lineA.bbox.y + lineA.bbox.height / 2) - (lineB.bbox.y + lineB.bbox.height / 2));
-            } else {
-                readingGap = Math.max(0, Math.max(lineA.bbox.y, lineB.bbox.y) - Math.min(lineA.bbox.bottom, lineB.bbox.bottom));
-                perpOverlap = Math.max(0, Math.min(lineA.bbox.right, lineB.bbox.right) - Math.max(lineA.bbox.x, lineB.bbox.x));
-                perpOffset = Math.abs((lineA.bbox.x + lineA.bbox.width / 2) - (lineB.bbox.x + lineB.bbox.width / 2));
+    while (currentLineIndex < processedLines.length) {
+        let chunkStartIndex = currentLineIndex;
+        let chunkEndIndex = processedLines.length - 1;
+
+        if (naturalHeight > CHUNK_MAX_HEIGHT) {
+            const chunkTopY = processedLines[chunkStartIndex].pixelTop;
+            for (let i = chunkStartIndex + 1; i < processedLines.length; i++) {
+                if (processedLines[i].pixelBottom - chunkTopY <= CHUNK_MAX_HEIGHT) {
+                    chunkEndIndex = i;
+                } else {
+                    break;
+                }
             }
-            if (readingGap > distThreshold) continue;
-            const smallerPerpSize = lineA.isVertical ? Math.min(lineA.bbox.height, lineB.bbox.height) : Math.min(lineA.bbox.width, lineB.bbox.width);
-            if (perpOffset > perpTol && (smallerPerpSize === 0 || perpOverlap / smallerPerpSize < config.overlap_min)) continue;
-            uf.union(i, j);
         }
-    }
 
-    const groups = {};
-    for (let i = 0; i < processedLines.length; i++) {
-        const root = uf.find(i);
-        if (!groups[root]) groups[root] = [];
-        groups[root].push(processedLines[i]);
-    }
+        const chunkLines = processedLines.slice(chunkStartIndex, chunkEndIndex + 1);
+        const uf = new UnionFind(chunkLines.length);
 
+        const horizontalLines = chunkLines.filter(l => !l.isVertical);
+        const verticalLines = chunkLines.filter(l => l.isVertical);
+
+        const initialMedianH = median(horizontalLines.map(l => l.bbox.height));
+        const initialMedianW = median(verticalLines.map(l => l.bbox.width));
+
+        const primaryH = horizontalLines.filter(l => l.bbox.height >= initialMedianH * config.min_line_ratio);
+        const primaryV = verticalLines.filter(l => l.bbox.width >= initialMedianW * config.min_line_ratio);
+        
+        const robustMedianH = median(primaryH.map(l => l.bbox.height)) || initialMedianH || 20;
+        const robustMedianW = median(primaryV.map(l => l.bbox.width)) || initialMedianW || 20;
+
+        for (let i = 0; i < chunkLines.length; i++) {
+            for (let j = i + 1; j < chunkLines.length; j++) {
+                const lineA = chunkLines[i];
+                const lineB = chunkLines[j];
+                if (lineA.isVertical !== lineB.isVertical) continue;
+
+                const medianSize = lineA.isVertical ? robustMedianW : robustMedianH;
+                const isAPrimary = lineA.fontSize >= medianSize * config.min_line_ratio;
+                const isBPrimary = lineB.fontSize >= medianSize * config.min_line_ratio;
+
+                let fontRatioThreshold = config.font_ratio;
+                if (isAPrimary !== isBPrimary) {
+                    fontRatioThreshold = config.font_ratio_for_mixed;
+                }
+                
+                const fontRatio = Math.max(lineA.fontSize / lineB.fontSize, lineB.fontSize / lineA.fontSize);
+                if (fontRatio > fontRatioThreshold) continue;
+                
+                const distThreshold = medianSize * config.dist_k;
+                let readingGap, perpOverlap;
+
+                if (lineA.isVertical) {
+                    readingGap = Math.max(0, Math.max(lineA.bbox.x, lineB.bbox.x) - Math.min(lineA.bbox.right, lineB.bbox.right));
+                    perpOverlap = Math.max(0, Math.min(lineA.bbox.bottom, lineB.bbox.bottom) - Math.max(lineA.bbox.y, lineB.bbox.y));
+                } else {
+                    readingGap = Math.max(0, Math.max(lineA.bbox.y, lineB.bbox.y) - Math.min(lineA.bbox.bottom, lineB.bbox.bottom));
+                    perpOverlap = Math.max(0, Math.min(lineA.bbox.right, lineB.bbox.right) - Math.max(lineA.bbox.x, lineB.bbox.x));
+                }
+                
+                const smallerPerpSize = Math.min(
+                    lineA.isVertical ? lineA.bbox.height : lineA.bbox.width,
+                    lineB.isVertical ? lineB.bbox.height : lineB.bbox.width
+                );
+                
+                if (readingGap > distThreshold) continue;
+                if (smallerPerpSize > 0 && perpOverlap / smallerPerpSize < config.overlap_min) continue;
+                if (isAPrimary !== isBPrimary && smallerPerpSize > 0 && (perpOverlap / smallerPerpSize < config.mixed_min_overlap_ratio)) continue;
+                
+                uf.union(i, j);
+            }
+        }
+
+        const tempGroups = {};
+        for (let i = 0; i < chunkLines.length; i++) {
+            const root = uf.find(i);
+            if (!tempGroups[root]) tempGroups[root] = [];
+            tempGroups[root].push(chunkLines[i]);
+        }
+
+        for (const rootId in tempGroups) {
+            allGroups.push(tempGroups[rootId].map(pLine => lines[pLine.originalIndex]));
+        }
+        currentLineIndex = chunkEndIndex + 1;
+    }
+    
+    return allGroups;
+}
+
+function autoMergeOcrData(lines, naturalWidth, naturalHeight, config) {
+    if (!config.enabled || !lines || lines.length < 2) return lines;
+
+    const groups = groupOcrData(lines, naturalWidth, naturalHeight, config);
     const finalMergedData = [];
-    for (const rootId in groups) {
-        const group = groups[rootId];
+
+    for (const group of groups) {
         if (group.length === 1) {
-            finalMergedData.push(lines[group[0].originalIndex]);
-        } else {
-            const isVertical = group[0].isVertical;
-            group.sort((a, b) => isVertical ? (b.bbox.x - a.bbox.x) : (a.bbox.y - b.bbox.y));
-            const joinChar = config.add_space_on_merge ? ' ' : '\u200B';
-            const combinedText = group.map(l => l.text).join(joinChar);
-            const bbox = group.reduce((acc, line) => ({
-                minX: Math.min(acc.minX, line.bbox.x), minY: Math.min(acc.minY, line.bbox.y),
-                maxX: Math.max(acc.maxX, line.bbox.right), maxY: Math.max(acc.maxY, line.bbox.bottom)
-            }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
-            finalMergedData.push({
-                text: combinedText, isMerged: true, forcedOrientation: isVertical ? 'vertical' : 'horizontal',
-                tightBoundingBox: { x: bbox.minX / scale, y: bbox.minY / scale, width: (bbox.maxX - bbox.minX) / scale, height: (bbox.maxY - bbox.minY) / scale }
-            });
+            finalMergedData.push(group[0]);
+            continue;
         }
+
+        // --- ROBUST ORIENTATION DETECTION (THE FIX) ---
+        const verticalCount = group.filter(l => l.tightBoundingBox.height > l.tightBoundingBox.width).length;
+        const isVerticalGroup = verticalCount > group.length / 2;
+        
+        // --- STABLE SORTING LOGIC ---
+        group.sort((a, b) => {
+            const boxA = a.tightBoundingBox;
+            const boxB = b.tightBoundingBox;
+            if (isVerticalGroup) {
+                const centerXA = -(boxA.x + boxA.width / 2);
+                const centerXB = -(boxB.x + boxB.width / 2);
+                if (centerXA !== centerXB) return centerXA - centerXB;
+                return (boxA.y + boxA.height / 2) - (boxB.y + boxB.height / 2);
+            } else {
+                const centerYA = boxA.y + boxA.height / 2;
+                const centerYB = boxB.y + boxB.height / 2;
+                if (centerYA !== centerYB) return centerYA - centerYB;
+                return (boxA.x + boxA.width / 2) - (boxB.x + boxB.width / 2);
+            }
+        });
+
+        const joinChar = config.add_space_on_merge ? ' ' : '\u200B';
+        const combinedText = group.map(l => l.text).join(joinChar);
+
+        const mergedBbox = group.reduce((acc, line) => {
+            const b = line.tightBoundingBox;
+            return {
+                minX: Math.min(acc.minX, b.x),
+                minY: Math.min(acc.minY, b.y),
+                maxX: Math.max(acc.maxX, b.x + b.width),
+                maxY: Math.max(acc.maxY, b.y + b.height),
+            };
+        }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+
+        finalMergedData.push({
+            text: combinedText,
+            isMerged: true,
+            forcedOrientation: isVerticalGroup ? 'vertical' : 'horizontal',
+            tightBoundingBox: {
+                x: mergedBbox.minX,
+                y: mergedBbox.minY,
+                width: mergedBbox.maxX - mergedBbox.minX,
+                height: mergedBbox.maxY - mergedBbox.minY,
+            },
+        });
     }
-    if (finalMergedData.length < lines.length) console.log(`[AutoMerge] Finished. Initial: ${lines.length}, Final: ${finalMergedData.length}`);
+
+    if (finalMergedData.length < lines.length) {
+        console.log(`[AutoMerge] Finished. Initial: ${lines.length}, Final: ${finalMergedData.length}`);
+    }
     return finalMergedData;
 }
+
 
 // --- Utility Functions ---
 
@@ -263,7 +377,6 @@ app.get('/ocr', async (req, res) => {
 
     if (ocrCache.has(imageUrl)) {
         const cachedEntry = ocrCache.get(imageUrl);
-        // Handle both new {context, data} and old array formats
         const responseData = cachedEntry.data !== undefined ? cachedEntry.data : cachedEntry;
         console.log(`[OCR] [${cachedEntry.context || context}] Cache HIT for: ...${imageUrl.slice(-40)}`);
         return res.json(responseData);
@@ -271,29 +384,71 @@ app.get('/ocr', async (req, res) => {
 
     console.log(`[OCR] [${context}] Processing new image: ...${imageUrl.slice(-40)}`);
     try {
-        let ocrResult;
+        const fetchOptions = {};
         if (authUser) {
             const auth = 'Basic ' + Buffer.from(authUser + ":" + (authPass || '')).toString('base64');
-            const response = await fetch(imageUrl, { headers: { 'Authorization': auth } });
-            if (!response.ok) throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
-            const imageBuffer = Buffer.from(await response.arrayBuffer());
-            const mimeType = response.headers.get('content-type') || 'image/jpeg';
-            const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
-            ocrResult = await lens.scanByURL(dataUrl);
+            fetchOptions.headers = { 'Authorization': auth };
+        }
+        
+        const response = await fetch(imageUrl, fetchOptions);
+        if (!response.ok) throw new Error(`Failed to download image. Status: ${response.status} ${response.statusText}`);
+        const imageBuffer = Buffer.from(await response.arrayBuffer());
+
+        const image = sharp(imageBuffer);
+        const metadata = await image.metadata();
+        const fullWidth = metadata.width;
+        const fullHeight = metadata.height;
+
+        let allFinalResults = [];
+        const MAX_CHUNK_HEIGHT = 3000;
+
+        if (fullHeight > MAX_CHUNK_HEIGHT) {
+            console.log(`[OCR] [${context}] Image is tall (${fullHeight}px). Processing in chunks.`);
+            for (let yOffset = 0; yOffset < fullHeight; yOffset += MAX_CHUNK_HEIGHT) {
+                const chunkHeight = Math.min(MAX_CHUNK_HEIGHT, fullHeight - yOffset);
+                console.log(`[OCR] [${context}] Processing chunk at y=${yOffset} (size: ${fullWidth}x${chunkHeight})`);
+                
+                const chunkBuffer = await image.extract({ left: 0, top: yOffset, width: fullWidth, height: chunkHeight }).toBuffer();
+                const mimeType = metadata.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+                const dataUrl = `data:${mimeType};base64,${chunkBuffer.toString('base64')}`;
+
+                const rawChunkResult = await lens.scanByURL(dataUrl);
+                const transformedChunkResult = transformOcrData(rawChunkResult);
+                
+                let mergedChunkResults = transformedChunkResult;
+                if (AUTO_MERGE_CONFIG.enabled && transformedChunkResult.length > 0) {
+                    mergedChunkResults = autoMergeOcrData(transformedChunkResult, fullWidth, chunkHeight, AUTO_MERGE_CONFIG);
+                }
+
+                // Remap coordinates to be relative to the full image
+                for (const result of mergedChunkResults) {
+                    const bbox = result.tightBoundingBox;
+                    const yGlobalPx = (bbox.y * chunkHeight) + yOffset;
+                    result.tightBoundingBox.y = yGlobalPx / fullHeight;
+                    result.tightBoundingBox.height = (bbox.height * chunkHeight) / fullHeight;
+                    allFinalResults.push(result);
+                }
+            }
         } else {
-            ocrResult = await lens.scanByURL(imageUrl);
+            const mimeType = metadata.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+            const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+            const rawResult = await lens.scanByURL(dataUrl);
+            const transformedResult = transformOcrData(rawResult);
+
+            if (AUTO_MERGE_CONFIG.enabled && transformedResult.length > 0) {
+                allFinalResults = autoMergeOcrData(transformedResult, fullWidth, fullHeight, AUTO_MERGE_CONFIG);
+            } else {
+                allFinalResults = transformedResult;
+            }
         }
 
-        const transformedResult = transformOcrData(ocrResult);
-        const finalResult = autoMergeOcrData(transformedResult, AUTO_MERGE_CONFIG);
-
         ocrRequestsProcessed++;
-        const cacheEntry = { context: context, data: finalResult };
+        const cacheEntry = { context: context, data: allFinalResults };
         ocrCache.set(imageUrl, cacheEntry);
         saveCacheToFile();
         
         console.log(`[OCR] [${context}] Successful for ...${imageUrl.slice(-40)}.`);
-        res.json(finalResult);
+        res.json(allFinalResults);
 
     } catch (error) {
         console.error(`[OCR] [${context}] Process failed for ${imageUrl}:`, error.message);
@@ -330,7 +485,6 @@ app.post('/import-cache', upload.single('cacheFile'), (req, res) => {
         let newItemsCount = 0;
         for (const [key, value] of Object.entries(importedData)) {
             if (!ocrCache.has(key)) {
-                // Handle both old (array) and new ({context, data}) formats
                 if (Array.isArray(value)) {
                     ocrCache.set(key, { context: "Imported Data", data: value });
                 } else if (value && value.data) {
@@ -355,8 +509,8 @@ app.listen(port, host, (err) => {
         console.error('Error starting server:', err);
     } else {
         loadCacheFromFile();
-        console.log(`Local OCR Server V4.0 listening at http://${host}:${port}`);
+        console.log(`Local OCR Server V5.0 listening at http://${host}:${port}`);
         console.log(`Cache file path: ${CACHE_FILE_PATH}`);
-        console.log('Features: Auto-Merging, Context Logging, Persistent Caching, Import/Export, Auth, Chapter Pre-processing');
+        console.log('Features: Upgraded Auto-Merging, Tall Image Chunking, Context Logging, Persistent Caching, Import/Export, Auth, Chapter Pre-processing');
     }
 });
