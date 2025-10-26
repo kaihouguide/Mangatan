@@ -23,7 +23,7 @@ With manga from Suwayomi, Mangatan will automatically make each pages' text scan
     *   Follow the installation instructions provided on their official GitHub page to get it running.
 
 2.  **Tampermonkey Extension & Userscript**
-    *   Get the **[Tampermonkey](https://www.tampermonkey.net/)** extension for your browser.
+    *   Get the **[Tampermonkey](https://www.tampermonkey.net/)** extension for your browser. ( allow access to file urls in your browser's extension settings)
     *   Then, install the required userscript for this project from this GitHub repository.
 
 3. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
