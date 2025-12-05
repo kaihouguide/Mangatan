@@ -5,7 +5,7 @@
 // @description  Adds a stable, inline OCR button and modifier-key merging. Now includes a superior CSS blend mode for perfect text contrast on any background. This version includes significant stability improvements to the hover-to-show overlay logic, eliminating flickering. Includes fixes for font size calculation, merged box containment, widow/orphan prevention, and resilience against OCR errors causing text overflow.
 // @author       1Selxo (Original) & Gemini (Refactoring & PC-Centric Features) & Modified for OCR Error Resilience
 // @match        *://127.0.0.1*/*
-// @mmatch       *://localhost*/*
+// @match       *://localhost*/*
 // @match        *://suwayomi*/*
 // @exclude      *://suwayomi.org/*
 // @exclude      *://github.com/*
