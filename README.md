@@ -1,3 +1,7 @@
+### to make it easeier to use this project we started maintaing our own Language-learning Focused [suwayomi-fork](https://github.com/KolbyML/Mangatan) 
+
+
+
 ## Please add \n to nothing in your yomitan replacement patterns under Translation for now
 Welcome! This guide provides the steps to get your OCR server running for a seamless reading experience.
 
