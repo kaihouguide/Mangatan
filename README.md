@@ -1,4 +1,4 @@
-### to make it easeier to use this project we started maintaing our own Language-learning Focused [suwayomi-fork](https://github.com/KolbyML/Mangatan) 
+### To make it easeier to use this project we started maintaing our own Language-learning Focused [suwayomi-fork](https://github.com/KolbyML/Mangatan) 
 
 
 
