@@ -1,5 +1,5 @@
-### To make it easeier to use this project we started maintaing our own Language-learning Focused [suwayomi-fork](https://github.com/KolbyML/Mangatan) 
-
+### To make it easeier to use this project we staroi maintaing our own Language-learning Focused [suwayomi-fork](https://github.com/KolbyML/Mangatan) 
+### have a suggetion or want to have a chat? Join [mangatan's discord server](https://discord.gg/tDAtpPN8KK)
 
 
 ## Please add \n to nothing in your yomitan replacement patterns under Translation for now
