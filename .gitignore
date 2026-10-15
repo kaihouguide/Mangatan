@@ -77,3 +77,4 @@ AGENTS.override.md
 
 # Chapters downloaded by the debug build
 downloads/
+.codegraph/
