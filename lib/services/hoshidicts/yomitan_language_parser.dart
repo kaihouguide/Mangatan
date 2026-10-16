@@ -162,20 +162,18 @@ class YomitanTransform {
   final String description;
 }
 
-typedef YomitanLookupCallback =
-    Future<List<HoshiLookupResult>> Function(
-      String text,
-      int maxResults,
-      int scanLength,
-    );
+typedef YomitanLookupCallback = Future<List<HoshiLookupResult>> Function(
+  String text,
+  int maxResults,
+  int scanLength,
+);
 
-typedef YomitanCandidateLoader =
-    Future<List<YomitanLookupCandidate>> Function(
-      String language,
-      String text,
-      int scanLength,
-      int maxCandidates,
-    );
+typedef YomitanCandidateLoader = Future<List<YomitanLookupCandidate>> Function(
+  String language,
+  String text,
+  int scanLength,
+  int maxCandidates,
+);
 
 Future<List<HoshiLookupResult>> lookupYomitanDictionary({
   required String language,
@@ -255,10 +253,11 @@ int _leadingWordLength(String text, int scanLength) {
   return length;
 }
 
+final _wordCharacterPattern = RegExp(r'[\p{L}\p{N}\p{M}]', unicode: true);
+
 bool _isWordRune(int rune) {
   if (rune == 0x27 || rune == 0x2019) return true;
-  final character = String.fromCharCode(rune);
-  return RegExp(r'[\p{L}\p{N}\p{M}]', unicode: true).hasMatch(character);
+  return _wordCharacterPattern.hasMatch(String.fromCharCode(rune));
 }
 
 bool _isInternalYomitanTrace(YomitanTransform transform) {

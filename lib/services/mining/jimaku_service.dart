@@ -518,12 +518,14 @@ String _cleanJimakuTitleCandidate(String value) => value
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
+final _letterOrDigitPattern = RegExp(r'[\p{L}\p{N}]', unicode: true);
+
 String _normalizedJimakuText(String value) {
   final buffer = StringBuffer();
   var lastWasSpace = true;
   for (final rune in value.toLowerCase().runes) {
     final character = String.fromCharCode(rune);
-    if (RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(character)) {
+    if (_letterOrDigitPattern.hasMatch(character)) {
       buffer.write(character);
       lastWasSpace = false;
     } else if (!lastWasSpace) {

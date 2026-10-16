@@ -887,10 +887,12 @@ _VideoOcrSelection _videoOcrSelectionAtOffset(
   );
 }
 
-bool _isLookupBoundary(String character) =>
-    character.trim().isEmpty ||
-    RegExp(r'[\u3000-\u303f\uff01-\uff65、。！？「」『』（）［］【】…‥・,.!?;:()\[\]{}]')
-        .hasMatch(character);
+final _lookupBoundaryPattern = RegExp(
+  r'[\u3000-\u303f\uff01-\uff65、。！？「」『』（）［］【】…‥・,.!?;:()\[\]{}]',
+);
+final _asciiWordPattern = RegExp(r'[A-Za-z0-9_\-]');
 
-bool _isAsciiWord(String character) =>
-    RegExp(r'[A-Za-z0-9_\-]').hasMatch(character);
+bool _isLookupBoundary(String character) =>
+    character.trim().isEmpty || _lookupBoundaryPattern.hasMatch(character);
+
+bool _isAsciiWord(String character) => _asciiWordPattern.hasMatch(character);

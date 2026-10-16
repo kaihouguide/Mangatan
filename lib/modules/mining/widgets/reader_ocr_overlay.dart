@@ -1850,17 +1850,6 @@ int _characterOffset(OcrTextBlock block, Offset local, Size size) {
       .toInt();
 }
 
-// ignore: unused_element
-String _extractLookupString(String text, int start) {
-  final stop = RegExp(r'[\s。、！？「」『』（）\[\]・,.;:!?]');
-  final buffer = StringBuffer();
-  for (var index = start; index < text.length && buffer.length < 80; index++) {
-    if (stop.hasMatch(text[index])) break;
-    buffer.write(text[index]);
-  }
-  return buffer.toString();
-}
-
 String _extractOcrLookupString(String text, int start) {
   final buffer = StringBuffer();
   for (var index = start; index < text.length && buffer.length < 80; index++) {
