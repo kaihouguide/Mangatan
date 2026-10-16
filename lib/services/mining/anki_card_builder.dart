@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as image;
 import 'package:mangayomi/services/mining/anki_markers.dart';
+import 'package:mangayomi/services/mining/media_file_name.dart';
 import 'package:mangayomi/services/mining/mining_models.dart';
 import 'package:mangayomi/src/rust/api/hoshidicts.dart';
 
@@ -629,10 +630,7 @@ class AnkiCardBuilder {
   }
 
   static String _safeMediaName(String value, {required String extension}) {
-    final safe = value
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    final safe = sanitizeMediaFileName(value);
     return '${safe.isEmpty ? 'mangatan-mining' : safe}.$extension';
   }
 

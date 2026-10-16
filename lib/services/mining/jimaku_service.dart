@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/mining/media_file_name.dart';
 import 'package:path/path.dart' as p;
 
 class JimakuException implements Exception {
@@ -613,10 +614,7 @@ int _tokenScore(String target, String candidate) {
 }
 
 String _safeFileName(String value) {
-  final safe = value
-      .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+  final safe = sanitizeMediaFileName(value);
   return safe.isEmpty ? 'jimaku-subtitle.srt' : safe;
 }
 
