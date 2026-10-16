@@ -114,14 +114,10 @@ class _CustomSubtitleViewState extends ConsumerState<CustomSubtitleView> {
     _hoverLookupTimer?.cancel();
     _hoverExitTimer?.cancel();
     _hoverPopup?.dismiss();
-    final captureContexts = [..._recentCaptureContexts, ?_captureContext];
-    for (final context in captureContexts) {
-      unawaited(
-        context
-            .then((value) => value.sceneCapture?.dispose())
-            .catchError((_) {}),
-      );
-    }
+    [
+      ..._recentCaptureContexts,
+      ?_captureContext,
+    ].forEach(_disposeCaptureContext);
     if (_resumeAfterHover) {
       unawaited(widget.controller.player.play());
     }
@@ -151,16 +147,17 @@ class _CustomSubtitleViewState extends ConsumerState<CustomSubtitleView> {
     if (previous != null) {
       _recentCaptureContexts.add(previous);
       if (_recentCaptureContexts.length > 8) {
-        final expired = _recentCaptureContexts.removeAt(0);
-        unawaited(
-          expired
-              .then((value) => value.sceneCapture?.dispose())
-              .catchError((_) {}),
-        );
+        _disposeCaptureContext(_recentCaptureContexts.removeAt(0));
       }
     }
     _captureCueText = text;
     _captureContext = null;
+  }
+
+  static void _disposeCaptureContext(Future<MiningContext> context) {
+    unawaited(
+      context.then((value) => value.sceneCapture?.dispose()).catchError((_) {}),
+    );
   }
 
   void setPadding(
@@ -223,9 +220,7 @@ class _CustomSubtitleViewState extends ConsumerState<CustomSubtitleView> {
       subtitleText: subtitleText,
     );
     if (selection.text.trim().isEmpty) {
-      if (_highlightStart != -1 || _highlightEnd != -1) {
-        setState(_clearHighlight);
-      }
+      _clearHighlightIfNeeded();
       return null;
     }
     return selection;
@@ -394,9 +389,7 @@ class _CustomSubtitleViewState extends ConsumerState<CustomSubtitleView> {
     _hoverPopup = null;
     _popupHovered = false;
     _hoverSelection = null;
-    if (_highlightStart != -1 || _highlightEnd != -1) {
-      setState(_clearHighlight);
-    }
+    _clearHighlightIfNeeded();
     _resumeHoverPlayback();
   }
 
@@ -497,11 +490,10 @@ class _CustomSubtitleViewState extends ConsumerState<CustomSubtitleView> {
                 backgroundColor: Colors.transparent,
                 shadows: const [],
               );
-        final subtitleStyle = _subtitleFillStyle(rawSubtitleStyle);
         final text = _CrispSubtitleText(
           textKey: _subtitleTextKey,
           text: subtitleText,
-          style: subtitleStyle,
+          style: rawSubtitleStyle,
           textAlign: textAlign,
           textScaler: textScaler,
           outlineColor: _subtitleOutlineColor(rawSubtitleStyle),
@@ -533,10 +525,6 @@ class _CustomSubtitleViewState extends ConsumerState<CustomSubtitleView> {
                             subtitleText: subtitleText,
                           );
                         } else {
-                          _selectionAtPosition(
-                            globalPosition: event.position,
-                            subtitleText: subtitleText,
-                          );
                           _clearHighlightIfNeeded();
                         }
                       },
@@ -544,9 +532,8 @@ class _CustomSubtitleViewState extends ConsumerState<CustomSubtitleView> {
                         if (_desktopHoverEnabled) {
                           _subtitleHovered = false;
                           _scheduleHoverDismiss();
-                        } else if (_highlightStart != -1 ||
-                            _highlightEnd != -1) {
-                          setState(_clearHighlight);
+                        } else {
+                          _clearHighlightIfNeeded();
                         }
                       },
                       child: GestureDetector(
@@ -638,11 +625,9 @@ List<Rect> subtitleHighlightRectsForTesting({
   double maxWidth = 600,
 }) {
   final painter = TextPainter(
-    text: const TextSpan(style: TextStyle(fontSize: 40)),
+    text: TextSpan(text: text, style: const TextStyle(fontSize: 40)),
     textDirection: TextDirection.ltr,
-  );
-  painter.text = TextSpan(text: text, style: const TextStyle(fontSize: 40));
-  painter.layout(maxWidth: maxWidth);
+  )..layout(maxWidth: maxWidth);
   return _textSelectionRects(painter, text, start, end);
 }
 
@@ -770,11 +755,11 @@ bool _isAsciiWord(String value) {
       code == 0x2d;
 }
 
-bool _isLookupBoundary(String value) {
-  return RegExp(
-    r'[\s\u3001\u3002\uff01\uff1f!?\u300c\u300d\u300e\u300f\uff08\uff09()\[\]{}.,;:\u30fb\u2026]',
-  ).hasMatch(value);
-}
+final _lookupBoundaryPattern = RegExp(
+  r'[\s\u3001\u3002\uff01\uff1f!?\u300c\u300d\u300e\u300f\uff08\uff09()\[\]{}.,;:\u30fb\u2026]',
+);
+
+bool _isLookupBoundary(String value) => _lookupBoundaryPattern.hasMatch(value);
 
 class _CrispSubtitleText extends StatelessWidget {
   const _CrispSubtitleText({
@@ -835,7 +820,6 @@ class _CrispSubtitleText extends StatelessWidget {
               highlightStart: -1,
               highlightEnd: -1,
             ),
-            style: _subtitleOutlineStyle(style, outlineColor, outlineWidth),
             textAlign: textAlign,
             textScaler: textScaler,
           ),
@@ -878,10 +862,6 @@ TextSpan _subtitleSpan({
       if (end < text.length) TextSpan(text: text.substring(end)),
     ],
   );
-}
-
-TextStyle _subtitleFillStyle(TextStyle style) {
-  return style;
 }
 
 Color _subtitleOutlineColor(TextStyle style) {
@@ -1004,9 +984,8 @@ class SubtitleAppearancePreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final previewSize = (settings.fontSize ?? 45).clamp(16, 56).toDouble();
-    final style = subtitleTextStyleFromSettings(
-      settings,
-    ).copyWith(fontSize: previewSize);
+    final style = subtitleTextStyleFromSettings(settings)
+        .copyWith(fontSize: previewSize);
     final outlineColor = _subtitleOutlineColor(style);
     final outlineWidth =
         settings.outlineThickness ??
