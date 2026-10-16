@@ -21,6 +21,7 @@ import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
 import 'package:mangayomi/services/sync/google_drive_oauth.dart';
 import 'package:mangayomi/services/sync/google_drive_refresh_token_store.dart';
 import 'package:mangayomi/services/sync/google_drive_sync_storage.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 typedef GoogleDriveChimahonLocalProjectionProvider =
     Future<GoogleDriveChimahonLocalProjection> Function();
@@ -502,13 +503,13 @@ class GoogleDriveChimahonLocalStability {
     final initialTracking = initial.trackingDeletionKeys;
     final finalTracking = finalProjection.trackingDeletionKeys;
     return GoogleDriveChimahonLocalStability._(
-      backupUnchanged: _sameBytes(initialBytes, finalBytes),
+      backupUnchanged: sameBytes(initialBytes, finalBytes),
       unrepresentablePreferenceKeysUnchanged: _sameSet(
         initialUnrepresentable,
         finalUnrepresentable,
       ),
       trackingDeletionKeysUnchanged: _sameSet(initialTracking, finalTracking),
-      previewUsedInitialBackup: _sameBytes(initialBytes, previewBytes),
+      previewUsedInitialBackup: sameBytes(initialBytes, previewBytes),
       mediaSelectionUnchanged:
           initial.mediaSelection == finalProjection.mediaSelection,
       mediaSelectionInitializationUnchanged:
@@ -714,14 +715,6 @@ class _ReadOnlyCrossDeviceSyncStorage implements CrossDeviceSyncStorage {
   }) => Future.error(
     UnsupportedError('A read-only Chimahon preview cannot upload data.'),
   );
-}
-
-bool _sameBytes(List<int> first, List<int> second) {
-  if (first.length != second.length) return false;
-  for (var index = 0; index < first.length; index++) {
-    if (first[index] != second[index]) return false;
-  }
-  return true;
 }
 
 bool _sameSet<T>(Set<T> first, Set<T> second) =>

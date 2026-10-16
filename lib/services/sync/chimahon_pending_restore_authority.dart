@@ -20,6 +20,7 @@ import 'package:mangayomi/services/sync/chimahon_backup_references.dart';
 import 'package:mangayomi/services/sync/chimahon_unknown_field_safety.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_merger.dart';
 import 'package:protobuf/protobuf.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 /// Applies an explicitly selected Chimahon backup after the ordinary
 /// local/cloud merge.
@@ -606,7 +607,7 @@ class ChimahonPendingRestoreAuthority {
       }
       backup.unknownFields.clear();
     }
-    return _sameBytes(before, actual)
+    return sameMessageBytes(before, actual)
         ? null
         : 'restore_unselected_collection_changed';
   }
@@ -655,7 +656,7 @@ class ChimahonPendingRestoreAuthority {
       ..clearField(2)
       ..clearField(3)
       ..unknownFields.clear();
-    return _sameBytes(oldEnvelope, newEnvelope) &&
+    return sameMessageBytes(oldEnvelope, newEnvelope) &&
         _retainsUnknown(selected, after);
   }
 
@@ -678,7 +679,7 @@ class ChimahonPendingRestoreAuthority {
       final next = remaining.removeAt(nextIndex);
       if (!_retainsUnknown(old, next) ||
           (chosen == null
-              ? !_sameBytes(old, next)
+              ? !sameMessageBytes(old, next)
               : !_sameKnownWithSelectedUnknown(next, chosen))) {
         return false;
       }
@@ -716,7 +717,7 @@ class ChimahonPendingRestoreAuthority {
       if (next == null) return false;
       final chosen = selectedByKey[keyOf(old)];
       if (chosen == null) {
-        if (!_sameBytes(old, next)) return false;
+        if (!sameMessageBytes(old, next)) return false;
       } else if (!_retainsUnknown(old, next) ||
           !(selectedValid?.call(old, next, chosen) ?? true)) {
         return false;
@@ -1058,7 +1059,7 @@ class ChimahonPendingRestoreAuthority {
       ..history.clear()
       ..tracking.clear()
       ..unknownFields.clear();
-    if (!_sameBytes(actualRoot, selectedRoot) ||
+    if (!sameMessageBytes(actualRoot, selectedRoot) ||
         !_unknownFieldsEndWith(actual, selected)) {
       return false;
     }
@@ -1106,7 +1107,7 @@ class ChimahonPendingRestoreAuthority {
       ..history.clear()
       ..tracking.clear()
       ..unknownFields.clear();
-    if (!_sameBytes(actualRoot, selectedRoot) ||
+    if (!sameMessageBytes(actualRoot, selectedRoot) ||
         !_unknownFieldsEndWith(actual, selected)) {
       return false;
     }
@@ -1137,7 +1138,7 @@ class ChimahonPendingRestoreAuthority {
     final selectedRoot = selected.deepCopy()
       ..stats.clear()
       ..unknownFields.clear();
-    if (!_sameBytes(actualRoot, selectedRoot) ||
+    if (!sameMessageBytes(actualRoot, selectedRoot) ||
         !_unknownFieldsEndWith(actual, selected)) {
       return false;
     }
@@ -1370,7 +1371,7 @@ class ChimahonPendingRestoreAuthority {
   ) {
     final actualKnown = actual.deepCopy()..unknownFields.clear();
     final selectedKnown = selected.deepCopy()..unknownFields.clear();
-    return _sameBytes(actualKnown, selectedKnown) &&
+    return sameMessageBytes(actualKnown, selectedKnown) &&
         _unknownFieldsEndWith(actual, selected);
   }
 
@@ -1611,16 +1612,6 @@ class ChimahonPendingRestoreAuthority {
       );
     }
     return competing + 1;
-  }
-
-  bool _sameBytes(GeneratedMessage left, GeneratedMessage right) {
-    final leftBytes = left.writeToBuffer();
-    final rightBytes = right.writeToBuffer();
-    if (leftBytes.length != rightBytes.length) return false;
-    for (var index = 0; index < leftBytes.length; index++) {
-      if (leftBytes[index] != rightBytes[index]) return false;
-    }
-    return true;
   }
 
   // Chimahon identifies ordered manga/anime categories by their exact names.

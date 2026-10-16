@@ -7,6 +7,7 @@ import 'package:mangayomi/services/sync/chimahon_sync_codec.dart';
 import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 const _recoveryDirectoryName = 'remote_recovery';
 const _recoveryDigestDomain = 'mangatan.chimahon.remote-recovery.v2';
@@ -117,14 +118,13 @@ class FileChimahonRemoteRecoveryStore implements ChimahonRemoteRecoveryStore {
     RandomAccessFile? lock;
     try {
       await directory.create(recursive: true);
-      lock = await File(
-        p.join(directory.path, '.append.lock'),
-      ).open(mode: FileMode.append);
+      lock = await File(p.join(directory.path, '.append.lock'))
+          .open(mode: FileMode.append);
       await lock.lock(FileLock.blockingExclusive);
 
       if (await target.exists()) {
         final existing = await target.readAsBytes();
-        if (!_sameBytes(existing, bytes)) {
+        if (!sameBytes(existing, bytes)) {
           throw const ChimahonRemoteRecoveryException(
             ChimahonRemoteRecoveryFailure.existingEntryMismatch,
           );
@@ -148,7 +148,7 @@ class FileChimahonRemoteRecoveryStore implements ChimahonRemoteRecoveryStore {
         await temporary.writeAsBytes(bytes, flush: true);
         if (await target.exists()) {
           final existing = await target.readAsBytes();
-          if (!_sameBytes(existing, bytes)) {
+          if (!sameBytes(existing, bytes)) {
             throw const ChimahonRemoteRecoveryException(
               ChimahonRemoteRecoveryFailure.existingEntryMismatch,
             );
@@ -162,7 +162,7 @@ class FileChimahonRemoteRecoveryStore implements ChimahonRemoteRecoveryStore {
         // target was checked again immediately before this atomic publish and
         // completed digest entries are never renamed, deleted, or rewritten.
         await temporary.rename(target.path);
-        if (!_sameBytes(await target.readAsBytes(), bytes)) {
+        if (!sameBytes(await target.readAsBytes(), bytes)) {
           throw const ChimahonRemoteRecoveryException(
             ChimahonRemoteRecoveryFailure.persistenceFailed,
           );
@@ -203,13 +203,5 @@ class FileChimahonRemoteRecoveryStore implements ChimahonRemoteRecoveryStore {
     return sha256
         .convert(utf8.encode('$_recoveryDigestDomain\n$contentDigest'))
         .toString();
-  }
-
-  bool _sameBytes(List<int> first, List<int> second) {
-    if (first.length != second.length) return false;
-    for (var index = 0; index < first.length; index++) {
-      if (first[index] != second[index]) return false;
-    }
-    return true;
   }
 }

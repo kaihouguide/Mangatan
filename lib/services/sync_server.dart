@@ -60,6 +60,7 @@ import 'package:mangayomi/utils/client_id.dart';
 import 'package:mangayomi/utils/log/logger.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 part 'sync_server.g.dart';
 
 /// Matches the server's SYNC.maxRowsPerEntity. A changed-row batch larger
@@ -562,7 +563,7 @@ class SyncServer extends _$SyncServer {
           'previewProjection',
           localProjectionService.createSnapshot,
         );
-        if (!_sameChimahonBackup(localBeforeDownload, localProjection.backup) ||
+        if (!sameMessageBytes(localBeforeDownload, localProjection.backup) ||
             localProjection.persistedMediaSelectionState !=
                 mediaSelectionStateBeforeDownload) {
           throw const SyncStorageException(
@@ -843,12 +844,12 @@ class SyncServer extends _$SyncServer {
     fullSyncWatch.stop();
     AppLogger.log(
       'Chimahon full sync performance: '
-      'total=${(fullSyncWatch.elapsedMicroseconds / Duration.microsecondsPerMillisecond).toStringAsFixed(2)}ms '
-      'pendingRestore=${(pendingRestoreWatch.elapsedMicroseconds / Duration.microsecondsPerMillisecond).toStringAsFixed(2)}ms '
-      'providerSetup=${(providerWatch.elapsedMicroseconds / Duration.microsecondsPerMillisecond).toStringAsFixed(2)}ms '
-      'localSetup=${(setupWatch.elapsedMicroseconds / Duration.microsecondsPerMillisecond).toStringAsFixed(2)}ms '
-      'core=${(coreWatch.elapsedMicroseconds / Duration.microsecondsPerMillisecond).toStringAsFixed(2)}ms '
-      'epub=${(epubDuration.inMicroseconds / Duration.microsecondsPerMillisecond).toStringAsFixed(2)}ms '
+      'total=${_syncMilliseconds(fullSyncWatch.elapsed)}ms '
+      'pendingRestore=${_syncMilliseconds(pendingRestoreWatch.elapsed)}ms '
+      'providerSetup=${_syncMilliseconds(providerWatch.elapsed)}ms '
+      'localSetup=${_syncMilliseconds(setupWatch.elapsed)}ms '
+      'core=${_syncMilliseconds(coreWatch.elapsed)}ms '
+      'epub=${_syncMilliseconds(epubDuration)}ms '
       'provider=${syncPreference.chimahonSyncProvider.name} '
       'mode=${download
           ? 'download'
@@ -917,16 +918,6 @@ class SyncServer extends _$SyncServer {
         return;
       }
     }
-  }
-
-  bool _sameChimahonBackup(BackupMihon first, BackupMihon second) {
-    final firstBytes = first.writeToBuffer();
-    final secondBytes = second.writeToBuffer();
-    if (firstBytes.length != secondBytes.length) return false;
-    for (var index = 0; index < firstBytes.length; index++) {
-      if (firstBytes[index] != secondBytes[index]) return false;
-    }
-    return true;
   }
 
   String _normalizeServer(String? server) {

@@ -1,4 +1,5 @@
 import 'package:protobuf/protobuf.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 enum ChimahonUnknownFieldPlacement { prefix, suffix, anywhere }
 
@@ -49,7 +50,7 @@ abstract final class ChimahonUnknownFieldSafety {
     List<List<int>> target,
     List<List<int>> baseline,
     ChimahonUnknownFieldPlacement placement,
-  ) => _containsBy(target, baseline, placement, _sameBytes);
+  ) => _containsBy(target, baseline, placement, sameBytes);
 
   static bool _containsBy<T>(
     List<T> target,
@@ -78,13 +79,5 @@ abstract final class ChimahonUnknownFieldSafety {
       if (matches) return true;
     }
     return false;
-  }
-
-  static bool _sameBytes(List<int> left, List<int> right) {
-    if (left.length != right.length) return false;
-    for (var index = 0; index < left.length; index++) {
-      if (left[index] != right[index]) return false;
-    }
-    return true;
   }
 }

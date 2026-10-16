@@ -3,6 +3,7 @@ import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupCh
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupEpisode.pb.dart';
 import 'package:mangayomi/services/sync/chimahon_unknown_field_safety.dart';
 import 'package:protobuf/protobuf.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 /// Proofs for the deliberately lossy Mangatan chapter and episode projection.
 ///
@@ -173,21 +174,13 @@ abstract final class ChimahonMediaChildProjectionProof {
     if (localVersion != Int64.ZERO ||
         localModifiedAt <= proposedModifiedAt ||
         !portableValuesAreEqual ||
-        !_sameBytes(remote.writeToBuffer(), proposed.writeToBuffer())) {
+        !sameBytes(remote.writeToBuffer(), proposed.writeToBuffer())) {
       return false;
     }
     return ChimahonUnknownFieldSafety.missingOrReorderedTags(
       baseline: localProjection,
       target: proposed,
     ).isEmpty;
-  }
-
-  static bool _sameBytes(List<int> left, List<int> right) {
-    if (left.length != right.length) return false;
-    for (var index = 0; index < left.length; index++) {
-      if (left[index] != right[index]) return false;
-    }
-    return true;
   }
 
   /// Mangatan historically stores `1` as its no-resume sentinel, while
