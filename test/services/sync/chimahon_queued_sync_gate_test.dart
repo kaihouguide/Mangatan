@@ -26,7 +26,7 @@ void main() {
       final queued = runQueuedChimahonSync(
         coordinator: coordinator,
         readCurrentPreference: () => current,
-        silent: false,
+        scheduled: false,
         synchronize: (preference) async {
           synchronizedPreference = preference;
         },
@@ -60,7 +60,7 @@ void main() {
     (syncOn: false, frequency: 300),
     (syncOn: true, frequency: 0),
   ]) {
-    test('queued silent sync skips when current state is '
+    test('queued scheduled sync skips when current state is '
         '${disabledState.syncOn ? 'Off' : 'disabled'}', () async {
       final coordinator = ChimahonRestoreSyncCoordinator();
       final blockerStarted = Completer<void>();
@@ -77,7 +77,7 @@ void main() {
       final queued = runQueuedChimahonSync(
         coordinator: coordinator,
         readCurrentPreference: () => current,
-        silent: true,
+        scheduled: true,
         synchronize: (_) async {
           backendCalls++;
         },
@@ -112,7 +112,7 @@ void main() {
       final queued = runQueuedChimahonSync(
         coordinator: coordinator,
         readCurrentPreference: () => current,
-        silent: false,
+        scheduled: false,
         synchronize: (_) async {
           backendCalls++;
         },
@@ -132,7 +132,7 @@ void main() {
     final ran = await runQueuedChimahonSync(
       coordinator: ChimahonRestoreSyncCoordinator(),
       readCurrentPreference: () => _enabledPreference(frequency: 0),
-      silent: false,
+      scheduled: false,
       synchronize: (_) async {
         backendCalls++;
       },

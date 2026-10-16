@@ -79,51 +79,28 @@ const SyncPreferenceSchema = CollectionSchema(
       name: r'googleDriveConnected',
       type: IsarType.bool,
     ),
-    r'lastSyncHistory': PropertySchema(
-      id: 13,
-      name: r'lastSyncHistory',
-      type: IsarType.long,
-    ),
-    r'lastSyncManga': PropertySchema(
-      id: 14,
-      name: r'lastSyncManga',
-      type: IsarType.long,
-    ),
-    r'lastSyncUpdate': PropertySchema(
+    r'lastSync': PropertySchema(id: 13, name: r'lastSync', type: IsarType.long),
+    r'server': PropertySchema(id: 14, name: r'server', type: IsarType.string),
+    r'sessionToken': PropertySchema(
       id: 15,
-      name: r'lastSyncUpdate',
-      type: IsarType.long,
+      name: r'sessionToken',
+      type: IsarType.string,
     ),
-    r'server': PropertySchema(id: 16, name: r'server', type: IsarType.string),
-    r'syncHistories': PropertySchema(
-      id: 17,
-      name: r'syncHistories',
-      type: IsarType.bool,
-    ),
+    r'since': PropertySchema(id: 16, name: r'since', type: IsarType.long),
     r'syncMode': PropertySchema(
-      id: 18,
+      id: 17,
       name: r'syncMode',
       type: IsarType.byte,
       enumMap: _SyncPreferencesyncModeEnumValueMap,
     ),
-    r'syncOn': PropertySchema(id: 19, name: r'syncOn', type: IsarType.bool),
-    r'syncSettings': PropertySchema(
-      id: 20,
-      name: r'syncSettings',
-      type: IsarType.bool,
-    ),
-    r'syncUpdates': PropertySchema(
-      id: 21,
-      name: r'syncUpdates',
-      type: IsarType.bool,
-    ),
+    r'syncOn': PropertySchema(id: 18, name: r'syncOn', type: IsarType.bool),
     r'syncYomiApiToken': PropertySchema(
-      id: 22,
+      id: 19,
       name: r'syncYomiApiToken',
       type: IsarType.string,
     ),
     r'syncYomiServer': PropertySchema(
-      id: 23,
+      id: 20,
       name: r'syncYomiServer',
       type: IsarType.string,
     ),
@@ -181,6 +158,12 @@ int _syncPreferenceEstimateSize(
     }
   }
   {
+    final value = object.sessionToken;
+    if (value != null) {
+      bytesCount += 3 + value.length * 3;
+    }
+  }
+  {
     final value = object.syncYomiApiToken;
     if (value != null) {
       bytesCount += 3 + value.length * 3;
@@ -214,17 +197,14 @@ void _syncPreferenceSerialize(
   writer.writeByte(offsets[10], object.chimahonSyncProvider.index);
   writer.writeString(offsets[11], object.email);
   writer.writeBool(offsets[12], object.googleDriveConnected);
-  writer.writeLong(offsets[13], object.lastSyncHistory);
-  writer.writeLong(offsets[14], object.lastSyncManga);
-  writer.writeLong(offsets[15], object.lastSyncUpdate);
-  writer.writeString(offsets[16], object.server);
-  writer.writeBool(offsets[17], object.syncHistories);
-  writer.writeByte(offsets[18], object.syncMode.index);
-  writer.writeBool(offsets[19], object.syncOn);
-  writer.writeBool(offsets[20], object.syncSettings);
-  writer.writeBool(offsets[21], object.syncUpdates);
-  writer.writeString(offsets[22], object.syncYomiApiToken);
-  writer.writeString(offsets[23], object.syncYomiServer);
+  writer.writeLong(offsets[13], object.lastSync);
+  writer.writeString(offsets[14], object.server);
+  writer.writeString(offsets[15], object.sessionToken);
+  writer.writeLong(offsets[16], object.since);
+  writer.writeByte(offsets[17], object.syncMode.index);
+  writer.writeBool(offsets[18], object.syncOn);
+  writer.writeString(offsets[19], object.syncYomiApiToken);
+  writer.writeString(offsets[20], object.syncYomiServer);
 }
 
 SyncPreference _syncPreferenceDeserialize(
@@ -253,23 +233,20 @@ SyncPreference _syncPreferenceDeserialize(
         ChimahonSyncProvider.syncYomi,
     email: reader.readStringOrNull(offsets[11]),
     googleDriveConnected: reader.readBoolOrNull(offsets[12]) ?? false,
-    lastSyncHistory: reader.readLongOrNull(offsets[13]),
-    lastSyncManga: reader.readLongOrNull(offsets[14]),
-    lastSyncUpdate: reader.readLongOrNull(offsets[15]),
-    server: reader.readStringOrNull(offsets[16]),
+    lastSync: reader.readLongOrNull(offsets[13]),
+    server: reader.readStringOrNull(offsets[14]),
+    sessionToken: reader.readStringOrNull(offsets[15]),
+    since: reader.readLongOrNull(offsets[16]),
     syncId: id,
     syncMode:
         _SyncPreferencesyncModeValueEnumMap[reader.readByteOrNull(
-          offsets[18],
+          offsets[17],
         )] ??
         SyncMode.native,
-    syncOn: reader.readBoolOrNull(offsets[19]) ?? false,
-    syncYomiApiToken: reader.readStringOrNull(offsets[22]),
-    syncYomiServer: reader.readStringOrNull(offsets[23]),
+    syncOn: reader.readBoolOrNull(offsets[18]) ?? false,
+    syncYomiApiToken: reader.readStringOrNull(offsets[19]),
+    syncYomiServer: reader.readStringOrNull(offsets[20]),
   );
-  object.syncHistories = reader.readBool(offsets[17]);
-  object.syncSettings = reader.readBool(offsets[20]);
-  object.syncUpdates = reader.readBool(offsets[21]);
   return object;
 }
 
@@ -312,28 +289,22 @@ P _syncPreferenceDeserializeProp<P>(
     case 13:
       return (reader.readLongOrNull(offset)) as P;
     case 14:
-      return (reader.readLongOrNull(offset)) as P;
-    case 15:
-      return (reader.readLongOrNull(offset)) as P;
-    case 16:
       return (reader.readStringOrNull(offset)) as P;
+    case 15:
+      return (reader.readStringOrNull(offset)) as P;
+    case 16:
+      return (reader.readLongOrNull(offset)) as P;
     case 17:
-      return (reader.readBool(offset)) as P;
-    case 18:
       return (_SyncPreferencesyncModeValueEnumMap[reader.readByteOrNull(
                 offset,
               )] ??
               SyncMode.native)
           as P;
-    case 19:
+    case 18:
       return (reader.readBoolOrNull(offset) ?? false) as P;
-    case 20:
-      return (reader.readBool(offset)) as P;
-    case 21:
-      return (reader.readBool(offset)) as P;
-    case 22:
+    case 19:
       return (reader.readStringOrNull(offset)) as P;
-    case 23:
+    case 20:
       return (reader.readStringOrNull(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -1360,39 +1331,39 @@ extension SyncPreferenceQueryFilter
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncHistoryIsNull() {
+  lastSyncIsNull() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
-        const FilterCondition.isNull(property: r'lastSyncHistory'),
+        const FilterCondition.isNull(property: r'lastSync'),
       );
     });
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncHistoryIsNotNull() {
+  lastSyncIsNotNull() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
-        const FilterCondition.isNotNull(property: r'lastSyncHistory'),
+        const FilterCondition.isNotNull(property: r'lastSync'),
       );
     });
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncHistoryEqualTo(int? value) {
+  lastSyncEqualTo(int? value) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
-        FilterCondition.equalTo(property: r'lastSyncHistory', value: value),
+        FilterCondition.equalTo(property: r'lastSync', value: value),
       );
     });
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncHistoryGreaterThan(int? value, {bool include = false}) {
+  lastSyncGreaterThan(int? value, {bool include = false}) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         FilterCondition.greaterThan(
           include: include,
-          property: r'lastSyncHistory',
+          property: r'lastSync',
           value: value,
         ),
       );
@@ -1400,12 +1371,12 @@ extension SyncPreferenceQueryFilter
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncHistoryLessThan(int? value, {bool include = false}) {
+  lastSyncLessThan(int? value, {bool include = false}) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         FilterCondition.lessThan(
           include: include,
-          property: r'lastSyncHistory',
+          property: r'lastSync',
           value: value,
         ),
       );
@@ -1413,7 +1384,7 @@ extension SyncPreferenceQueryFilter
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncHistoryBetween(
+  lastSyncBetween(
     int? lower,
     int? upper, {
     bool includeLower = true,
@@ -1422,153 +1393,7 @@ extension SyncPreferenceQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         FilterCondition.between(
-          property: r'lastSyncHistory',
-          lower: lower,
-          includeLower: includeLower,
-          upper: upper,
-          includeUpper: includeUpper,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncMangaIsNull() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        const FilterCondition.isNull(property: r'lastSyncManga'),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncMangaIsNotNull() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        const FilterCondition.isNotNull(property: r'lastSyncManga'),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncMangaEqualTo(int? value) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.equalTo(property: r'lastSyncManga', value: value),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncMangaGreaterThan(int? value, {bool include = false}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.greaterThan(
-          include: include,
-          property: r'lastSyncManga',
-          value: value,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncMangaLessThan(int? value, {bool include = false}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.lessThan(
-          include: include,
-          property: r'lastSyncManga',
-          value: value,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncMangaBetween(
-    int? lower,
-    int? upper, {
-    bool includeLower = true,
-    bool includeUpper = true,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.between(
-          property: r'lastSyncManga',
-          lower: lower,
-          includeLower: includeLower,
-          upper: upper,
-          includeUpper: includeUpper,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncUpdateIsNull() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        const FilterCondition.isNull(property: r'lastSyncUpdate'),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncUpdateIsNotNull() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        const FilterCondition.isNotNull(property: r'lastSyncUpdate'),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncUpdateEqualTo(int? value) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.equalTo(property: r'lastSyncUpdate', value: value),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncUpdateGreaterThan(int? value, {bool include = false}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.greaterThan(
-          include: include,
-          property: r'lastSyncUpdate',
-          value: value,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncUpdateLessThan(int? value, {bool include = false}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.lessThan(
-          include: include,
-          property: r'lastSyncUpdate',
-          value: value,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  lastSyncUpdateBetween(
-    int? lower,
-    int? upper, {
-    bool includeLower = true,
-    bool includeUpper = true,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.between(
-          property: r'lastSyncUpdate',
+          property: r'lastSync',
           lower: lower,
           includeLower: includeLower,
           upper: upper,
@@ -1738,10 +1563,233 @@ extension SyncPreferenceQueryFilter
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  syncHistoriesEqualTo(bool value) {
+  sessionTokenIsNull() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
-        FilterCondition.equalTo(property: r'syncHistories', value: value),
+        const FilterCondition.isNull(property: r'sessionToken'),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'sessionToken'),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenEqualTo(String? value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'sessionToken',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenGreaterThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'sessionToken',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenLessThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'sessionToken',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenBetween(
+    String? lower,
+    String? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'sessionToken',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenStartsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.startsWith(
+          property: r'sessionToken',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenEndsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.endsWith(
+          property: r'sessionToken',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.contains(
+          property: r'sessionToken',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.matches(
+          property: r'sessionToken',
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'sessionToken', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sessionTokenIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(property: r'sessionToken', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sinceIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'since'),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sinceIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'since'),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sinceEqualTo(int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'since', value: value),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sinceGreaterThan(int? value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'since',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sinceLessThan(int? value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'since',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
+  sinceBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'since',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+        ),
       );
     });
   }
@@ -1879,24 +1927,6 @@ extension SyncPreferenceQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         FilterCondition.equalTo(property: r'syncOn', value: value),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  syncSettingsEqualTo(bool value) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.equalTo(property: r'syncSettings', value: value),
-      );
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterFilterCondition>
-  syncUpdatesEqualTo(bool value) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.equalTo(property: r'syncUpdates', value: value),
       );
     });
   }
@@ -2407,45 +2437,16 @@ extension SyncPreferenceQuerySortBy
     });
   }
 
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortByLastSyncHistory() {
+  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy> sortByLastSync() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncHistory', Sort.asc);
+      return query.addSortBy(r'lastSync', Sort.asc);
     });
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortByLastSyncHistoryDesc() {
+  sortByLastSyncDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncHistory', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortByLastSyncManga() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncManga', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortByLastSyncMangaDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncManga', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortByLastSyncUpdate() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncUpdate', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortByLastSyncUpdateDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncUpdate', Sort.desc);
+      return query.addSortBy(r'lastSync', Sort.desc);
     });
   }
 
@@ -2463,16 +2464,28 @@ extension SyncPreferenceQuerySortBy
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortBySyncHistories() {
+  sortBySessionToken() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncHistories', Sort.asc);
+      return query.addSortBy(r'sessionToken', Sort.asc);
     });
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortBySyncHistoriesDesc() {
+  sortBySessionTokenDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncHistories', Sort.desc);
+      return query.addSortBy(r'sessionToken', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy> sortBySince() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'since', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy> sortBySinceDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'since', Sort.desc);
     });
   }
 
@@ -2499,34 +2512,6 @@ extension SyncPreferenceQuerySortBy
   sortBySyncOnDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'syncOn', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortBySyncSettings() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncSettings', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortBySyncSettingsDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncSettings', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortBySyncUpdates() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncUpdates', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  sortBySyncUpdatesDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncUpdates', Sort.desc);
     });
   }
 
@@ -2740,45 +2725,16 @@ extension SyncPreferenceQuerySortThenBy
     });
   }
 
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenByLastSyncHistory() {
+  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy> thenByLastSync() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncHistory', Sort.asc);
+      return query.addSortBy(r'lastSync', Sort.asc);
     });
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenByLastSyncHistoryDesc() {
+  thenByLastSyncDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncHistory', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenByLastSyncManga() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncManga', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenByLastSyncMangaDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncManga', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenByLastSyncUpdate() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncUpdate', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenByLastSyncUpdateDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'lastSyncUpdate', Sort.desc);
+      return query.addSortBy(r'lastSync', Sort.desc);
     });
   }
 
@@ -2796,16 +2752,28 @@ extension SyncPreferenceQuerySortThenBy
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenBySyncHistories() {
+  thenBySessionToken() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncHistories', Sort.asc);
+      return query.addSortBy(r'sessionToken', Sort.asc);
     });
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenBySyncHistoriesDesc() {
+  thenBySessionTokenDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncHistories', Sort.desc);
+      return query.addSortBy(r'sessionToken', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy> thenBySince() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'since', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy> thenBySinceDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'since', Sort.desc);
     });
   }
 
@@ -2845,34 +2813,6 @@ extension SyncPreferenceQuerySortThenBy
   thenBySyncOnDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'syncOn', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenBySyncSettings() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncSettings', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenBySyncSettingsDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncSettings', Sort.desc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenBySyncUpdates() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncUpdates', Sort.asc);
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QAfterSortBy>
-  thenBySyncUpdatesDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'syncUpdates', Sort.desc);
     });
   }
 
@@ -3006,24 +2946,9 @@ extension SyncPreferenceQueryWhereDistinct
     });
   }
 
-  QueryBuilder<SyncPreference, SyncPreference, QDistinct>
-  distinctByLastSyncHistory() {
+  QueryBuilder<SyncPreference, SyncPreference, QDistinct> distinctByLastSync() {
     return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'lastSyncHistory');
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QDistinct>
-  distinctByLastSyncManga() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'lastSyncManga');
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QDistinct>
-  distinctByLastSyncUpdate() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'lastSyncUpdate');
+      return query.addDistinctBy(r'lastSync');
     });
   }
 
@@ -3036,9 +2961,15 @@ extension SyncPreferenceQueryWhereDistinct
   }
 
   QueryBuilder<SyncPreference, SyncPreference, QDistinct>
-  distinctBySyncHistories() {
+  distinctBySessionToken({bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'syncHistories');
+      return query.addDistinctBy(r'sessionToken', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<SyncPreference, SyncPreference, QDistinct> distinctBySince() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'since');
     });
   }
 
@@ -3051,20 +2982,6 @@ extension SyncPreferenceQueryWhereDistinct
   QueryBuilder<SyncPreference, SyncPreference, QDistinct> distinctBySyncOn() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'syncOn');
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QDistinct>
-  distinctBySyncSettings() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'syncSettings');
-    });
-  }
-
-  QueryBuilder<SyncPreference, SyncPreference, QDistinct>
-  distinctBySyncUpdates() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'syncUpdates');
     });
   }
 
@@ -3186,23 +3103,9 @@ extension SyncPreferenceQueryProperty
     });
   }
 
-  QueryBuilder<SyncPreference, int?, QQueryOperations>
-  lastSyncHistoryProperty() {
+  QueryBuilder<SyncPreference, int?, QQueryOperations> lastSyncProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'lastSyncHistory');
-    });
-  }
-
-  QueryBuilder<SyncPreference, int?, QQueryOperations> lastSyncMangaProperty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'lastSyncManga');
-    });
-  }
-
-  QueryBuilder<SyncPreference, int?, QQueryOperations>
-  lastSyncUpdateProperty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'lastSyncUpdate');
+      return query.addPropertyName(r'lastSync');
     });
   }
 
@@ -3212,9 +3115,16 @@ extension SyncPreferenceQueryProperty
     });
   }
 
-  QueryBuilder<SyncPreference, bool, QQueryOperations> syncHistoriesProperty() {
+  QueryBuilder<SyncPreference, String?, QQueryOperations>
+  sessionTokenProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'syncHistories');
+      return query.addPropertyName(r'sessionToken');
+    });
+  }
+
+  QueryBuilder<SyncPreference, int?, QQueryOperations> sinceProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'since');
     });
   }
 
@@ -3227,18 +3137,6 @@ extension SyncPreferenceQueryProperty
   QueryBuilder<SyncPreference, bool, QQueryOperations> syncOnProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'syncOn');
-    });
-  }
-
-  QueryBuilder<SyncPreference, bool, QQueryOperations> syncSettingsProperty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'syncSettings');
-    });
-  }
-
-  QueryBuilder<SyncPreference, bool, QQueryOperations> syncUpdatesProperty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'syncUpdates');
     });
   }
 

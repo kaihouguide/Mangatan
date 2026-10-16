@@ -299,16 +299,14 @@ class Synching extends _$Synching {
     return value;
   }
 
-  void setLastSyncManga(int timestamp) {
-    _updateCurrentPreference((current) => current.lastSyncManga = timestamp);
+  void setSince(int timestamp) {
+    _updateCurrentPreference((current) => current.since = timestamp);
+    ref.invalidateSelf();
   }
 
-  void setLastSyncHistory(int timestamp) {
-    _updateCurrentPreference((current) => current.lastSyncHistory = timestamp);
-  }
-
-  void setLastSyncUpdate(int timestamp) {
-    _updateCurrentPreference((current) => current.lastSyncUpdate = timestamp);
+  void setLastSync(int timestamp) {
+    _updateCurrentPreference((current) => current.lastSync = timestamp);
+    ref.invalidateSelf();
   }
 
   void setServer(String? server) {
@@ -367,21 +365,6 @@ class Synching extends _$Synching {
     });
     if (restored) ref.invalidateSelf();
     return restored;
-  }
-
-  void setSyncHistories(bool value) {
-    _updateCurrentPreference((current) => current.syncHistories = value);
-    ref.invalidateSelf();
-  }
-
-  void setSyncUpdates(bool value) {
-    _updateCurrentPreference((current) => current.syncUpdates = value);
-    ref.invalidateSelf();
-  }
-
-  void setSyncSettings(bool value) {
-    _updateCurrentPreference((current) => current.syncSettings = value);
-    ref.invalidateSelf();
   }
 
   void setSyncMode(SyncMode value) {

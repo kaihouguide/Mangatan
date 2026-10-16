@@ -162,7 +162,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     if (l10n == null) return;
     await ref
         .read(syncServerProvider(syncId: 1).notifier)
-        .startSync(l10n, true);
+        .startSync(l10n, true, scheduled: true);
   }
 
   void _initializeProviders() {
