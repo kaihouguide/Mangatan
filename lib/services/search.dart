@@ -4,14 +4,8 @@ import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/services/local_source_browser.dart';
 import 'package:mangayomi/services/m_extension_server.dart';
 import 'package:mangayomi/services/isolate_service.dart';
-import 'package:mangayomi/services/local_source_page.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import 'dart:math';
-
-import 'package:mangayomi/eval/model/m_manga.dart';
-import 'package:mangayomi/modules/more/settings/browse/providers/browse_state_provider.dart';
-import 'package:mangayomi/repositories/manga_repository.dart';
 part 'search.g.dart';
 
 @riverpod

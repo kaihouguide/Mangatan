@@ -7,7 +7,6 @@ import 'package:mangayomi/modules/manga/reader/mixins/chapter_reader_settings_mi
 import 'package:mangayomi/modules/manga/reader/mixins/chapter_controller_mixin.dart';
 import 'package:mangayomi/services/epub_chapter_metadata.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 part 'novel_reader_controller_provider.g.dart';
 

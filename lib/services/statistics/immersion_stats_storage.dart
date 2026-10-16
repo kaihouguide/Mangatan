@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:mangayomi/services/statistics/immersion_stats_models.dart';
 
@@ -317,11 +319,13 @@ class ImmersionStatsStorage {
     return result;
   }
 
-  /// Merges one book's restored rows.
+  /// Merges one book's restored or synced rows per day and per field.
   ///
-  /// Unlike the daily manga/Anki rows, Chimahon's novel statistics carry
-  /// `lastStatisticModified`, so the newer row wins outright and ties keep the
-  /// local copy.
+  /// Chimahon's database-backed backups write `lastStatisticModified = 0`, and
+  /// its restorer only adds the missing delta per day. A timestamp therefore
+  /// cannot pick a winner: the counters only grow, so the larger value per
+  /// field already contains the other side's reading. This mirrors both
+  /// Chimahon's `NovelRestorer` and the sync merger's `mergeNovelStatDay`.
   static Future<void> mergeNovelStats(
     String novelId,
     Iterable<NovelStatsEntry> incoming,
@@ -342,13 +346,53 @@ class ImmersionStatsStorage {
           continue;
         }
         final existing = local[index];
-        if (entry.lastStatisticModified > existing.lastStatisticModified) {
-          local[index] = entry;
+        final merged = mergeNovelStatsDay(existing, entry);
+        if (merged != existing) {
+          local[index] = merged;
           changed = true;
         }
       }
       if (changed) await _writeNovelStats(novelId, local);
     });
+  }
+
+  @visibleForTesting
+  static NovelStatsEntry mergeNovelStatsDay(
+    NovelStatsEntry local,
+    NovelStatsEntry remote,
+  ) {
+    final newer =
+        remote.charactersRead > local.charactersRead ||
+            (remote.charactersRead == local.charactersRead &&
+                remote.readingTimeSeconds > local.readingTimeSeconds)
+        ? remote
+        : local;
+    int minNonZero(int first, int second) => first <= 0
+        ? second
+        : second <= 0
+        ? first
+        : math.min(first, second);
+    return local.copyWith(
+      charactersRead: math.max(local.charactersRead, remote.charactersRead),
+      readingTimeSeconds: math.max(
+        local.readingTimeSeconds,
+        remote.readingTimeSeconds,
+      ),
+      minReadingSpeed: minNonZero(
+        local.minReadingSpeed,
+        remote.minReadingSpeed,
+      ),
+      altMinReadingSpeed: minNonZero(
+        local.altMinReadingSpeed,
+        remote.altMinReadingSpeed,
+      ),
+      lastReadingSpeed: newer.lastReadingSpeed,
+      maxReadingSpeed: math.max(local.maxReadingSpeed, remote.maxReadingSpeed),
+      lastStatisticModified: math.max(
+        local.lastStatisticModified,
+        remote.lastStatisticModified,
+      ),
+    );
   }
 
   /// Drops a book's statistics when its library entry is removed.
@@ -377,18 +421,25 @@ class ImmersionStatsStorage {
     T Function(Map<dynamic, dynamic>) fromJson,
   ) {
     if (raw is! String || raw.isEmpty) return <T>[];
+    final Object? decoded;
     try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return <T>[];
-      return [
-        for (final item in decoded)
-          if (item is Map) fromJson(item),
-      ];
+      decoded = jsonDecode(raw);
     } catch (_) {
       // A corrupt payload is treated as empty rather than propagating: the
       // next write repairs it, and reading is on the page-turn path.
       return <T>[];
     }
+    if (decoded is! List) return <T>[];
+    final entries = <T>[];
+    for (final item in decoded) {
+      if (item is! Map) continue;
+      // Skip a malformed row on its own. Failing the whole list would make
+      // the next read-modify-write save it back empty and erase the history.
+      try {
+        entries.add(fromJson(item));
+      } catch (_) {}
+    }
+    return entries;
   }
 
   static String _encodeList(List<dynamic> stats) =>

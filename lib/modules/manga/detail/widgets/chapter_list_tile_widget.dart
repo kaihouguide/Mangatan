@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mangayomi/main.dart';
 import 'package:mangayomi/modules/widgets/custom_extended_image_provider.dart';
 import 'package:mangayomi/modules/widgets/progress_center.dart';
 import 'package:mangayomi/modules/novel/novel_reader_progress.dart';
@@ -28,7 +27,6 @@ import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/download_repository.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
-import 'package:mangayomi/utils/cached_network.dart';
 
 class ChapterListTileWidget extends ConsumerWidget {
   final Chapter chapter;

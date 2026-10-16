@@ -94,7 +94,7 @@ class YouTubeService {
     }
 
     final results = await _client.search.searchContent(query);
-    return results.map(_fromSearchResult).toList();
+    return results.map(_fromSearchResult).nonNulls.toList();
   }
 
   Future<List<YouTubeBrowseItem>> loadCollection(
@@ -225,7 +225,9 @@ class YouTubeService {
 
   static Future<List<mangatan.Video>> resolveVideoStreams(String url) async {
     final bridgeVideo = await _resolveWithBridge(url);
-    if (bridgeVideo != null) {
+    // A bridge answer without streams would surface as "no video"; the
+    // in-process resolver can still find them.
+    if (bridgeVideo != null && bridgeVideo.streams.isNotEmpty) {
       final preferredQuality = await YouTubePreferences.preferredQuality();
       final preferredHeight =
           int.tryParse(preferredQuality.replaceAll('p', '')) ?? 1080;
@@ -387,7 +389,9 @@ class YouTubeService {
     return null;
   }
 
-  static YouTubeBrowseItem _fromSearchResult(youtube.SearchResult result) {
+  /// Returns null for result kinds this browser cannot open, so one new
+  /// YouTube result type does not fail the whole search.
+  static YouTubeBrowseItem? _fromSearchResult(youtube.SearchResult result) {
     return switch (result) {
       youtube.SearchVideo video => YouTubeBrowseItem(
         id: video.id.value,
@@ -422,9 +426,7 @@ class YouTubeService {
             : playlist.thumbnails.last.url.toString(),
         url: 'https://www.youtube.com/playlist?list=${playlist.id}',
       ),
-      _ => throw UnsupportedError(
-        'Unsupported YouTube search result: ${result.runtimeType}',
-      ),
+      _ => null,
     };
   }
 
@@ -528,8 +530,9 @@ class _BridgeYouTubeVideo {
         channelUrl: json['channelUrl']?.toString() ?? '',
         streams: [
           for (final stream in (json['streams'] as List<dynamic>? ?? const []))
-            _BridgeYouTubeStream.fromJson(stream as Map<String, dynamic>),
-        ],
+            if (stream is Map<String, dynamic>)
+              _BridgeYouTubeStream.fromJson(stream),
+        ].where((stream) => stream.url.isNotEmpty).toList(),
       );
 
   final String title;

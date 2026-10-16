@@ -212,16 +212,21 @@ void WriteUint8(uint8_t* target, size_t offset, uint8_t value) {
   *(target + offset) = value;
 }
 
+void ScreenAiFreeUnchecked(void* pointer) {
+  if (pointer) {
+    CoTaskMemFree(pointer);
+  }
+}
+
 }  // namespace
 
-extern "C" __declspec(dllexport) int ScreenAiRecognize(
-    const wchar_t* component_dir,
-    const uint8_t* rgba_pixels,
-    int32_t width,
-    int32_t height,
-    uint8_t** output,
-    uint32_t* output_length,
-    char** error) {
+static int RecognizeUnchecked(const wchar_t* component_dir,
+                              const uint8_t* rgba_pixels,
+                              int32_t width,
+                              int32_t height,
+                              uint8_t** output,
+                              uint32_t* output_length,
+                              char** error) {
   if (output) {
     *output = nullptr;
   }
@@ -295,8 +300,35 @@ extern "C" __declspec(dllexport) int ScreenAiRecognize(
   return 1;
 }
 
-extern "C" __declspec(dllexport) void ScreenAiFree(void* pointer) {
-  if (pointer) {
-    CoTaskMemFree(pointer);
+extern "C" __declspec(dllexport) int ScreenAiRecognize(
+    const wchar_t* component_dir,
+    const uint8_t* rgba_pixels,
+    int32_t width,
+    int32_t height,
+    uint8_t** output,
+    uint32_t* output_length,
+    char** error) {
+  // An exception leaving this export would terminate the app. A very large
+  // capture can fail to allocate its BGRA copy; report that like any other
+  // OCR failure instead.
+  try {
+    return RecognizeUnchecked(component_dir, rgba_pixels, width, height,
+                              output, output_length, error);
+  } catch (...) {
+    if (output) {
+      ScreenAiFreeUnchecked(*output);
+      *output = nullptr;
+    }
+    if (output_length) {
+      *output_length = 0;
+    }
+    if (error && !*error) {
+      *error = CopyCString("ScreenAI OCR failed");
+    }
+    return 0;
   }
+}
+
+extern "C" __declspec(dllexport) void ScreenAiFree(void* pointer) {
+  ScreenAiFreeUnchecked(pointer);
 }

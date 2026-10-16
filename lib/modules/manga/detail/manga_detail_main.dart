@@ -14,7 +14,6 @@ import 'package:mangayomi/modules/widgets/desktop_back_navigation_handler.dart';
 import 'package:mangayomi/modules/widgets/error_text.dart';
 import 'package:mangayomi/modules/widgets/progress_center.dart';
 import 'package:mangayomi/utils/source_lookup.dart';
-import 'package:mangayomi/repositories/source_repository.dart';
 
 class MangaReaderDetail extends ConsumerStatefulWidget {
   final int mangaId;

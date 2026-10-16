@@ -25,9 +25,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../providers/storage_provider.dart';
 
-import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/settings.dart';
-
 class ExtensionServerScreen extends ConsumerStatefulWidget {
   const ExtensionServerScreen({super.key});
 
@@ -926,7 +923,7 @@ class _ExtensionServerScreenState extends ConsumerState<ExtensionServerScreen> {
       type: FileType.custom,
       allowedExtensions: const ['jar'],
     );
-    final file = result?.singleOrNull;
+    final file = result.singleOrNull;
     final filePath = file?.path;
     if (filePath == null || filePath.isEmpty) {
       return null;

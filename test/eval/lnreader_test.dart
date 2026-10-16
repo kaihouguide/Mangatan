@@ -1,10 +1,13 @@
+import 'dart:ffi';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mangayomi/eval/lnreader/js_cheerio.dart';
 import 'package:mangayomi/eval/lnreader/service.dart';
 import 'package:mangayomi/models/source.dart';
 
 void main() {
-  group('LNReader JsCheerio Optimizations', () {
+  group('LNReader JsCheerio Optimizations', skip: _quickJsUnavailable(), () {
     test('ElementCollection batch find, text, and eq work properly', () async {
       final runtime = getJavascriptRuntime();
       final cheerio = JsCheerio(runtime)..init();
@@ -77,7 +80,7 @@ void main() {
     });
   });
 
-  group('LNReaderExtensionService storage and headers', () {
+  group('LNReaderExtensionService storage and headers', skip: _quickJsUnavailable(), () {
     test('storage get and set persist within session', () async {
       final source = Source()
         ..id = 12345
@@ -379,6 +382,15 @@ void main() {
       },
     );
   });
+}
+
+/// flutter_qjs resolves QuickJS from the running process on desktop, so the
+/// engine exists in the app but not in a plain `flutter test` host.
+String? _quickJsUnavailable() {
+  if (Platform.isWindows || Platform.isAndroid) return null;
+  return DynamicLibrary.process().providesSymbol('jsNewRuntime')
+      ? null
+      : 'QuickJS is not linked into the test process';
 }
 
 String jsonStringEscape(String s) {

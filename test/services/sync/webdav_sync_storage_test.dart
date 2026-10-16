@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupMihon.pb.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_codec.dart';
 import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
@@ -52,6 +54,32 @@ void main() {
       );
     },
   );
+
+  test('does not send credentials through a cross-origin redirect', () async {
+    final hosts = <String>[];
+    final redirecting = WebDavSyncStorage(
+      collectionUrl: Uri.parse('https://dav.example/dav/'),
+      credentials: const WebDavCredentials(
+        username: 'reader',
+        password: 'secret',
+      ),
+      client: MockClient((request) async {
+        hosts.add(request.url.host);
+        return http.Response(
+          '',
+          302,
+          headers: {'location': 'http://elsewhere.example/dav/file'},
+        );
+      }),
+    );
+    addTearDown(redirecting.close);
+
+    await expectLater(
+      redirecting.download(),
+      throwsA(isA<SyncStorageException>()),
+    );
+    expect(hosts, ['dav.example']);
+  });
 
   test('create and update conflicts map to shared sync conflict', () async {
     final bytes = const ChimahonSyncCodec().encode(

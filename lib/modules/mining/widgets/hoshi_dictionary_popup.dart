@@ -443,7 +443,7 @@ class _HoshiDictionaryPopupState extends State<HoshiDictionaryPopup> {
       final dictionaryProfile = await _resolvedProfile();
       final profile = dictionaryProfile.anki;
       if (!profile.ankiEnabled) return const [];
-      return AnkiConnectService(
+      return await AnkiConnectService(
         endpoint: await MiningPreferences.getAnkiEndpoint(),
       ).findDuplicateNoteIds(
         deckName: profile.deckName,
@@ -1450,8 +1450,12 @@ const Rect kAnkiCropDefaultRect = Rect.fromLTRB(0.1, 0.1, 0.9, 0.9);
 /// the full captured page. Returns `null` when the raster produced no bytes.
 Future<Uint8List?> cropControllerToPngBytes(CropController controller) async {
   final ui.Image bitmap = await controller.croppedBitmap();
-  final byteData = await bitmap.toByteData(format: ui.ImageByteFormat.png);
-  return byteData?.buffer.asUint8List();
+  try {
+    final byteData = await bitmap.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  } finally {
+    bitmap.dispose();
+  }
 }
 
 Future<Uint8List?> _showCropDialog({

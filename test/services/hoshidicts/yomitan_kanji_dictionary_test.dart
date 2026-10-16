@@ -22,6 +22,36 @@ void main() {
     }
   });
 
+  test('rejects dictionary titles that are not one folder name', () async {
+    for (final title in ['../escape', r'a\b', '..', 'C:escape']) {
+      final zip = File(
+        '${temporaryDirectory.path}${Platform.pathSeparator}unsafe.zip',
+      );
+      await zip.writeAsBytes(
+        ZipEncoder().encode(
+          Archive()..addFile(
+            ArchiveFile.string('index.json', jsonEncode({'title': title})),
+          ),
+        ),
+      );
+      await expectLater(
+        ensureYomitanDictionaryTitleIsSafe(zip.path),
+        throwsFormatException,
+        reason: title,
+      );
+    }
+  });
+
+  test('accepts ordinary dictionary titles', () async {
+    final zip = await _writeDictionaryZip(
+      temporaryDirectory,
+      title: 'JMdict [2024-05-01]',
+      kanjiBank: const [],
+      tagBank: const [],
+    );
+    await ensureYomitanDictionaryTitleIsSafe(zip.path);
+  });
+
   test('imports Yomitan V3 Kanji banks and resolves tag metadata', () async {
     final zip = await _writeDictionaryZip(
       temporaryDirectory,

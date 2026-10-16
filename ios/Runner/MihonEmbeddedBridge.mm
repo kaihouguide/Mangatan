@@ -122,9 +122,14 @@ MangatanEmbeddedMihonThread *EmbeddedMihonThread() {
 }
 
 NSError *EmbeddedMihonError(NSInteger code, NSString *message) {
+  // A nil value in the dictionary literal would raise and terminate the app
+  // instead of reporting the startup failure to Flutter.
   return [NSError errorWithDomain:kEmbeddedMihonErrorDomain
                              code:code
-                         userInfo:@{NSLocalizedDescriptionKey : message}];
+                         userInfo:@{
+                           NSLocalizedDescriptionKey :
+                               message ?: @"The embedded Mihon bridge failed."
+                         }];
 }
 
 NSString *OpenJDKRuntimePath() {
@@ -232,12 +237,20 @@ NSString *JavaExceptionMessage(JNIEnv *env, NSString *fallback) {
       if (!env->ExceptionCheck() && text != nullptr) {
         const char *utf8 = env->GetStringUTFChars(text, nullptr);
         if (utf8 != nullptr) {
-          message = [NSString stringWithUTF8String:utf8];
+          // JNI returns modified UTF-8, which Foundation rejects for
+          // characters outside the BMP. Keep the fallback in that case.
+          NSString *decoded = [NSString stringWithUTF8String:utf8];
+          if (decoded != nil) {
+            message = decoded;
+          }
           env->ReleaseStringUTFChars(text, utf8);
         }
         env->DeleteLocalRef(text);
       } else {
         env->ExceptionClear();
+        if (text != nullptr) {
+          env->DeleteLocalRef(text);
+        }
       }
     }
     env->DeleteLocalRef(throwableClass);
@@ -538,9 +551,14 @@ void MangatanEmbeddedMihonStart(
         if (applicationDirectory != nil) {
           jstring appDirectory =
               environment->NewStringUTF(applicationDirectory.UTF8String);
-          TraceEmbeddedMihon(@"calling EmbeddedBridge.start");
-          jint result = environment->CallStaticIntMethod(
-              gEmbeddedBridgeClass, gStartMethod, port, appDirectory);
+          // JNI forbids calling into Java with the OutOfMemoryError that a
+          // failed NewStringUTF leaves pending.
+          jint result = 0;
+          if (appDirectory != nullptr) {
+            TraceEmbeddedMihon(@"calling EmbeddedBridge.start");
+            result = environment->CallStaticIntMethod(
+                gEmbeddedBridgeClass, gStartMethod, port, appDirectory);
+          }
           TraceEmbeddedMihon(
               [NSString stringWithFormat:
                   @"EmbeddedBridge.start returned %d (exception=%@)",

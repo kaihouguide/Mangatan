@@ -6,9 +6,6 @@ import 'package:mangayomi/services/epub_chapter_metadata.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:mangayomi/main.dart';
 import 'package:mangayomi/models/download.dart';
-import 'package:mangayomi/models/settings.dart';
-import 'package:mangayomi/repositories/download_repository.dart';
-import 'package:mangayomi/repositories/track_repository.dart';
 part 'library_filter_provider.g.dart';
 
 /// Sorts unread counts while keeping fully-read entries at the end.

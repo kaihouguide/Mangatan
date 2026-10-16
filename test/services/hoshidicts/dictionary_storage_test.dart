@@ -187,6 +187,31 @@ void main() {
     },
   );
 
+  test('re-importing keeps the priority and display name', () async {
+    final root = await Directory.systemTemp.createTemp('dictionary-storage-');
+    addTearDown(() => root.delete(recursive: true));
+    await _createDictionary(root, 'Alpha');
+    await _createDictionary(root, 'Beta');
+    await DictionaryStorage.instance.reorder(['Beta', 'Alpha'], root: root);
+    await DictionaryStorage.instance.renameDisplayName(
+      'Beta',
+      'Preferred',
+      root: root,
+    );
+
+    await DictionaryStorage.instance.recordImport(
+      name: 'Beta',
+      termCount: BigInt.one,
+      frequencyCount: BigInt.zero,
+      pitchCount: BigInt.zero,
+      root: root,
+    );
+
+    final installed = await DictionaryStorage.instance.installed(root: root);
+    expect(installed.map((dictionary) => dictionary.name), ['Beta', 'Alpha']);
+    expect(installed.first.displayName, 'Preferred');
+  });
+
   test(
     'applies profile order and enabled dictionaries without rewriting disk order',
     () async {

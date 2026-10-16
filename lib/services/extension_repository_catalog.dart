@@ -161,8 +161,11 @@ Map<String, dynamic> _normalizeModernExtension(
   final resources = extension['resources'] is Map
       ? Map<String, dynamic>.from(extension['resources'] as Map)
       : const <String, dynamic>{};
-  final sources = (extension['sources'] as List? ?? const [])
+  final rawSources = extension['sources'];
+  final sources = (rawSources is List ? rawSources : const [])
       .whereType<Map>()
+      // A source without an ID cannot be bound to a native Mihon source.
+      .where((source) => source['id'] != null)
       .map(
         (source) => {
           'id': source['id'].toString(),

@@ -20,9 +20,6 @@ import 'package:mangayomi/services/m_extension_server.dart';
 import 'package:mangayomi/utils/item_type_localization.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:mangayomi/modules/browse/providers/browse_initial_tab_provider.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/source.dart';
 
 class BrowseScreen extends ConsumerStatefulWidget {
   const BrowseScreen({super.key});
@@ -128,7 +125,7 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen>
       type: FileType.custom,
       allowedExtensions: const ['apk'],
     );
-    final path = selection?.single.path;
+    final path = selection.singleOrNull?.path;
     if (path == null || !mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,

@@ -17,7 +17,6 @@ import 'package:mangayomi/modules/more/settings/browse/providers/browse_state_pr
 import 'package:mangayomi/utils/log/logger.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:path/path.dart' as path;
-import 'package:mangayomi/repositories/settings_repository.dart';
 
 @visibleForTesting
 String? embeddedMihonBaseUrlFromResponse(Map<Object?, Object?>? response) {

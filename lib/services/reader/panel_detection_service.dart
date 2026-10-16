@@ -73,7 +73,11 @@ class PanelDetectionService {
     try {
       await target.parent.create(recursive: true);
       if (await partial.exists()) await partial.delete();
-      final response = await http.get(Uri.parse(modelUrl));
+      // ensureModel shares one in-flight download; a stalled connection
+      // would otherwise keep every caller waiting forever.
+      final response = await http
+          .get(Uri.parse(modelUrl))
+          .timeout(const Duration(minutes: 5));
       if (response.statusCode != HttpStatus.ok) {
         throw HttpException(
           'Panel model download failed (${response.statusCode})',
@@ -104,9 +108,16 @@ class PanelDetectionService {
   }
 
   Future<bool> _isValid(File file) async {
-    if (!await file.exists()) return false;
-    final digest = await sha256.bind(file.openRead()).first;
-    return digest.toString() == modelSha256;
+    try {
+      if (!await file.exists()) return false;
+      final digest = await sha256.bind(file.openRead()).first;
+      return digest.toString() == modelSha256;
+    } on FileSystemException {
+      // An unreadable model is unusable; report it as missing so the user
+      // can download it again instead of seeing a settings page that never
+      // finishes loading.
+      return false;
+    }
   }
 
   Future<List<PanelDetection>> detect(Uint8List encodedImage) async {

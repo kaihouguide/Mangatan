@@ -251,13 +251,16 @@ class ChimahonSyncImporter {
         .nonNulls
         .toSet();
     const novelMaterializer = ChimahonNovelMaterializer();
+    final libraryNovels = chimahonEpubLibraryNovels(
+      backup,
+    ).toList(growable: false);
     final staleCloudNovelParentIds = !syncNovels
         ? <int>{}
         : novelMaterializer.staleCloudNovelParentIds(
             localMangas: localMangas,
             localProgress: localNovelProgress,
             localChapters: localChapters,
-            remote: backup.backupNovels,
+            remote: libraryNovels,
           );
     final activeLocalMangas = localMangas
         .where((manga) => !staleCloudNovelParentIds.contains(manga.id))
@@ -296,7 +299,7 @@ class ChimahonSyncImporter {
             localMangas: activeLocalMangas,
             localProgress: activeLocalNovelProgress,
             localChapters: localChapters,
-            remote: backup.backupNovels,
+            remote: libraryNovels,
           )
         : const ChimahonNovelMaterializationPlan(
             updatedProgress: [],

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/http/idle_timeout_client.dart';
 import 'package:mangayomi/services/sync/google_drive_sync_storage.dart';
 
 /// An explicitly invoked, destructive capability probe for Drive v2 ETags.
@@ -23,7 +24,7 @@ class GoogleDriveConditionalWriteProbe {
   GoogleDriveConditionalWriteProbe({
     required this.accessToken,
     http.Client? client,
-  }) : _client = client ?? http.Client(),
+  }) : _client = client ?? IdleTimeoutClient(http.Client()),
        _ownsClient = client == null {
     if (accessToken.trim().isEmpty) {
       throw ArgumentError.value(

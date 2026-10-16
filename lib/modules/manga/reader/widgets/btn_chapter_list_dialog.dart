@@ -14,7 +14,6 @@ import 'package:mangayomi/utils/design_tokens.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/extensions/string_extensions.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
-import 'package:mangayomi/main.dart';
 
 Widget btnToShowChapterListDialog(
   BuildContext context,

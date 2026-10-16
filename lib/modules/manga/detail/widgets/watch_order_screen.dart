@@ -17,9 +17,6 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/track_preference.dart';
 
 /// Cover height over width, taken from the artwork itself: AniList serves
 /// these at 230x320. Matching it means BoxFit.cover has nothing to crop, so

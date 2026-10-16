@@ -44,6 +44,19 @@ class _OcrSettingsScreenState extends State<OcrSettingsScreen> {
   }
 
   Future<void> _load() async {
+    try {
+      await _loadValues();
+    } catch (error) {
+      // Keep the page usable with its defaults rather than spinning forever.
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load OCR settings: $error')),
+      );
+    }
+  }
+
+  Future<void> _loadValues() async {
     await ReaderOcrState.initialize();
     final values = await Future.wait<dynamic>([
       MiningPreferences.getMokuroWebsiteOcrEnabled(),
@@ -90,7 +103,7 @@ class _OcrSettingsScreenState extends State<OcrSettingsScreen> {
       type: FileType.custom,
       allowedExtensions: const ['tflite'],
     );
-    final selected = result?.single.path;
+    final selected = result.singleOrNull?.path;
     if (selected == null) return;
     try {
       await AnimeTextDetectionService.instance.importModel(File(selected));

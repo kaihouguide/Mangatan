@@ -32,9 +32,6 @@ import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/language.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:isar_community/isar.dart';
-import 'package:mangayomi/modules/widgets/extension_server_warning_banner.dart';
-import 'package:mangayomi/repositories/source_repository.dart';
-import 'package:mangayomi/utils/cached_network.dart';
 
 class ExtensionDetail extends ConsumerStatefulWidget {
   final Source source;

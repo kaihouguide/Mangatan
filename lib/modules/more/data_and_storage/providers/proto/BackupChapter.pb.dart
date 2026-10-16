@@ -32,6 +32,7 @@ class BackupChapter extends $pb.GeneratedMessage {
     $fixnum.Int64? lastModifiedAt,
     $fixnum.Int64? version,
     $core.List<$core.int>? memo,
+    $core.double? progress,
   }) {
     final result = create();
     if (url != null) result.url = url;
@@ -47,6 +48,7 @@ class BackupChapter extends $pb.GeneratedMessage {
     if (lastModifiedAt != null) result.lastModifiedAt = lastModifiedAt;
     if (version != null) result.version = version;
     if (memo != null) result.memo = memo;
+    if (progress != null) result.progress = progress;
     return result;
   }
 
@@ -79,6 +81,7 @@ class BackupChapter extends $pb.GeneratedMessage {
     ..aInt64(12, _omitFieldNames ? '' : 'version')
     ..a<$core.List<$core.int>>(
         13, _omitFieldNames ? '' : 'memo', $pb.PbFieldType.OY)
+    ..aD(14, _omitFieldNames ? '' : 'progress')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -218,6 +221,16 @@ class BackupChapter extends $pb.GeneratedMessage {
   $core.bool hasMemo() => $_has(12);
   @$pb.TagNumber(13)
   void clearMemo() => $_clearField(13);
+
+  /// Chimahon 2.4: resume fraction for novel chapters. Manga ignores it.
+  @$pb.TagNumber(14)
+  $core.double get progress => $_getN(13);
+  @$pb.TagNumber(14)
+  set progress($core.double value) => $_setDouble(13, value);
+  @$pb.TagNumber(14)
+  $core.bool hasProgress() => $_has(13);
+  @$pb.TagNumber(14)
+  void clearProgress() => $_clearField(14);
 }
 
 const $core.bool _omitFieldNames =

@@ -13,12 +13,17 @@ import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupNo
 /// must never be written to the Chimahon wire format. A scoped hash of the
 /// normalized category name gives independently configured desktops the same
 /// portable identity. Chimahon's built-in uncategorized category remains the
-/// special `default` ID and is represented locally by an empty category list.
+/// special `default` membership ID and is represented locally by an empty
+/// category list.
+///
+/// The uncategorized row itself is never exported. Chimahon before 2.4 adds
+/// its own `default` row when one is missing, and 2.4 stores it as database
+/// row `0` with a blank name. Its restorer matches categories by ID or name,
+/// so a synthetic `default`/`Default` row would become a real category there.
 class ChimahonNovelCategoryAdapter {
   const ChimahonNovelCategoryAdapter();
 
   static const uncategorizedId = 'default';
-  static const uncategorizedName = 'Default';
 
   String stableId(String? name) {
     final normalized = normalizeName(name);
@@ -93,14 +98,7 @@ class ChimahonNovelCategoryAdapter {
     }
 
     return ChimahonNovelCategoryExportProjection(
-      categories: [
-        BackupNovelCategory(
-          id: uncategorizedId,
-          name: uncategorizedName,
-          order: Int64(-1),
-        ),
-        ...categoryByWireId.values,
-      ],
+      categories: categoryByWireId.values.toList(growable: false),
       categoryIdsByMangaId: categoryIdsByMangaId,
     );
   }

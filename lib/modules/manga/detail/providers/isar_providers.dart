@@ -4,7 +4,6 @@ import 'package:mangayomi/services/epub_chapter_metadata.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/manga_repository.dart';
 part 'isar_providers.g.dart';
 

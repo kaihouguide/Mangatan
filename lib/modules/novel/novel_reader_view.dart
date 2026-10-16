@@ -13,7 +13,6 @@ import 'package:mangayomi/main.dart';
 import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/epub_book_progress.dart';
 import 'package:mangayomi/models/settings.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/modules/anime/widgets/desktop.dart';
 import 'package:mangayomi/modules/manga/reader/mixins/reader_gestures.dart';
 import 'package:mangayomi/modules/manga/reader/widgets/auto_scroll_button.dart';
@@ -52,7 +51,6 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:flutter/widgets.dart' as widgets;
-import 'package:mangayomi/modules/novel/utils/novel_reader_fonts.dart';
 
 typedef DoubleClickAnimationListener = void Function();
 

@@ -302,34 +302,6 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     );
   }
 
-  Future<String?> _showLocalFolderNameDialog(
-    BuildContext context,
-    String initialName,
-  ) async {
-    final controller = TextEditingController(text: initialName);
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(context.l10n.name),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(labelText: context.l10n.name),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(context.l10n.cancel),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: Text(context.l10n.ok),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showHelpDialog(BuildContext context) {
     final data = (
       "LocalFolder",

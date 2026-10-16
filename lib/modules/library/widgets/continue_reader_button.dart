@@ -13,7 +13,6 @@ import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:mangayomi/services/epub_chapter_metadata.dart';
 import 'package:mangayomi/services/sync/chimahon_novel_materializer.dart';
-import 'package:mangayomi/repositories/history_repository.dart';
 
 class ContinueReaderButton extends ConsumerWidget {
   final Manga entry;
@@ -39,14 +38,18 @@ class ContinueReaderButton extends ConsumerWidget {
                   .isNotEmptySync();
           if (isMissingEpub) {
             botToast(chimahonMissingEpubGuidance, second: 4);
-            await ref.read(
-              importArchivesFromFileProvider(
-                itemType: ItemType.novel,
-                entry,
-                init: false,
-                splitChapters: false,
-              ).future,
-            );
+            try {
+              await ref.read(
+                importArchivesFromFileProvider(
+                  itemType: ItemType.novel,
+                  entry,
+                  init: false,
+                  splitChapters: false,
+                ).future,
+              );
+            } catch (error) {
+              botToast('Import failed: $error');
+            }
             return;
           }
           if (isLocalEpubManga(entry)) {
@@ -63,7 +66,8 @@ class ContinueReaderButton extends ConsumerWidget {
           if (snapshot.hasData && snapshot.data!.isNotEmpty && !incognitoMode) {
             snapshot.data!.first.chapter.value!.pushToReaderView(context);
           } else {
-            userFacingChapters(entry).first.pushToReaderView(context);
+            // A title whose chapters were never fetched has nothing to open.
+            userFacingChapters(entry).firstOrNull?.pushToReaderView(context);
           }
         },
         child: Container(

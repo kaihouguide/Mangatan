@@ -289,10 +289,8 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['zip'],
-        allowMultiple: true,
       );
-      final paths =
-          result?.map((file) => file.path).nonNulls.toList() ?? [];
+      final paths = result.map((file) => file.path).nonNulls.toList();
       await _importDictionaryPaths(paths);
     } catch (error) {
       if (!mounted) return;
@@ -747,13 +745,17 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
         final models = info.noteTypes
             .map((noteType) => noteType.name)
             .toList(growable: false);
-        final selectedModel = models.contains(_ankiProfile.modelName)
+        // A fresh AnkiMobile profile can report no note types or decks yet.
+        // Keep the saved names then, as the AnkiConnect path does.
+        final selectedModel =
+            models.contains(_ankiProfile.modelName) || models.isEmpty
             ? _ankiProfile.modelName
             : models.first;
         final fields = info.fieldsByNoteType[selectedModel] ?? const <String>[];
         final isLapis = _isLapisLike(selectedModel, fields);
         final needsLapisMigration = isLapis && _needsLapisMigration();
-        final selectedDeck = info.decks.contains(_ankiProfile.deckName)
+        final selectedDeck =
+            info.decks.contains(_ankiProfile.deckName) || info.decks.isEmpty
             ? _ankiProfile.deckName
             : info.decks.first;
         final configurationChanged =
@@ -1563,7 +1565,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                       hint: '.gloss-sc-li { color: red; }',
                       maxLines: 12,
                     );
-                    if (value == null) return;
+                    if (value == null || !mounted) return;
                     setState(() {
                       _popupPreferences = _popupPreferences.copyWith(
                         customCss: value,
@@ -2137,6 +2139,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                         );
                         return;
                       }
+                      if (!mounted) return;
                       setState(() => _ankiEndpoint = endpoint);
                       await MiningPreferences.setAnkiEndpoint(endpoint);
                       await _refreshAnki();

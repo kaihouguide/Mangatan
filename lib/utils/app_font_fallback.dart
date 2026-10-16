@@ -36,10 +36,10 @@ TextTheme _applyTextThemeFallback(TextTheme theme) {
   TextStyle? withFallback(TextStyle? style) {
     if (style == null) return null;
     return style.copyWith(
-      fontFamilyFallback: <String>[
+      fontFamilyFallback: <String>{
         ...?style.fontFamilyFallback,
         ...appFontFamilyFallback,
-      ].toSet().toList(),
+      }.toList(),
     );
   }
 

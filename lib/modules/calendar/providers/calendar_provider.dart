@@ -1,5 +1,4 @@
 import 'package:mangayomi/models/manga.dart';
-import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/http/idle_timeout_client.dart';
 import 'package:mangayomi/services/sync/chimahon_backup_fingerprint.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_codec.dart';
 import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
@@ -18,7 +19,7 @@ class GoogleDriveReadOnlyInspector {
     required this.accessToken,
     this.remoteFileName = GoogleDriveSyncStorage.chimahonRemoteFileName,
     http.Client? client,
-  }) : _client = client ?? http.Client(),
+  }) : _client = client ?? IdleTimeoutClient(http.Client()),
        _ownsClient = client == null;
 
   static const _apiHost = 'www.googleapis.com';

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/http/idle_timeout_client.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_codec.dart';
 import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
 import 'package:mangayomi/services/sync/mangatan_epub_blob_storage.dart';
@@ -21,7 +22,7 @@ class WebDavSyncStorage
     required this.credentials,
     http.Client? client,
   }) : collectionUrl = _asCollectionUrl(collectionUrl),
-       _client = client ?? http.Client(),
+       _client = client ?? IdleTimeoutClient(http.Client()),
        _ownsClient = client == null;
 
   static const chimahonRemoteFileName = 'Chimahon_sync.proto.gz';
@@ -206,8 +207,8 @@ class WebDavSyncStorage
       body: bytes,
       headers: {
         'Content-Type': contentType,
-        if (ifMatch != null) 'If-Match': ifMatch,
-        if (ifNoneMatch != null) 'If-None-Match': ifNoneMatch,
+        'If-Match': ?ifMatch,
+        'If-None-Match': ?ifNoneMatch,
       },
     );
     if (response.statusCode == 412 || response.statusCode == 409) {
@@ -240,9 +241,18 @@ class WebDavSyncStorage
     }
     final location = response.headers['location'];
     if (location == null || location.isEmpty) return response;
+    final target = uri.resolve(location);
+    // Every request carries Basic credentials. Following a redirect to
+    // another origin (or from https down to http) would hand them to that
+    // server, so only same-origin redirects are followed.
+    if (target.scheme != uri.scheme ||
+        target.host.toLowerCase() != uri.host.toLowerCase() ||
+        target.port != uri.port) {
+      return response;
+    }
     return _request(
       method,
-      uri.resolve(location),
+      target,
       headers: headers,
       body: body,
       redirectsRemaining: redirectsRemaining - 1,

@@ -2,7 +2,10 @@ import 'package:isar_community/isar.dart';
 import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/epub_book_progress.dart';
 import 'package:mangayomi/models/manga.dart';
+import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupMihon.pb.dart';
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupNovel.pb.dart';
+import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupSourceNovel.pb.dart';
+import 'package:protobuf/protobuf.dart';
 import 'package:mangayomi/services/sync/chimahon_novel_progress_adapter.dart';
 import 'package:mangayomi/utils/chimahon_novel_identity.dart';
 
@@ -13,6 +16,44 @@ const chimahonCloudNovelLinkPrefix = 'chimahon://novel/';
 const chimahonMissingEpubBadge = 'Missing EPUB';
 const chimahonMissingEpubGuidance =
     'EPUB file missing on this device. Select the matching EPUB to read.';
+
+/// `BackupMihon.backupSourceNovels`, which Mangatan carries but does not model.
+const _chimahonSourceNovelsTag = 702;
+
+/// The novels in [backup] that can become Mangatan EPUB books.
+///
+/// Chimahon 2.4 also exports favorites from its novel extensions as
+/// `backupNovels` rows, alongside a `backupSourceNovels` entry for the same
+/// book. Mangatan has no source for them, so materializing one would leave a
+/// "Missing EPUB" entry that no file can satisfy. They still travel on the
+/// wire unchanged; only the local library projection skips them.
+Iterable<BackupNovel> chimahonEpubLibraryNovels(BackupMihon backup) {
+  final sourceNovelIds = <String>{};
+  final encoded =
+      backup.unknownFields.getField(_chimahonSourceNovelsTag)?.lengthDelimited ??
+      const <List<int>>[];
+  for (final bytes in encoded) {
+    try {
+      final novel = BackupSourceNovel.fromBuffer(bytes);
+      final id = ChimahonNovelIdentity.stableIdOrNull(
+        title: novel.title,
+        author: novel.hasAuthor() ? novel.author : null,
+      );
+      if (id != null) sourceNovelIds.add(id);
+    } on InvalidProtocolBufferException {
+      // An unreadable entry cannot identify a book; keep the novel visible.
+    }
+  }
+  if (sourceNovelIds.isEmpty) return backup.backupNovels;
+  return backup.backupNovels.where((novel) {
+    final id = ChimahonNovelIdentity.stableIdOrNull(
+      title: novel.title,
+      author: novel.author,
+      fallbackId: novel.id,
+    );
+    return id == null || !sourceNovelIds.contains(id);
+  });
+}
 
 /// One remote-only novel which still needs an Isar parent ID assigned.
 class ChimahonCloudNovelMaterialization {

@@ -63,8 +63,10 @@ class MihonExtensionDescriptor {
 
   factory MihonExtensionDescriptor.fromJson(Map<String, dynamic> json) {
     final packageName = json['packageName']?.toString().trim() ?? '';
-    final sources = (json['sources'] as List? ?? const [])
+    final rawSources = json['sources'];
+    final sources = (rawSources is List ? rawSources : const [])
         .whereType<Map>()
+        .where((source) => source['id'] != null)
         .map(
           (source) => MihonSourceDescriptor.fromJson(
             source.map((key, value) => MapEntry(key.toString(), value)),

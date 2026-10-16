@@ -12,6 +12,16 @@ void main() {
       expect(hasNewerDictionaryRevision('1.0', '1.0'), isFalse);
     });
 
+    test('compares numeric revisions longer than an int', () {
+      expect(
+        hasNewerDictionaryRevision(
+          '20240501123000000000',
+          '20240601123000000000',
+        ),
+        isTrue,
+      );
+    });
+
     test('falls back to lexical comparison for named revisions', () {
       expect(hasNewerDictionaryRevision('2026-a', '2026-b'), isTrue);
       expect(hasNewerDictionaryRevision(null, '2'), isFalse);

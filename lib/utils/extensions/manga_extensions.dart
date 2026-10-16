@@ -6,8 +6,6 @@ import 'package:mangayomi/utils/chapter_recognition.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
 import 'package:mangayomi/models/download.dart';
-import 'package:mangayomi/repositories/download_repository.dart';
-import 'package:mangayomi/repositories/settings_repository.dart';
 
 /// Sort/identity keys that only bucket by season if numbering actually
 /// repeats across seasons (a real reset) — otherwise chapters key by raw

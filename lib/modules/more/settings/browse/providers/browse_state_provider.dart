@@ -12,8 +12,6 @@ import 'package:mangayomi/services/fetch_item_sources.dart';
 import 'package:mangayomi/services/http/m_client.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:http_interceptor/http_interceptor.dart';
-import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:mangayomi/services/extension_store_service.dart';
 part 'browse_state_provider.g.dart';

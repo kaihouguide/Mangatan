@@ -77,7 +77,6 @@ import 'package:mangayomi/utils/error_toast.dart';
 import 'package:protobuf/protobuf.dart';
 import 'package:mangayomi/utils/log/logger.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:flutter_qjs/quickjs/ffi.dart' hide ListFirstWhere;
 import 'package:mangayomi/main.dart';
 part 'restore.g.dart';
 
@@ -771,7 +770,12 @@ Future<void> restoreBackup(
           }
           settingsRepository.clearSync();
           if (settings != null) {
-            isar.settings.putAllSync(settings);
+            isar.settings.putAllSync([
+              for (final incoming in settings)
+                currentSettings == null
+                    ? incoming
+                    : preserveDeviceLocalSettings(incoming, currentSettings),
+            ]);
           }
           customButtonRepository.clearSync();
           if (customButtons != null) {
@@ -1156,6 +1160,9 @@ Future<void> _restoreTachiBkBackupDataExclusive(
   }
   const manualRestoreAdapter = ChimahonManualRestoreAdapter();
   const novelMaterializer = ChimahonNovelMaterializer();
+  final libraryNovels = chimahonEpubLibraryNovels(
+    backup,
+  ).toList(growable: false);
   final localNovelProgress = isar.epubBookProgress.where().findAllSync();
   final allLocalChapters = isar.chapters.where().findAllSync();
   final allLocalArchiveMangas = isar.mangas
@@ -1167,7 +1174,7 @@ Future<void> _restoreTachiBkBackupDataExclusive(
         localMangas: allLocalArchiveMangas,
         localProgress: localNovelProgress,
         localChapters: allLocalChapters,
-        remote: backup.backupNovels,
+        remote: libraryNovels,
       );
   final localArchiveMangas = allLocalArchiveMangas
       .where((manga) => !obsoleteCloudNovelParentIds.contains(manga.id))
@@ -1253,7 +1260,7 @@ Future<void> _restoreTachiBkBackupDataExclusive(
     localMangas: retainedLocalMangas,
     localProgress: retainedNovelProgress,
     localChapters: retainedLocalChapters,
-    remote: backup.backupNovels,
+    remote: libraryNovels,
   );
   isar.writeTxnSync(() {
     isar.categorys.clearSync();
@@ -1781,6 +1788,19 @@ int _protoInt(Object value) {
     return value;
   }
   return (value as dynamic).toInt() as int;
+}
+
+/// Keeps fields that describe this device rather than the library: folder
+/// paths, the Java runtime, and the proxy. A backup made on another device
+/// would otherwise point them at paths that do not exist here.
+Settings preserveDeviceLocalSettings(Settings incoming, Settings current) {
+  return incoming
+    ..id = current.id
+    ..localFolders = current.localFolders
+    ..askDownloadDestination = current.askDownloadDestination
+    ..androidProxyServer = current.androidProxyServer
+    ..jrePath = current.jrePath
+    ..extensionServerPath = current.extensionServerPath;
 }
 
 void _invalidateCommonState(Ref ref) {

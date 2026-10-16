@@ -237,8 +237,13 @@ Future<MihonFactoryRefreshResult> refreshInstalledMihonFactorySources(
           break;
         }
       }
-    } on Object {
+    } on Object catch (error) {
       groupFailed = true;
+      AppLogger.log(
+        'Mihon factory refresh failed for '
+        '${mihonExtensionGroupKey(template)}: $error',
+        logLevel: LogLevel.warning,
+      );
     }
     if (groupReconciled) {
       reconciledGroups++;

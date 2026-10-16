@@ -593,6 +593,7 @@ class SyncServer extends _$SyncServer {
               second: 5,
             );
           }
+          _reportEpubDownloadFailures(epubResult, silent: silent);
           epubWatch.stop();
           epubDuration += epubWatch.elapsed;
         }
@@ -760,6 +761,7 @@ class SyncServer extends _$SyncServer {
               second: 5,
             );
           }
+          _reportEpubDownloadFailures(epubResult, silent: silent);
           epubWatch.stop();
           epubDuration += epubWatch.elapsed;
         }
@@ -792,6 +794,18 @@ class SyncServer extends _$SyncServer {
     _currentSyncNotifier.setLastSyncManga(timestamp);
     _currentSyncNotifier.setLastSyncHistory(timestamp);
     _currentSyncNotifier.setLastSyncUpdate(timestamp);
+  }
+
+  void _reportEpubDownloadFailures(
+    MangatanEpubSyncResult result, {
+    required bool silent,
+  }) {
+    if (silent || result.placeholdersFailed == 0) return;
+    botToast(
+      '${result.placeholdersFailed} synced EPUB file(s) could not be '
+      'downloaded. They will be retried on the next sync.',
+      second: 5,
+    );
   }
 
   Synching get _currentSyncNotifier =>
@@ -1188,7 +1202,7 @@ class SyncServer extends _$SyncServer {
     final settings = Settings.fromJson(jsonData["settings"]);
     await settingsRepository.writeTransactionAsync(
       () => settingsRepository.putAsync(
-        _preserveDeviceLocalSettings(settings, oldSettings)
+        preserveDeviceLocalSettings(settings, oldSettings)
           ..cookiesList = oldSettings.cookiesList,
       ),
     );
@@ -1334,14 +1348,4 @@ class SyncServer extends _$SyncServer {
     final syncPrefs = ref.watch(synchingProvider(syncId: syncId));
     return syncPrefs.server ?? "";
   }
-}
-
-Settings _preserveDeviceLocalSettings(Settings incoming, Settings current) {
-  return incoming
-    ..id = current.id
-    ..localFolders = current.localFolders
-    ..askDownloadDestination = current.askDownloadDestination
-    ..androidProxyServer = current.androidProxyServer
-    ..jrePath = current.jrePath
-    ..extensionServerPath = current.extensionServerPath;
 }

@@ -15,16 +15,14 @@ import 'package:mangayomi/services/get_detail.dart';
 import 'package:mangayomi/modules/mass_migration/services/mass_migration_service.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/constant.dart';
+import 'package:mangayomi/utils/error_toast.dart';
 import 'package:mangayomi/modules/manga/detail/manga_detail_view.dart';
 import 'package:mangayomi/modules/manga/detail/providers/state_providers.dart';
 import 'package:mangayomi/modules/more/providers/incognito_mode_state_provider.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:mangayomi/utils/extensions/manga_extensions.dart';
-import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/category.dart';
 import 'package:mangayomi/models/chapter.dart';
-import 'package:mangayomi/models/history.dart';
 
 String mangaDetailValueOrFallback(String? value, String fallback) =>
     value == null || value.isEmpty ? fallback : value;
@@ -95,9 +93,11 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
         singleManga: model,
       );
     } else {
-      model.favorite = true;
-      model.dateAdded = DateTime.now().millisecondsSinceEpoch;
-      await mangaRepository.save(model);
+      isar.writeTxnSync(() {
+        model.updateFavorite(true);
+        model.dateAdded = DateTime.now().millisecondsSinceEpoch;
+        isar.mangas.putSync(model);
+      });
     }
   }
 
@@ -151,17 +151,25 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
       link: newManga.link,
       imageUrl: newManga.imageUrl,
     );
-    final preview = await ref.read(
-      getDetailProvider(url: newManga.link!, source: destinationSource).future,
-    );
-    await migrateLibraryItem(
-      ref: ref,
-      oldManga: oldManga,
-      selectedManga: selectedManga,
-      preview: preview,
-      destinationSource: destinationSource,
-    );
-    await mangaRepository.deleteLibrarySourceGroup([newManga]);
+    try {
+      final preview = await ref.read(
+        getDetailProvider(
+          url: newManga.link!,
+          source: destinationSource,
+        ).future,
+      );
+      await migrateLibraryItem(
+        ref: ref,
+        oldManga: oldManga,
+        selectedManga: selectedManga,
+        preview: preview,
+        destinationSource: destinationSource,
+      );
+      await mangaRepository.deleteLibrarySourceGroup([newManga]);
+    } catch (error, stack) {
+      toastError(error, stack: stack, source: 'library-duplicate-migrate');
+      return;
+    }
     if (context.mounted) Navigator.pop(context);
   }
 
@@ -316,25 +324,7 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
                   backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                   elevation: 0,
                 ),
-                onPressed: () async {
-                  final model = widget.manga;
-                  final checkCategoryList = categoryRepository
-                      .isNotEmptyByItemType(model.itemType);
-                  if (checkCategoryList) {
-                    showCategorySelectionDialog(
-                      context: context,
-                      ref: ref,
-                      itemType: model.itemType,
-                      singleManga: model,
-                    );
-                  } else {
-                    isar.writeTxnSync(() {
-                      model.updateFavorite(true);
-                      model.dateAdded = DateTime.now().millisecondsSinceEpoch;
-                      isar.mangas.putSync(model);
-                    });
-                  }
-                },
+                onPressed: () => _onAddToLibraryPressed(context),
                 child: Column(
                   children: [
                     Icon(

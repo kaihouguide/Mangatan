@@ -236,11 +236,14 @@ void main() {
       expect(all.keys, containsAll(['book-a', 'book-b']));
     });
 
-    test('merge prefers the newer row and keeps ties local', () async {
+    test('merge keeps the larger value per field, like Chimahon', () async {
       await ImmersionStatsStorage.saveNovelStats('book', [
         const NovelStatsEntry(
           dateKey: '2026-07-18',
           charactersRead: 500,
+          readingTimeSeconds: 60,
+          minReadingSpeed: 900,
+          maxReadingSpeed: 3000,
           lastStatisticModified: 100,
         ),
         const NovelStatsEntry(
@@ -250,26 +253,32 @@ void main() {
         ),
       ]);
       await ImmersionStatsStorage.mergeNovelStats('book', [
-        // Newer: wins outright, even though the value is lower.
+        // A newer clock does not erase reading the local row already holds.
         const NovelStatsEntry(
           dateKey: '2026-07-18',
           charactersRead: 300,
+          readingTimeSeconds: 90,
+          minReadingSpeed: 700,
+          maxReadingSpeed: 2000,
           lastStatisticModified: 200,
         ),
-        // Same clock: a tie keeps the local row.
-        const NovelStatsEntry(
-          dateKey: '2026-07-19',
-          charactersRead: 999,
-          lastStatisticModified: 100,
-        ),
+        // Chimahon database backups carry no clock; the larger count wins.
+        const NovelStatsEntry(dateKey: '2026-07-19', charactersRead: 999),
       ]);
 
       final byDate = {
         for (final entry in await ImmersionStatsStorage.loadNovelStats('book'))
           entry.dateKey: entry,
       };
-      expect(byDate['2026-07-18']!.charactersRead, 300);
-      expect(byDate['2026-07-19']!.charactersRead, 100);
+      final first = byDate['2026-07-18']!;
+      expect(first.charactersRead, 500);
+      expect(first.readingTimeSeconds, 90);
+      expect(first.minReadingSpeed, 700);
+      expect(first.maxReadingSpeed, 3000);
+      expect(first.lastStatisticModified, 200);
+      final second = byDate['2026-07-19']!;
+      expect(second.charactersRead, 999);
+      expect(second.lastStatisticModified, 100);
     });
 
     test('deleting a book drops only its statistics', () async {

@@ -70,7 +70,10 @@ class ChimahonManualRestoreCategoryAdapter {
       );
     }
     for (final category in novelCategories) {
-      if (category.id == ChimahonNovelCategoryAdapter.uncategorizedId) {
+      // Chimahon 2.4 exports its uncategorized system row as ID `0` with a
+      // blank name; neither form is a user category.
+      if (category.id == ChimahonNovelCategoryAdapter.uncategorizedId ||
+          category.name.trim().isEmpty) {
         continue;
       }
       addBackupCategory(

@@ -7,7 +7,6 @@ import 'package:mangayomi/modules/more/widgets/downloaded_only_widget.dart';
 import 'package:mangayomi/modules/more/widgets/incognito_mode_widget.dart';
 import 'package:mangayomi/modules/more/widgets/list_tile_widget.dart';
 import 'package:mangayomi/providers/l10n_providers.dart';
-import 'package:mangayomi/utils/constant.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 
 class MoreScreen extends ConsumerStatefulWidget {

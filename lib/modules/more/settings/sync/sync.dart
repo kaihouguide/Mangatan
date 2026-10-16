@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
-import 'package:mangayomi/main.dart';
 import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.dart';
 import 'package:mangayomi/modules/more/settings/sync/widgets/auto_sync_frequency_option.dart';
 import 'package:mangayomi/utils/date.dart';
@@ -23,10 +22,7 @@ import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/log/logger.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/modules/more/settings/sync/providers/sync_connection_status_provider.dart';
 import 'package:mangayomi/repositories/sync_preference_repository.dart';
-import 'package:mangayomi/utils/platform_utils.dart';
 
 final _googleDriveConnectionSingleFlight = GoogleDriveConnectionSingleFlight();
 
@@ -904,15 +900,16 @@ class SyncScreen extends ConsumerWidget {
                                                 .notifier,
                                           )
                                           .login(l10n, server, email, password);
+                                // The dialog can be dismissed while the
+                                // connection test is still running.
+                                if (!context.mounted) return;
                                 if (!res.$1) {
                                   setState(() {
                                     isLoading = false;
                                     errorMessage = res.$2;
                                   });
                                 } else {
-                                  if (context.mounted) {
-                                    Navigator.pop(context);
-                                  }
+                                  Navigator.pop(context);
                                 }
                               },
                         child: isLoading

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
 import 'package:http_interceptor/http_interceptor.dart';
+import 'package:mangayomi/eval/aidoku/service.dart';
 import 'package:mangayomi/eval/model/filter.dart';
 import 'package:mangayomi/eval/model/source_preference.dart';
 import 'package:mangayomi/eval/mihon/bridge_http_client.dart';
@@ -17,12 +19,11 @@ import 'package:mangayomi/services/http/m_client.dart';
 import 'package:mangayomi/services/isolate_service.dart';
 import 'package:mangayomi/services/mihon_source_preferences.dart';
 import 'package:mangayomi/utils/extension_language_defaults.dart';
+import 'package:mangayomi/utils/log/logger.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:isar_community/isar.dart';
-import 'package:mangayomi/eval/aidoku/service.dart';
 import 'package:mangayomi/repositories/source_repository.dart';
 import 'package:mangayomi/services/extension_store_service.dart';
-import 'package:mangayomi/utils/log/logger.dart';
 
 Future<void> fetchSourcesList({
   int? id,
@@ -36,21 +37,27 @@ Future<void> fetchSourcesList({
   final url = repo?.jsonUrl;
   if (url == null) return;
 
-  final catalog = await loadExtensionRepositoryCatalog(Uri.parse(url), (
-    uri,
-  ) async {
-    final response = await http.get(uri);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException(
-        'Extension repository returned HTTP ${response.statusCode}.',
-        uri: uri,
-      );
-    }
-    return response.bodyBytes;
-  });
+  ExtensionRepositoryCatalog? catalog;
+  Object? catalogError;
+  StackTrace? catalogStackTrace;
+  try {
+    catalog = await loadExtensionRepositoryCatalog(Uri.parse(url), (uri) async {
+      final response = await http.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'Extension repository returned HTTP ${response.statusCode}.',
+          uri: uri,
+        );
+      }
+      return response.bodyBytes;
+    });
+  } catch (error, stackTrace) {
+    catalogError = error;
+    catalogStackTrace = stackTrace;
+  }
   final info = await PackageInfo.fromPlatform();
 
-  final sourceList = catalog.entries
+  final allSources = (catalog?.entries ?? const <Map<String, dynamic>>[])
       .expand((e) sync* {
         if (e['name'] != null &&
             e['pkg'] != null &&
@@ -60,7 +67,7 @@ Future<void> fetchSourcesList({
             e['nsfw'] != null &&
             e['sources'] != null &&
             e['apk'] != null) {
-          final repoUrl = catalog.indexUri
+          final repoUrl = catalog!.indexUri
               .resolve('.')
               .toString()
               .replaceFirst(RegExp(r'/$'), '');
@@ -153,10 +160,27 @@ Future<void> fetchSourcesList({
       })
       .where(
         (source) =>
-            source.itemType == itemType &&
             source.appMinVerReq != null &&
             compareVersions(info.version, source.appMinVerReq!) > -1,
       )
+      .toList();
+  if (allSources.isEmpty) {
+    // Aidoku repositories use a store format the Mihon catalog loader does
+    // not read. Only their sources are taken from the upstream store parser,
+    // so Mihon, LNReader, and Mangayomi repositories keep their own path.
+    final store = await ExtensionStoreService.fetchStore(url, http);
+    allSources.addAll(
+      store?.sources.where(
+            (source) => source.sourceCodeLanguage == SourceCodeLanguage.aidoku,
+          ) ??
+          const <Source>[],
+    );
+  }
+  if (allSources.isEmpty && catalogError != null) {
+    Error.throwWithStackTrace(catalogError, catalogStackTrace!);
+  }
+  final sourceList = allSources
+      .where((source) => source.itemType == itemType)
       .toList();
 
   if (id != null) {
@@ -263,7 +287,17 @@ Future<void> fetchSourcesList({
     }
   }
 
-  checkIfSourceIsObsolete(sourceList, repo!, itemType);
+  unawaited(
+    checkIfSourceIsObsolete(sourceList, repo!, itemType).catchError((
+      Object error,
+      StackTrace stack,
+    ) {
+      AppLogger.log(
+        'Could not check for obsolete sources: $error\n$stack',
+        logLevel: LogLevel.warning,
+      );
+    }),
+  );
 }
 
 Future<void> _updateSources(
@@ -308,7 +342,9 @@ Future<void> _updateSources(
     sourceCode = sourceCodeOverride;
   } else {
     final req = await http.get(Uri.parse(sources.first.sourceCodeUrl!));
-    sourceCode = sources.first.sourceCodeLanguage == SourceCodeLanguage.mihon
+    sourceCode =
+        sources.first.sourceCodeLanguage == SourceCodeLanguage.mihon ||
+            sources.first.sourceCodeLanguage == SourceCodeLanguage.aidoku
         ? base64.encode(req.bodyBytes)
         : req.body;
   }
@@ -369,6 +405,15 @@ Future<void> _updateSources(
       preferenceList = freshPreferences == null
           ? existingPreferences
           : mergeMihonPreferenceValues(freshPreferences, existingPreferences);
+    } else if (source.sourceCodeLanguage == SourceCodeLanguage.aidoku) {
+      final service = AidokuExtensionService(source);
+      try {
+        headers = service.getHeaders();
+        supportLatest = service.supportsLatest;
+        filterList = await service.fetchFilterList();
+      } finally {
+        service.dispose();
+      }
     } else {
       headers = await getIsolateService.get<Map<String, String>>(
         source: source,

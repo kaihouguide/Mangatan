@@ -15,17 +15,13 @@ import 'package:mangayomi/modules/manga/detail/providers/update_manga_detail_pro
 import 'package:mangayomi/modules/more/providers/algorithm_weights_state_provider.dart';
 import 'package:mangayomi/modules/widgets/category_selection_dialog.dart';
 import 'package:mangayomi/repositories/history_repository.dart';
-import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/repositories/track_repository.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:mangayomi/utils/extensions/manga_extensions.dart';
 import 'package:mangayomi/utils/extensions/string_extensions.dart';
 import 'package:mangayomi/utils/utils.dart';
-import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/history.dart';
-import 'package:mangayomi/models/track_preference.dart';
 
 /// TV-only, d-pad-first anime detail. Equal split, screen-padded: the hero
 /// (cover, title, meta, synopsis) and a vertical list of actions on the left,

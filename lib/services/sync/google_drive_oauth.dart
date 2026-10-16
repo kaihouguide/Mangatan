@@ -7,6 +7,7 @@ import 'package:app_links/app_links.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/http/idle_timeout_client.dart';
 import 'package:mangayomi/utils/url_protocol/api.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -196,7 +197,7 @@ class GoogleDriveOAuthClient {
     http.Client? client,
     GoogleOAuthBrowser? browser,
     DateTime Function()? clock,
-  }) : _client = client ?? http.Client(),
+  }) : _client = client ?? IdleTimeoutClient(http.Client()),
        _ownsClient = client == null,
        _browser = browser ?? _defaultBrowser(config),
        _clock = clock ?? DateTime.now;

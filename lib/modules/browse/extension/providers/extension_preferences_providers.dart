@@ -7,8 +7,6 @@ import 'package:mangayomi/repositories/source_repository.dart';
 import 'package:mangayomi/services/get_source_preference.dart';
 import 'package:mangayomi/services/mihon_source_preferences.dart';
 
-import 'package:mangayomi/eval/aidoku/aidoku_ext_dart.dart' as aidoku;
-import 'dart:async';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
 

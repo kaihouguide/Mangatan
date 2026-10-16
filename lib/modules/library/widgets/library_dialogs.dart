@@ -20,9 +20,9 @@ import 'package:mangayomi/providers/storage_provider.dart';
 import 'package:mangayomi/repositories/download_repository.dart';
 import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
+import 'package:mangayomi/utils/error_toast.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:path/path.dart' as p;
-import 'package:mangayomi/modules/library/providers/file_scanner.dart';
 import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.dart';
 
 /// Shows a dialog for deleting selected manga from library and/or device.
@@ -274,16 +274,24 @@ void showImportLocalDialog(BuildContext context, ItemType itemType) {
                                       ),
                                       onPressed: () async {
                                         setState(() => isLoading = true);
-                                        await ref.watch(
-                                          importArchivesFromFileProvider(
-                                            itemType: itemType,
-                                            null,
-                                            init: true,
-                                            splitChapters: false,
-                                          ).future,
-                                        );
-                                        setState(() => isLoading = false);
+                                        try {
+                                          await ref.read(
+                                            importArchivesFromFileProvider(
+                                              itemType: itemType,
+                                              null,
+                                              init: true,
+                                              splitChapters: false,
+                                            ).future,
+                                          );
+                                        } catch (error, stack) {
+                                          toastError(
+                                            error,
+                                            stack: stack,
+                                            source: 'local-import',
+                                          );
+                                        }
                                         if (!context.mounted) return;
+                                        setState(() => isLoading = false);
                                         Navigator.pop(context);
                                       },
                                       child: Column(

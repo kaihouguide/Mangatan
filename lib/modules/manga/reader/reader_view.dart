@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:photo_view/photo_view.dart';
 import 'package:mangayomi/modules/widgets/error_state.dart';
 import 'package:mangayomi/services/downloaded_chapter.dart';
-import 'package:mangayomi/providers/storage_provider.dart';
 import 'package:mangayomi/modules/manga/archive_reader/providers/archive_reader_providers.dart';
 import 'package:mangayomi/modules/library/providers/file_scanner.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
@@ -47,7 +46,6 @@ import 'package:mangayomi/modules/manga/reader/providers/push_router.dart';
 import 'package:mangayomi/services/get_chapter_pages.dart';
 import 'package:mangayomi/services/chapter_cache.dart';
 import 'package:mangayomi/repositories/chapter_repository.dart';
-import 'package:mangayomi/services/download_manager/downloaded_manga_artifact.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/modules/manga/reader/providers/reader_controller_provider.dart';
 import 'package:mangayomi/modules/more/settings/reader/reader_screen.dart';
@@ -55,17 +53,9 @@ import 'package:mangayomi/modules/manga/reader/providers/manga_reader_provider.d
 import 'package:mangayomi/modules/manga/reader/image_view_webtoon.dart';
 import 'package:mangayomi/modules/widgets/progress_center.dart';
 import 'package:mangayomi/utils/system_ui.dart';
-import 'package:photo_view/photo_view.dart';
-import 'package:mangayomi/modules/widgets/error_state.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:mangayomi/modules/manga/reader/image_view_paged.dart';
-import 'package:mangayomi/modules/manga/reader/widgets/circular_progress_indicator_animate_rotate.dart';
-import 'package:mangayomi/modules/manga/reader/widgets/navigation_overlay.dart';
-import 'package:mangayomi/modules/manga/reader/widgets/transition_view_paged.dart';
-import 'package:mangayomi/modules/widgets/custom_extended_image_provider.dart';
-import 'package:mangayomi/providers/l10n_providers.dart';
 
 const _macosPagedWheelChannel = MethodChannel(
   'com.mangatan.reader/paged_wheel',
@@ -1078,11 +1068,14 @@ class _MangaChapterPageGalleryState
       if (firstChapter == null) return;
 
       // Use mixin's method for memory-bounded preloading with auto-eviction
-      preloadNextChapter(chapterData, chap).then((success) {
-        if (success && mounted) {
-          setState(() {});
-        }
-      });
+      preloadNextChapter(chapterData, chap)
+          .then((success) {
+            if (success && mounted) {
+              setState(() {});
+            }
+          })
+          // Preloading is opportunistic; the chapter loads normally on entry.
+          .catchError((_) {});
     } catch (_) {}
   }
 

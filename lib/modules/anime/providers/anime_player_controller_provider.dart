@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/misc.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:mangayomi/repositories/track_repository.dart';
 import 'package:mangayomi/models/chapter.dart';
@@ -10,10 +9,7 @@ import 'package:mangayomi/services/aniskip.dart';
 import 'package:mangayomi/utils/chapter_recognition.dart';
 import 'package:mangayomi/utils/riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/settings.dart';
-import 'package:mangayomi/models/track.dart';
 part 'anime_player_controller_provider.g.dart';
 
 final fullscreenProvider = StateProvider<bool>(() => false);

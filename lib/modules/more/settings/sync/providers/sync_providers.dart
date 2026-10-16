@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:isar_community/isar.dart';
@@ -10,7 +9,6 @@ import 'package:mangayomi/services/sync/google_drive_connection_intent.dart';
 import 'package:mangayomi/services/sync_server.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:mangayomi/repositories/changed_part_repository.dart';
-import 'package:mangayomi/repositories/sync_preference_repository.dart';
 part 'sync_providers.g.dart';
 
 /// Process-local compare-and-set token for a temporary automatic-sync pause.

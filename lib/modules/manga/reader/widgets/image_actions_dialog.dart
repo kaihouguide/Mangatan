@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/models/source.dart';
-import 'package:mangayomi/modules/library/providers/local_archive.dart';
 import 'package:mangayomi/modules/manga/reader/u_chap_data_preload.dart';
 import 'package:mangayomi/modules/mining/widgets/mining_lookup_sheet.dart';
 import 'package:mangayomi/modules/mining/widgets/reader_ocr_overlay.dart';

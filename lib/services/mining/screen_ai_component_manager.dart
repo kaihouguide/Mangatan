@@ -145,7 +145,11 @@ class ScreenAiComponentManager {
       var received = 0;
       final sink = destination.openWrite();
       try {
-        await for (final chunk in response) {
+        // connectionTimeout covers only the connect. A transfer that stalls
+        // afterwards would otherwise hang the install indefinitely.
+        await for (final chunk in response.timeout(
+          const Duration(minutes: 1),
+        )) {
           sink.add(chunk);
           received += chunk.length;
           onProgress?.call(received, total);

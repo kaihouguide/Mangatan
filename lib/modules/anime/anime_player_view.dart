@@ -18,7 +18,6 @@ import 'package:isar_community/isar.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
 import 'package:mangayomi/main.dart';
 import 'package:mangayomi/repositories/chapter_repository.dart';
-import 'package:mangayomi/repositories/custom_button_repository.dart';
 import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/custom_button.dart';
 import 'package:mangayomi/models/settings.dart';
@@ -87,13 +86,7 @@ import 'package:window_manager/window_manager.dart' show windowManager;
 
 import 'widgets/search_subtitles.dart';
 
-import 'package:flutter/gestures.dart';
 import 'package:mangayomi/models/manga.dart';
-import 'package:mangayomi/modules/anime/widgets/play_or_pause_button.dart';
-import 'package:mangayomi/modules/anime/widgets/tv_player_controls.dart';
-import 'package:mangayomi/modules/anime/widgets/tv_player_settings_panel.dart';
-import 'package:mangayomi/modules/main_view/providers/tv_mode_provider.dart';
-import 'package:mangayomi/utils/manga_cover_actions.dart';
 
 final Map<int, String> _sessionVideoStreamPreferences = {};
 
@@ -423,10 +416,18 @@ class _AnimeStreamPageState extends riv.ConsumerState<AnimeStreamPage>
         reportedDuration != null && reportedDuration > Duration.zero
         ? reportedDuration
         : _player.state.duration;
-    await _streamController.completeEpisode(
-      totalDuration,
-      elapsedSeconds: _watchStopwatch.elapsed.inSeconds,
-    );
+    try {
+      await _streamController.completeEpisode(
+        totalDuration,
+        elapsedSeconds: _watchStopwatch.elapsed.inSeconds,
+      );
+    } catch (error) {
+      // Failing to record history must not stop auto-play of the next episode.
+      AppLogger.log(
+        'Could not record the completed episode: $error',
+        logLevel: LogLevel.warning,
+      );
+    }
     _watchStopwatch.reset();
     if (!mounted) return;
 
@@ -1458,6 +1459,7 @@ mp.register_script_message('call_button_${button.id}_long', button${button.id}lo
   }) async {
     if (_jimakuLoading) return;
     _jimakuLoading = true;
+    final service = JimakuSubtitleService();
     try {
       final guess = await _currentJimakuGuess(titleOverride);
       if (guess.title.trim().isEmpty) {
@@ -1467,7 +1469,6 @@ mp.register_script_message('call_button_${button.id}_long', button${button.id}lo
       if (showFeedback) {
         botToast('Searching Jimaku: ${guess.displayName}');
       }
-      final service = JimakuSubtitleService();
       final entries = await service.searchEntries(
         apiKey: apiKey,
         query: guess.title,
@@ -1534,6 +1535,7 @@ mp.register_script_message('call_button_${button.id}_long', button${button.id}lo
     } catch (e) {
       if (showFeedback) botToast('Jimaku failed: $e', second: 5);
     } finally {
+      service.close();
       _jimakuLoading = false;
     }
   }
@@ -1565,8 +1567,18 @@ mp.register_script_message('call_button_${button.id}_long', button${button.id}lo
         !_jimakuSubtitleTracks.any((track) => track.id == activePath)) {
       return false;
     }
-    await _attachJimakuSubtitles(activePath);
-    return true;
+    try {
+      await _attachJimakuSubtitles(activePath);
+      return true;
+    } catch (error) {
+      // The temporary subtitle files can be gone; fall back to the source's
+      // own subtitles instead of failing the quality change.
+      AppLogger.log(
+        'Could not restore Jimaku subtitles: $error',
+        logLevel: LogLevel.warning,
+      );
+      return false;
+    }
   }
 
   Future<void> _attachJimakuSubtitles(String selectedPath) async {
@@ -1760,7 +1772,10 @@ mp.register_script_message('call_button_${button.id}_long', button${button.id}lo
     }
     if (!isDesktop) {
       final forceLandscape = ref.read(forceLandscapePlayerStateProvider);
-      if (forceLandscape) {
+      // Playing the next episode pushes a fresh player, and the old one's
+      // dispose() resets the orientation to portrait. A viewer still in
+      // fullscreen (fullscreenProvider is global) must stay in landscape.
+      if (forceLandscape || ref.read(fullscreenProvider)) {
         _setLandscapeMode(true);
       }
     }
@@ -2530,14 +2545,9 @@ mp.register_script_message('call_button_${button.id}_long', button${button.id}lo
           GestureDetector(
             onTap: () async {
               try {
-                final result = await FilePicker.pickFiles(
-                  allowMultiple: false,
-                );
-
-                if (result != null && context.mounted) {
-                  await _setSubtitleTrack(
-                    SubtitleTrack.uri(result.first.path!),
-                  );
+                final path = (await FilePicker.pickFile())?.path;
+                if (path != null && context.mounted) {
+                  await _setSubtitleTrack(SubtitleTrack.uri(path));
                 }
                 if (!context.mounted) return;
                 Navigator.pop(context);

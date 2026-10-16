@@ -15,7 +15,6 @@ import 'package:mangayomi/utils/cached_network.dart';
 import 'package:mangayomi/utils/error_toast.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
 
 class SourceRepositories extends ConsumerStatefulWidget {

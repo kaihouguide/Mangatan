@@ -14,7 +14,6 @@ import 'package:mangayomi/utils/item_type_localization.dart';
 import 'package:mangayomi/utils/language.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/utils/cached_network.dart';
 
 class SourceListTile extends StatelessWidget {
   final ItemType itemType;

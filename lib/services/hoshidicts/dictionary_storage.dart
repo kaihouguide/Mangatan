@@ -130,16 +130,25 @@ class DictionaryStorage {
     final directory = root ?? await rootDirectory;
     final manifest = await _readManifest(directory);
     final names = await _dictionaryNames(directory);
-    final preferredOrder = [
-      for (final dictionaryName in _orderedNames(names, manifest))
-        if (dictionaryName != name) dictionaryName,
-      name,
-    ];
+    // Re-importing or updating a dictionary replaces its data in place: it
+    // keeps the priority and display name the user gave it. Only a new
+    // dictionary goes to the end.
+    final previous = manifest[name];
+    final orderedNames = _orderedNames(names, manifest);
+    final preferredOrder = previous?['order'] is int
+        ? orderedNames
+        : [
+            for (final dictionaryName in orderedNames)
+              if (dictionaryName != name) dictionaryName,
+            name,
+          ];
     manifest[name] = {
       'terms': termCount > BigInt.zero,
       'frequencies': frequencyCount > BigInt.zero,
       'pitch': pitchCount > BigInt.zero,
       'kanji': (kanjiCount ?? BigInt.zero) > BigInt.zero,
+      if (previous?['displayName'] case final String displayName)
+        'displayName': displayName,
     };
     _writeOrder(manifest, names, preferredOrder);
     await _writeManifest(directory, manifest);
@@ -257,16 +266,20 @@ class DictionaryStorage {
       name: name,
       displayName:
           metadata?['displayName']?.toString() ?? index?['title']?.toString(),
-      hasTerms: metadata?['terms'] as bool? ?? !hasKanjiMarker,
-      hasFrequencies: metadata?['frequencies'] as bool? ?? false,
-      hasPitch: metadata?['pitch'] as bool? ?? false,
-      hasKanji: metadata?['kanji'] as bool? ?? hasKanjiMarker,
+      hasTerms: _flag(metadata?['terms']) ?? !hasKanjiMarker,
+      hasFrequencies: _flag(metadata?['frequencies']) ?? false,
+      hasPitch: _flag(metadata?['pitch']) ?? false,
+      hasKanji: _flag(metadata?['kanji']) ?? hasKanjiMarker,
       revision: index?['revision']?.toString(),
-      isUpdatable: index?['isUpdatable'] as bool? ?? false,
+      // index.json comes from the imported archive; a non-boolean value must
+      // not make the whole dictionary list unreadable.
+      isUpdatable: _flag(index?['isUpdatable']) ?? false,
       indexUrl: index?['indexUrl']?.toString(),
       downloadUrl: index?['downloadUrl']?.toString(),
     );
   }
+
+  static bool? _flag(Object? value) => value is bool ? value : null;
 
   Map<String, dynamic>? _readDictionaryIndex(Directory directory) {
     final file = File(p.join(directory.path, 'index.json'));
@@ -364,8 +377,14 @@ class DictionaryStorage {
     Map<String, Map<String, dynamic>> manifest,
   ) async {
     await root.create(recursive: true);
-    await File(
-      p.join(root.path, _manifestName),
-    ).writeAsString(const JsonEncoder.withIndent('  ').convert(manifest));
+    // Write beside the manifest and rename over it, so an interrupted write
+    // cannot leave a truncated file that reads back as an empty manifest.
+    final target = p.join(root.path, _manifestName);
+    final temporary = File('$target.tmp');
+    await temporary.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(manifest),
+      flush: true,
+    );
+    await temporary.rename(target);
   }
 }

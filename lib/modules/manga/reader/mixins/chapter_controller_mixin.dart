@@ -2,8 +2,6 @@ import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/history.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/models/settings.dart';
-import 'package:mangayomi/repositories/history_repository.dart';
-import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:mangayomi/utils/extensions/manga_extensions.dart';
 import 'package:isar_community/isar.dart';

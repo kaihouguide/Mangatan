@@ -10,12 +10,6 @@ import 'package:mangayomi/providers/l10n_providers.dart';
 import 'package:mangayomi/services/uninstall_extension.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/language.dart';
-import 'package:mangayomi/models/source.dart';
-import 'package:mangayomi/modules/widgets/tv_row_button.dart';
-import 'package:mangayomi/repositories/source_repository.dart';
-import 'package:mangayomi/services/fetch_sources_list.dart';
-import 'package:mangayomi/utils/cached_network.dart';
-import 'package:mangayomi/utils/platform_utils.dart';
 
 class ExtensionListTileWidget extends ConsumerStatefulWidget {
   final ExtensionCatalogEntry entry;

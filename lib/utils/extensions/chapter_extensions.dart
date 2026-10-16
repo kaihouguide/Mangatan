@@ -22,9 +22,6 @@ import 'package:mangayomi/utils/extensions/string_extensions.dart';
 import 'package:path/path.dart' as p;
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/download.dart';
-import 'package:mangayomi/models/track_preference.dart';
-import 'package:mangayomi/modules/library/providers/file_scanner.dart';
 
 extension ChapterExtension on Chapter {
   Future<void> pushToReaderView(

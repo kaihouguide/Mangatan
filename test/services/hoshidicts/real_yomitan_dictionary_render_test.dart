@@ -37,6 +37,7 @@ void main() {
       final file = File(sample.path);
       if (!file.existsSync()) {
         markTestSkipped('Dictionary ZIP is not present at ${sample.path}');
+        return;
       }
 
       final data = _loadGlossarySamples(file);

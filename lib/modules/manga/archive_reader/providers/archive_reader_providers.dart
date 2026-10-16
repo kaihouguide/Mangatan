@@ -7,7 +7,6 @@ import 'package:mangayomi/src/rust/api/epub.dart';
 import 'package:mangayomi/src/rust/api/rar.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:path/path.dart' as p;
-import 'package:mangayomi/utils/downloaded_page_file.dart';
 part 'archive_reader_providers.g.dart';
 
 // Constants for supported file types
@@ -276,7 +275,7 @@ Future<LocalArchive> _extractArchive(String path) async {
     }
 
     // Handle archive file
-    return _extractFromArchiveFile(path);
+    return await _extractFromArchiveFile(path);
   } catch (e) {
     if (kDebugMode) {
       debugPrint('Error extracting archive from $path: $e');
@@ -423,7 +422,7 @@ Future<(String, LocalExtensionType, Uint8List, String)> _extractArchiveMetadata(
     }
 
     // Handle archive file
-    return _extractMetadataFromArchiveFile(path);
+    return await _extractMetadataFromArchiveFile(path);
   } catch (e) {
     if (kDebugMode) {
       debugPrint('Error extracting metadata from $path: $e');

@@ -258,6 +258,7 @@ List<Rect> parseAnimeTextOutput(
     }
   } else if (outputShape[2] == 6) {
     final count = outputShape[1];
+    if (output.length < count * 6) return const [];
     for (var i = 0; i < count; i++) {
       final offset = i * 6;
       final left = output[offset];

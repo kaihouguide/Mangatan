@@ -12,6 +12,7 @@ import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
 import 'package:mangayomi/services/sync/mangatan_epub_blob_storage.dart';
 import 'package:mangayomi/services/sync/mangatan_epub_sync_manifest.dart';
 import 'package:mangayomi/src/rust/api/epub.dart';
+import 'package:mangayomi/utils/log/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -22,6 +23,7 @@ class MangatanEpubSyncResult {
     this.placeholdersMaterialized = 0,
     this.entriesAdvertised = 0,
     this.entriesRetained = 0,
+    this.placeholdersFailed = 0,
   });
 
   final int blobsUploaded;
@@ -29,6 +31,10 @@ class MangatanEpubSyncResult {
   final int placeholdersMaterialized;
   final int entriesAdvertised;
   final int entriesRetained;
+
+  /// Cloud books whose EPUB could not be downloaded or attached this time.
+  /// They stay placeholders and are retried on the next sync.
+  final int placeholdersFailed;
 
   bool get changedAnything =>
       blobsUploaded > 0 ||
@@ -94,6 +100,7 @@ class MangatanEpubSyncService {
       blobsUploaded: blobsUploaded,
       blobsDownloaded: downloadResult.blobsDownloaded,
       placeholdersMaterialized: downloadResult.placeholdersMaterialized,
+      placeholdersFailed: downloadResult.placeholdersFailed,
       entriesAdvertised: localEntries.length,
       entriesRetained: retained,
     );
@@ -116,23 +123,36 @@ class MangatanEpubSyncService {
 
     var downloaded = 0;
     var materialized = 0;
+    var failed = 0;
     for (final placeholder in missingProgress) {
       final stableId = progressAdapter.stableLocalIdOrNull(placeholder);
       if (stableId == null) continue;
       final entry = manifest.entries[stableId];
       if (entry == null || entry.deleted) continue;
-      final target = await _downloadTargetFor(entry);
-      if (!await _verifiedFileExists(target, entry)) {
-        await _downloadVerifiedBlob(entry, target);
-        downloaded++;
-      }
-      if (await _attachDownloadedEpub(placeholder, entry, target)) {
-        materialized++;
+      // One missing or corrupt blob must not keep every other book from
+      // downloading, nor fail a sync whose library data already completed.
+      try {
+        final target = await _downloadTargetFor(entry);
+        if (!await _verifiedFileExists(target, entry)) {
+          await _downloadVerifiedBlob(entry, target);
+          downloaded++;
+        }
+        if (await _attachDownloadedEpub(placeholder, entry, target)) {
+          materialized++;
+        }
+      } catch (error) {
+        failed++;
+        AppLogger.log(
+          'Could not download synced EPUB ${entry.stableNovelId}: '
+          '${error.runtimeType}',
+          logLevel: LogLevel.warning,
+        );
       }
     }
     return MangatanEpubSyncResult(
       blobsDownloaded: downloaded,
       placeholdersMaterialized: materialized,
+      placeholdersFailed: failed,
     );
   }
 
@@ -147,7 +167,13 @@ class MangatanEpubSyncService {
       if (path.isEmpty) continue;
       final file = File(path);
       if (!await file.exists()) continue;
-      final bytes = await file.readAsBytes();
+      final List<int> bytes;
+      try {
+        bytes = await file.readAsBytes();
+      } on FileSystemException {
+        // An unreadable local file is simply not advertised this time.
+        continue;
+      }
       final digest = sha256.convert(bytes).toString();
       entries[stableId] = MangatanEpubManifestEntry(
         stableNovelId: stableId,

@@ -8,7 +8,6 @@ import 'package:mangayomi/modules/browse/extension/widgets/extension_lang_list_t
 import 'package:mangayomi/utils/global_style.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
-import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
 
 class ExtensionsLang extends ConsumerWidget {

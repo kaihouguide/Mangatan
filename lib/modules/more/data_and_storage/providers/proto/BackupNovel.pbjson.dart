@@ -36,6 +36,22 @@ const BackupNovel$json = {
     },
     {'1': 'categoryIds', '3': 10, '4': 3, '5': 9, '10': 'categoryIds'},
     {'1': 'lang', '3': 11, '4': 1, '5': 9, '9': 2, '10': 'lang', '17': true},
+    {
+      '1': 'chapters',
+      '3': 12,
+      '4': 3,
+      '5': 11,
+      '6': '.BackupChapter',
+      '10': 'chapters'
+    },
+    {
+      '1': 'history',
+      '3': 13,
+      '4': 3,
+      '5': 11,
+      '6': '.BackupNovelHistory',
+      '10': 'history'
+    },
   ],
   '8': [
     {'1': '_author'},
@@ -52,7 +68,24 @@ final $typed_data.Uint8List backupNovelDescriptor = $convert.base64Decode(
     'dyZXNzEiYKDmNoYXJhY3RlckNvdW50GAcgASgFUg5jaGFyYWN0ZXJDb3VudBIiCgxsYXN0TW9k'
     'aWZpZWQYCCABKANSDGxhc3RNb2RpZmllZBImCgVzdGF0cxgJIAMoCzIQLkJhY2t1cE5vdmVsU3'
     'RhdFIFc3RhdHMSIAoLY2F0ZWdvcnlJZHMYCiADKAlSC2NhdGVnb3J5SWRzEhcKBGxhbmcYCyAB'
-    'KAlIAlIEbGFuZ4gBAUIJCgdfYXV0aG9yQggKBl9jb3ZlckIHCgVfbGFuZw==');
+    'KAlIAlIEbGFuZ4gBARIqCghjaGFwdGVycxgMIAMoCzIOLkJhY2t1cENoYXB0ZXJSCGNoYXB0ZX'
+    'JzEi0KB2hpc3RvcnkYDSADKAsyEy5CYWNrdXBOb3ZlbEhpc3RvcnlSB2hpc3RvcnlCCQoHX2F1'
+    'dGhvckIICgZfY292ZXJCBwoFX2xhbmc=');
+
+@$core.Deprecated('Use backupNovelHistoryDescriptor instead')
+const BackupNovelHistory$json = {
+  '1': 'BackupNovelHistory',
+  '2': [
+    {'1': 'chapterUrl', '3': 1, '4': 1, '5': 9, '10': 'chapterUrl'},
+    {'1': 'lastRead', '3': 2, '4': 1, '5': 3, '10': 'lastRead'},
+    {'1': 'timeRead', '3': 3, '4': 1, '5': 3, '10': 'timeRead'},
+  ],
+};
+
+/// Descriptor for `BackupNovelHistory`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List backupNovelHistoryDescriptor = $convert.base64Decode(
+    'ChJCYWNrdXBOb3ZlbEhpc3RvcnkSHgoKY2hhcHRlclVybBgBIAEoCVIKY2hhcHRlclVybBIaCg'
+    'hsYXN0UmVhZBgCIAEoA1IIbGFzdFJlYWQSGgoIdGltZVJlYWQYAyABKANSCHRpbWVSZWFk');
 
 @$core.Deprecated('Use backupNovelCategoryDescriptor instead')
 const BackupNovelCategory$json = {
