@@ -18,7 +18,6 @@ import 'package:mangayomi/utils/log/logger.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:path/path.dart' as path;
 import 'package:super_sliver_list/super_sliver_list.dart';
-import 'package:mangayomi/modules/library/providers/file_scanner.dart';
 
 class SubtitlesWidgetSearch extends ConsumerStatefulWidget {
   final Chapter chapter;

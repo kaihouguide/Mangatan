@@ -226,6 +226,11 @@ class _DictionaryPopupHostController {
     if (_entry != null && key.currentState != null) return Future.value();
     final initializing = _initializing;
     if (initializing != null) return initializing;
+    // The host lives in the root overlay. If that overlay was rebuilt, the
+    // old entry is no longer mounted and must be recreated, or every later
+    // lookup would wait on a host that never appears. A freshly inserted
+    // entry is mounted by the time its initialization completes.
+    if (_entry != null && !_entry!.mounted) _entry = null;
     if (_entry != null) return WidgetsBinding.instance.endOfFrame;
     return _initializing = _initialize(context);
   }

@@ -75,12 +75,29 @@ class AnkiConnectService {
         'AnkiConnect HTTP ${response.statusCode}: ${response.body}',
       );
     }
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    Object? decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException {
+      decoded = null;
+    }
+    // Another program can hold AnkiConnect's port. Report that like any other
+    // connection problem instead of surfacing a raw decoding error.
+    if (decoded is! Map) {
+      throw AnkiConnectException(
+        'The service at $endpoint did not answer like AnkiConnect.',
+      );
+    }
     final error = decoded['error'];
     if (error != null) {
       throw AnkiConnectException(error.toString());
     }
     return decoded['result'];
+  }
+
+  static List<Object?> _list(Object? result, String action) {
+    if (result is List) return result;
+    throw AnkiConnectException('AnkiConnect returned no list for $action.');
   }
 
   Future<int> version() async {
@@ -90,12 +107,12 @@ class AnkiConnectService {
 
   Future<List<String>> deckNames() async {
     final result = await invoke('deckNames');
-    return (result as List).map((item) => item.toString()).toList();
+    return _list(result, 'deckNames').map((item) => item.toString()).toList();
   }
 
   Future<List<String>> modelNames() async {
     final result = await invoke('modelNames');
-    return (result as List).map((item) => item.toString()).toList();
+    return _list(result, 'modelNames').map((item) => item.toString()).toList();
   }
 
   Future<List<String>> modelFieldNames(String modelName) async {
@@ -104,12 +121,15 @@ class AnkiConnectService {
       'modelFieldNames',
       params: {'modelName': modelName},
     );
-    return (result as List).map((item) => item.toString()).toList();
+    return _list(
+      result,
+      'modelFieldNames',
+    ).map((item) => item.toString()).toList();
   }
 
   Future<List<int>> findNotes(String query) async {
     final result = await invoke('findNotes', params: {'query': query});
-    return (result as List).map((item) => item as int).toList();
+    return _list(result, 'findNotes').whereType<int>().toList();
   }
 
   Future<List<int>> findDuplicateNoteIds({
@@ -146,7 +166,7 @@ class AnkiConnectService {
       'guiBrowse',
       params: {'query': 'nid:${noteIds.join(',')}'},
     );
-    return (result as List).map((item) => item as int).toList();
+    return _list(result, 'guiBrowse').whereType<int>().toList();
   }
 
   /// Uploads media by embedding the raw bytes as base64 `data`.
@@ -201,10 +221,10 @@ class AnkiConnectService {
         },
       },
     );
-    if (result == null) {
+    if (result is! int) {
       throw const AnkiConnectException('AnkiConnect did not return a note id.');
     }
-    return result as int;
+    return result;
   }
 
   Future<void> sync() async {
@@ -397,7 +417,15 @@ class AnkiConnectService {
         duplicateScope: duplicateScope,
         checkAllModels: checkAllModels,
       );
-      if (syncOnCreate) await sync();
+      if (syncOnCreate) {
+        // The note exists now. Failing the export over a sync error, such as
+        // not being logged in to AnkiWeb, would invite a duplicate on retry.
+        try {
+          await sync();
+        } on AnkiConnectException catch (error) {
+          warnings.add('Added, but syncing to AnkiWeb failed: $error');
+        }
+      }
       warnings
         ..insertAll(0, prepared.warnings)
         ..removeWhere((warning) => warning.trim().isEmpty);

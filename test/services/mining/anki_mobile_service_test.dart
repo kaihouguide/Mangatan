@@ -115,9 +115,10 @@ void main() {
           uri.queryParameters['fldImage']!,
           uri.queryParameters['fldAudio']!,
         };
-        final urls = RegExp(
-          r'http://127\.0\.0\.1:\d+/media/[^"\s<]+',
-        ).allMatches(fields.join('\n')).map((match) => match.group(0)!).toSet();
+        final urls = RegExp(r'http://127\.0\.0\.1:\d+/media/[^"\s<]+')
+            .allMatches(fields.join('\n'))
+            .map((match) => match.group(0)!)
+            .toSet();
         final client = HttpClient();
         client
           ..findProxy = ((_) => 'DIRECT')
@@ -199,5 +200,21 @@ void main() {
     expect(infoPlist, contains('<key>LSApplicationQueriesSchemes</key>'));
     expect(infoPlist, contains('<string>anki</string>'));
     expect(infoPlist, contains('<string>mangayomi</string>'));
+  });
+
+  test('media URLs cannot be guessed by other apps on the device', () async {
+    final server = await AnkiMobileMediaServer.start();
+    addTearDown(server.close);
+    final url = Uri.parse(
+      server.addBytes('shot.png', Uint8List.fromList([1, 2, 3])),
+    );
+    expect(url.path, matches(RegExp(r'^/media/0-[0-9a-f]{32}-shot\.png$')));
+
+    final client = HttpClient()..findProxy = ((_) => 'DIRECT');
+    addTearDown(client.close);
+    Future<int> status(Uri uri) async =>
+        (await (await client.getUrl(uri)).close()).statusCode;
+    expect(await status(url), 200);
+    expect(await status(url.replace(path: '/media/0-shot.png')), 404);
   });
 }

@@ -11,6 +11,7 @@ import 'package:ffi/ffi.dart';
 import 'package:mangayomi/services/mining/ocr_image_tiling.dart';
 import 'package:mangayomi/services/mining/ocr_models.dart';
 import 'package:mangayomi/services/mining/screen_ai_component_manager.dart';
+import 'package:mangayomi/services/mining/proto_wire.dart';
 import 'package:path/path.dart' as p;
 
 class ScreenAiOcrResult {
@@ -309,7 +310,7 @@ List<OcrTextBlock> _parseVisualAnnotation(
   required int imageHeight,
 }) {
   if (bytes.isEmpty) return const [];
-  final root = _ProtoMessage.decode(bytes);
+  final root = ProtoWireMessage.decode(bytes);
   final grouped = <String, List<_ScreenAiLine>>{};
   for (final line in root.messages(2)) {
     final text = line.string(3).trim();
@@ -364,7 +365,7 @@ List<OcrTextBlock> _parseVisualAnnotation(
 }
 
 _NormalizedRect? _readRect(
-  _ProtoMessage? message,
+  ProtoWireMessage? message,
   int imageWidth,
   int imageHeight,
 ) {
@@ -446,89 +447,4 @@ class _NormalizedRect {
     right: math.max(right, other.right),
     bottom: math.max(bottom, other.bottom),
   );
-}
-
-class _ProtoMessage {
-  const _ProtoMessage(this._fields);
-
-  final Map<int, List<_ProtoField>> _fields;
-
-  factory _ProtoMessage.decode(Uint8List bytes) {
-    final fields = <int, List<_ProtoField>>{};
-    final cursor = _ProtoCursor(bytes);
-    while (!cursor.isDone) {
-      final tag = cursor.varint();
-      final field = tag >> 3;
-      final wireType = tag & 7;
-      if (field == 0) throw const FormatException('Invalid protobuf field');
-      final value = switch (wireType) {
-        0 => _ProtoField(wireType, cursor.varint()),
-        1 => _ProtoField(wireType, cursor.read(8)),
-        2 => _ProtoField(wireType, cursor.read(cursor.varint())),
-        5 => _ProtoField(wireType, cursor.read(4)),
-        _ => throw FormatException('Unsupported protobuf wire type $wireType'),
-      };
-      fields.putIfAbsent(field, () => []).add(value);
-    }
-    return _ProtoMessage(fields);
-  }
-
-  Iterable<_ProtoMessage> messages(int field) sync* {
-    for (final value in _fields[field] ?? const <_ProtoField>[]) {
-      if (value.wireType == 2 && value.value is Uint8List) {
-        yield _ProtoMessage.decode(value.value as Uint8List);
-      }
-    }
-  }
-
-  _ProtoMessage? message(int field) => messages(field).firstOrNull;
-
-  String string(int field) {
-    final value = _fields[field]?.firstOrNull;
-    if (value?.wireType != 2 || value?.value is! Uint8List) return '';
-    return utf8.decode(value!.value as Uint8List, allowMalformed: true);
-  }
-
-  int? int32(int field) {
-    final value = _fields[field]?.firstOrNull;
-    if (value?.wireType != 0 || value?.value is! int) return null;
-    return value!.value as int;
-  }
-}
-
-class _ProtoField {
-  const _ProtoField(this.wireType, this.value);
-
-  final int wireType;
-  final Object value;
-}
-
-class _ProtoCursor {
-  _ProtoCursor(this.bytes);
-
-  final Uint8List bytes;
-  int offset = 0;
-
-  bool get isDone => offset >= bytes.length;
-
-  int varint() {
-    var result = 0;
-    var shift = 0;
-    while (offset < bytes.length && shift < 70) {
-      final byte = bytes[offset++];
-      result |= (byte & 0x7f) << shift;
-      if ((byte & 0x80) == 0) return result;
-      shift += 7;
-    }
-    throw const FormatException('Truncated protobuf varint');
-  }
-
-  Uint8List read(int length) {
-    if (length < 0 || offset + length > bytes.length) {
-      throw const FormatException('Truncated protobuf field');
-    }
-    final value = Uint8List.sublistView(bytes, offset, offset + length);
-    offset += length;
-    return value;
-  }
 }

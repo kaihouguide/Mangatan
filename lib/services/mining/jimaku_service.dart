@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/mining/media_file_name.dart';
 import 'package:path/path.dart' as p;
 
 class JimakuException implements Exception {
@@ -86,6 +87,7 @@ class JimakuSubtitleService {
     : _client = client ?? http.Client();
 
   static const _baseUrl = 'https://jimaku.cc/api';
+  static const _requestTimeout = Duration(seconds: 30);
   final http.Client _client;
 
   void close() => _client.close();
@@ -111,7 +113,9 @@ class JimakuSubtitleService {
     final uri = episode == null
         ? builder
         : builder.replace(queryParameters: {'episode': episode.toString()});
-    final response = await _client.get(uri, headers: _headers(apiKey));
+    final response = await _client
+        .get(uri, headers: _headers(apiKey))
+        .timeout(_requestTimeout);
     _throwIfBad(response);
     return (jsonDecode(response.body) as List)
         .whereType<Map>()
@@ -126,8 +130,16 @@ class JimakuSubtitleService {
   }) async {
     await outputDirectory.create(recursive: true);
     final output = File(p.join(outputDirectory.path, _safeFileName(file.name)));
-    if (await output.exists()) await output.delete();
-    final response = await _client.get(file.url, headers: _headers(apiKey));
+    // Fetch before touching the existing file, so a failed request keeps
+    // the subtitle that is already on disk.
+    // File links come from the API response. Only Jimaku gets the key, so a
+    // link to another host cannot collect it.
+    final response = await _client
+        .get(
+          file.url,
+          headers: _isJimakuUrl(file.url) ? _headers(apiKey) : null,
+        )
+        .timeout(_requestTimeout);
     _throwIfBad(response);
     await output.writeAsBytes(response.bodyBytes);
     return output;
@@ -181,13 +193,19 @@ class JimakuSubtitleService {
   }) async {
     final uri = Uri.parse('$_baseUrl/entries/search')
         .replace(queryParameters: {'anime': anime.toString(), 'query': query});
-    final response = await _client.get(uri, headers: _headers(apiKey));
+    final response = await _client
+        .get(uri, headers: _headers(apiKey))
+        .timeout(_requestTimeout);
     _throwIfBad(response);
     return (jsonDecode(response.body) as List)
         .whereType<Map>()
         .map((value) => JimakuEntry.fromJson(value.cast<String, dynamic>()))
         .toList();
   }
+
+  static bool _isJimakuUrl(Uri url) =>
+      url.scheme == 'https' &&
+      (url.host == 'jimaku.cc' || url.host.endsWith('.jimaku.cc'));
 
   Map<String, String> _headers(String apiKey) => {
     'Authorization': apiKey.trim(),
@@ -510,12 +528,14 @@ String _cleanJimakuTitleCandidate(String value) => value
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
+final _letterOrDigitPattern = RegExp(r'[\p{L}\p{N}]', unicode: true);
+
 String _normalizedJimakuText(String value) {
   final buffer = StringBuffer();
   var lastWasSpace = true;
   for (final rune in value.toLowerCase().runes) {
     final character = String.fromCharCode(rune);
-    if (RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(character)) {
+    if (_letterOrDigitPattern.hasMatch(character)) {
       buffer.write(character);
       lastWasSpace = false;
     } else if (!lastWasSpace) {
@@ -603,10 +623,7 @@ int _tokenScore(String target, String candidate) {
 }
 
 String _safeFileName(String value) {
-  final safe = value
-      .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+  final safe = sanitizeMediaFileName(value);
   return safe.isEmpty ? 'jimaku-subtitle.srt' : safe;
 }
 

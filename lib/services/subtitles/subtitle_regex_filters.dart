@@ -95,9 +95,12 @@ class SubtitleRegexFilterState {
   }
 
   static Future<void> _load() async {
-    options.value = SubtitleRegexFilterOptions.fromJson(
+    final stored = SubtitleRegexFilterOptions.fromJson(
       await MiningPreferences.getSubtitleRegexFilters(),
     );
+    // Options set while the stored ones were loading are newer; keep them.
+    if (_initialized) return;
+    options.value = stored;
     _initialized = true;
   }
 
@@ -108,6 +111,36 @@ class SubtitleRegexFilterState {
   }
 }
 
+final _speakerNamePattern = RegExp(
+  r'^(\s*(?:[-–—―－]\s*)?)[(（][^()（）\r\n]{1,48}[)）]\s*:?\s*',
+  multiLine: true,
+);
+final _bracketedTextPattern = RegExp(r'\[[^\[\]\n]*\]');
+final _curlyBracedTextPattern = RegExp(r'\{[^{}\n]*\}');
+final _musicSymbolPattern = RegExp(r'[♪♫♬♩♭♯#~〜～]+');
+final _lineBreakPattern = RegExp(r'\r?\n');
+final _inlineWhitespacePattern = RegExp(r'[ \t]+');
+final _subtitlePunctuationPattern = RegExp(
+  r'[\[\]{}()♪♫♬♩♭♯#~〜～:;,.!?…\-–—―－]',
+);
+
+// Subtitles are filtered on every rebuild; keep the user's pattern compiled.
+String? _customPatternSource;
+RegExp? _customPattern;
+
+RegExp? _compiledCustomPattern(String source) {
+  if (source != _customPatternSource) {
+    _customPatternSource = source;
+    try {
+      _customPattern = RegExp(source, multiLine: true);
+    } on FormatException {
+      // Preserve subtitles when a custom pattern is temporarily invalid.
+      _customPattern = null;
+    }
+  }
+  return _customPattern;
+}
+
 String applySubtitleRegexFilters(
   String input,
   SubtitleRegexFilterOptions options,
@@ -116,36 +149,29 @@ String applySubtitleRegexFilters(
   var result = input;
   if (options.removeSpeakerNames) {
     result = result.replaceAllMapped(
-      RegExp(
-        r'^(\s*(?:[-–—―－]\s*)?)[(（][^()（）\r\n]{1,48}[)）]\s*:?\s*',
-        multiLine: true,
-      ),
+      _speakerNamePattern,
       (match) => match.group(1) ?? '',
     );
   }
   if (options.removeBracketedText) {
-    result = result.replaceAll(RegExp(r'\[[^\[\]\n]*\]'), '');
+    result = result.replaceAll(_bracketedTextPattern, '');
   }
   if (options.removeCurlyBracedText) {
-    result = result.replaceAll(RegExp(r'\{[^{}\n]*\}'), '');
+    result = result.replaceAll(_curlyBracedTextPattern, '');
   }
   if (options.removeMusicSymbols) {
-    result = result.replaceAll(RegExp(r'[♪♫♬♩♭♯#~〜～]+'), '');
+    result = result.replaceAll(_musicSymbolPattern, '');
   }
   if (options.customRegexEnabled &&
       options.customRegexPattern.trim().isNotEmpty) {
-    try {
-      result = result.replaceAll(
-        RegExp(options.customRegexPattern, multiLine: true),
-        '',
-      );
-    } on FormatException {
-      // Preserve subtitles when a custom pattern is temporarily invalid.
+    final customPattern = _compiledCustomPattern(options.customRegexPattern);
+    if (customPattern != null) {
+      result = result.replaceAll(customPattern, '');
     }
   }
   final lines = result
-      .split(RegExp(r'\r?\n'))
-      .map((line) => line.trim().replaceAll(RegExp(r'[ \t]+'), ' '))
+      .split(_lineBreakPattern)
+      .map((line) => line.trim().replaceAll(_inlineWhitespacePattern, ' '))
       .where(
         (line) =>
             line.isNotEmpty &&
@@ -171,5 +197,5 @@ bool _isLetterOrDigit(int rune) {
   if (character.toUpperCase() != character.toLowerCase()) return true;
   return rune > 0x7f &&
       character.trim().isNotEmpty &&
-      !RegExp(r'[\[\]{}()♪♫♬♩♭♯#~〜～:;,.!?…\-–—―－]').hasMatch(character);
+      !_subtitlePunctuationPattern.hasMatch(character);
 }

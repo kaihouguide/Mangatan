@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/mining/media_file_name.dart';
 import 'package:mangayomi/services/mining/mining_models.dart';
 import 'package:mangayomi/services/mining/mining_preferences.dart';
 
@@ -396,12 +397,10 @@ class AnkiAudioService {
   }
 
   String _safeAudioFilename(String term, String reading, String extension) {
-    final base = [term, reading]
-        .where((part) => part.trim().isNotEmpty)
-        .join(' ')
-        .replaceAll(RegExp(r'[\\/:*?"<>|\[\]]'), '_')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    final base = sanitizeMediaFileName(
+      [term, reading].where((part) => part.trim().isNotEmpty).join(' '),
+      forbidBrackets: true,
+    );
     final prefix = base.isEmpty ? 'mangatan-audio' : base;
     return '$prefix-${DateTime.now().millisecondsSinceEpoch}.$extension';
   }

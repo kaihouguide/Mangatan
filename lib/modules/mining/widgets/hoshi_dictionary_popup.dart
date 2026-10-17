@@ -443,7 +443,7 @@ class _HoshiDictionaryPopupState extends State<HoshiDictionaryPopup> {
       final dictionaryProfile = await _resolvedProfile();
       final profile = dictionaryProfile.anki;
       if (!profile.ankiEnabled) return const [];
-      return AnkiConnectService(
+      return await AnkiConnectService(
         endpoint: await MiningPreferences.getAnkiEndpoint(),
       ).findDuplicateNoteIds(
         deckName: profile.deckName,
@@ -768,7 +768,10 @@ class _HoshiDictionaryPopupState extends State<HoshiDictionaryPopup> {
       callback: (arguments) async {
         if (arguments.isEmpty) return false;
         final uri = Uri.tryParse(arguments.first.toString());
-        return uri != null && await launchUrl(uri);
+        // Links come from imported dictionary content. Like the EPUB reader,
+        // open only web pages, never other apps' schemes or local files.
+        if (uri == null || !isExternalWebLink(uri)) return false;
+        return launchUrl(uri);
       },
     );
     controller.addJavaScriptHandler(
@@ -1031,18 +1034,6 @@ Map<String, dynamic> _argumentMap(List<dynamic> arguments) {
 }
 
 @visibleForTesting
-String hoshiReplaceRenderScript(int entryCount) =>
-    'window.resetHoshiAudioCaches?.();'
-    'window.resetHoshiNavigation?.();'
-    'window.resetHoshiDictionaryStyles?.();'
-    'window.getSelection?.()?.removeAllRanges?.();'
-    'window.scrollTo(0, 0);'
-    'window.lookupEntries = undefined;'
-    'window.entryCount = $entryCount;'
-    'document.getElementById("entries-container").innerHTML = "";'
-    'window.renderPopup();';
-
-@visibleForTesting
 String hoshiReplaceRenderScriptForEntries(
   List<Map<String, dynamic>> entries, {
   Map<String, Map<String, String>> mediaDataUris = const {},
@@ -1076,8 +1067,10 @@ String hoshiReplaceRenderScriptForEntries(
 List<Map<String, dynamic>> hoshiPopupEntries(List<HoshiLookupResult> results) =>
     [for (final result in results) hoshiPopupEntry(result)];
 
-typedef HoshiPopupMediaLoader =
-    Future<Uint8List?> Function(String dictionary, String path);
+typedef HoshiPopupMediaLoader = Future<Uint8List?> Function(
+  String dictionary,
+  String path,
+);
 
 @visibleForTesting
 Future<Map<String, Map<String, String>>> hoshiPopupMediaDataUris(
@@ -1187,9 +1180,8 @@ String buildHoshiPopupHtml({
   final scale = preferences.fontSize / 15;
   final customCss = jsonEncode(preferences.customCss);
   final colorScheme = dark ? 'dark' : 'light';
-  final language = const HtmlEscape(
-    HtmlEscapeMode.attribute,
-  ).convert(profile.languageCode);
+  final language = const HtmlEscape(HtmlEscapeMode.attribute)
+      .convert(profile.languageCode);
   final languageAttribute = language.isEmpty ? '' : ' lang="$language"';
   final scheme = theme.colorScheme;
   final background = _cssColor(
@@ -1450,8 +1442,12 @@ const Rect kAnkiCropDefaultRect = Rect.fromLTRB(0.1, 0.1, 0.9, 0.9);
 /// the full captured page. Returns `null` when the raster produced no bytes.
 Future<Uint8List?> cropControllerToPngBytes(CropController controller) async {
   final ui.Image bitmap = await controller.croppedBitmap();
-  final byteData = await bitmap.toByteData(format: ui.ImageByteFormat.png);
-  return byteData?.buffer.asUint8List();
+  try {
+    final byteData = await bitmap.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  } finally {
+    bitmap.dispose();
+  }
 }
 
 Future<Uint8List?> _showCropDialog({
@@ -1818,3 +1814,8 @@ class _CropToolButton extends StatelessWidget {
     );
   }
 }
+
+/// Whether a dictionary link may be opened outside the app.
+@visibleForTesting
+bool isExternalWebLink(Uri uri) =>
+    (uri.scheme == 'http' || uri.scheme == 'https') && uri.host.isNotEmpty;

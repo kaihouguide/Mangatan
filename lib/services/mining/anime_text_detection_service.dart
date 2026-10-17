@@ -44,12 +44,7 @@ class AnimeTextDetectionService {
       return false;
     }
     try {
-      final interpreter = Interpreter.fromFile(file);
-      final valid = animeTextModelShapesSupported(
-        inputShape: interpreter.getInputTensor(0).shape,
-        outputShape: interpreter.getOutputTensor(0).shape,
-      );
-      interpreter.close();
+      final valid = _hasSupportedShapes(file);
       status.value = valid
           ? AnimeTextModelStatus.ready
           : AnimeTextModelStatus.error;
@@ -57,6 +52,20 @@ class AnimeTextDetectionService {
     } catch (_) {
       status.value = AnimeTextModelStatus.error;
       return false;
+    }
+  }
+
+  /// Opens [model] only to check its tensor shapes, always releasing the
+  /// native interpreter even when reading them fails.
+  static bool _hasSupportedShapes(File model) {
+    final interpreter = Interpreter.fromFile(model);
+    try {
+      return animeTextModelShapesSupported(
+        inputShape: interpreter.getInputTensor(0).shape,
+        outputShape: interpreter.getOutputTensor(0).shape,
+      );
+    } finally {
+      interpreter.close();
     }
   }
 
@@ -68,12 +77,7 @@ class AnimeTextDetectionService {
       await target.parent.create(recursive: true);
       if (await partial.exists()) await partial.delete();
       await source.openRead().pipe(partial.openWrite());
-      final interpreter = Interpreter.fromFile(partial);
-      final valid = animeTextModelShapesSupported(
-        inputShape: interpreter.getInputTensor(0).shape,
-        outputShape: interpreter.getOutputTensor(0).shape,
-      );
-      interpreter.close();
+      final valid = _hasSupportedShapes(partial);
       if (!valid) {
         throw const FormatException(
           'This is not a supported AnimeText YOLO LiteRT export',
@@ -258,6 +262,7 @@ List<Rect> parseAnimeTextOutput(
     }
   } else if (outputShape[2] == 6) {
     final count = outputShape[1];
+    if (output.length < count * 6) return const [];
     for (var i = 0; i < count; i++) {
       final offset = i * 6;
       final left = output[offset];

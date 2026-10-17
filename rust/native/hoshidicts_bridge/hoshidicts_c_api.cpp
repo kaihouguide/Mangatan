@@ -208,11 +208,25 @@ char* duplicate_string(const std::string& value) {
   return copy;
 }
 
-char* error_json(const std::exception& error) {
+char* error_json(std::string_view message) {
   std::ostringstream out;
   out << "{\"success\":false,\"error\":";
-  append_json_string(out, error.what());
+  append_json_string(out, message);
   out << '}';
+  return duplicate_string(out.str());
+}
+
+char* error_json(const std::exception& error) { return error_json(error.what()); }
+
+// An exception leaving an extern "C" function terminates the process, so a
+// non-std throw from the dictionary library is reported like any other error.
+constexpr std::string_view kUnknownError = "Unknown hoshidicts error";
+char* import_error_json(std::string_view message) {
+  std::ostringstream out;
+  out << "{\"success\":false,\"title\":\"\",\"termCount\":0,\"metaCount\":0,\"freqCount\":0,\"pitchCount\":0,"
+         "\"mediaCount\":0,\"errors\":[";
+  append_json_string(out, message);
+  out << "]}";
   return duplicate_string(out.str());
 }
 }  // namespace
@@ -246,12 +260,9 @@ extern "C" char* hoshidicts_import_dictionary_json(const char* zip_path, const c
     out << '}';
     return duplicate_string(out.str());
   } catch (const std::exception& error) {
-    std::ostringstream out;
-    out << "{\"success\":false,\"title\":\"\",\"termCount\":0,\"metaCount\":0,\"freqCount\":0,\"pitchCount\":0,"
-           "\"mediaCount\":0,\"errors\":[";
-    append_json_string(out, error.what());
-    out << "]}";
-    return duplicate_string(out.str());
+    return import_error_json(error.what());
+  } catch (...) {
+    return import_error_json(kUnknownError);
   }
 }
 
@@ -275,6 +286,8 @@ extern "C" char* hoshidicts_rebuild_query_json(void* session, const char* const*
     return duplicate_string("{\"success\":true}");
   } catch (const std::exception& error) {
     return error_json(error);
+  } catch (...) {
+    return error_json(kUnknownError);
   }
 }
 
@@ -291,6 +304,8 @@ extern "C" char* hoshidicts_lookup_json(void* session, const char* text, int max
     return duplicate_string(out.str());
   } catch (const std::exception& error) {
     return error_json(error);
+  } catch (...) {
+    return error_json(kUnknownError);
   }
 }
 
@@ -304,6 +319,8 @@ extern "C" char* hoshidicts_styles_json(void* session) {
     return duplicate_string(out.str());
   } catch (const std::exception& error) {
     return error_json(error);
+  } catch (...) {
+    return error_json(kUnknownError);
   }
 }
 

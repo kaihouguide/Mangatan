@@ -68,4 +68,19 @@ void main() {
       OcrEnginePreference.screenAi,
     );
   });
+
+  test('Chimahon 2.4 Paddle imports as the local on-device engine', () {
+    expect(
+      importChimahonOcrEngine('paddle', platform: OcrHostPlatform.apple),
+      OcrEnginePreference.appleVision,
+    );
+    expect(
+      importChimahonOcrEngine('paddle', platform: OcrHostPlatform.windows),
+      OcrEnginePreference.screenAi,
+    );
+    expect(
+      importChimahonOcrEngine('future-engine', platform: OcrHostPlatform.apple),
+      isNull,
+    );
+  });
 }

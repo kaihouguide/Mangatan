@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as image;
 import 'package:mangayomi/services/mining/anki_markers.dart';
+import 'package:mangayomi/services/mining/media_file_name.dart';
 import 'package:mangayomi/services/mining/mining_models.dart';
 import 'package:mangayomi/src/rust/api/hoshidicts.dart';
 
@@ -133,7 +134,7 @@ class AnkiCardBuilder {
           return PreparedAnkiCard(
             draft: prepared.draft,
             screenshot: prepared.screenshot,
-            warnings: prepared.screenshot?.warnings ?? const [],
+            warnings: [...prepared.warnings, ...?prepared.screenshot?.warnings],
           );
         } finally {
           if (!handedOff) {
@@ -148,7 +149,13 @@ class AnkiCardBuilder {
     );
   }
 
-  Future<({AnkiCardDraft draft, AnkiScreenshotPreparation? screenshot})>
+  Future<
+    ({
+      AnkiCardDraft draft,
+      AnkiScreenshotPreparation? screenshot,
+      List<String> warnings,
+    })
+  >
   _buildPrepared({
     required HoshiLookupResult result,
     required MiningContext context,
@@ -160,6 +167,7 @@ class AnkiCardBuilder {
     AnkiScreenshotPreparation? screenshotOverride,
   }) async {
     final fieldMap = profile.effectiveFieldMap;
+    final warnings = <String>[];
     final sentenceAudioFuture = _usesMarker(fieldMap, AnkiMarker.sentenceAudio)
         ? Future<AnkiMediaFile?>.sync(
             () =>
@@ -174,7 +182,7 @@ class AnkiCardBuilder {
         ? Future<_ScreenshotPayload?>.value(
             _ScreenshotPayload.fromPreparation(screenshotOverride),
           )
-        : _loadScreenshot(context);
+        : _loadScreenshotOrWarn(context, warnings);
     final media = await Future.wait<Object?>([
       sentenceAudioFuture,
       screenshotFuture,
@@ -359,6 +367,7 @@ class AnkiCardBuilder {
         mediaFiles: [...dictionaryMedia, ?wordAudio, ?sentenceAudio],
       ),
       screenshot: screenshotPreparation,
+      warnings: warnings,
     );
   }
 
@@ -371,6 +380,25 @@ class AnkiCardBuilder {
             _normalizeFieldName(entry.key) != 'definitionpicture' &&
             entry.value.contains(AnkiMarker.screenshot),
       );
+
+  /// A failed capture costs only the image, as a failed upload already does.
+  /// Cancelling, for example by closing the crop dialog, still stops the card.
+  Future<_ScreenshotPayload?> _loadScreenshotOrWarn(
+    MiningContext context,
+    List<String> warnings,
+  ) async {
+    try {
+      return await _loadScreenshot(context);
+    } on AnkiExportCancelledException {
+      rethrow;
+    } catch (error) {
+      warnings.add(
+        'Screenshot capture failed ($error); the note was added without an '
+        'image.',
+      );
+      return null;
+    }
+  }
 
   Future<_ScreenshotPayload?> _loadScreenshot(MiningContext context) async {
     final loader = context.imageBytesLoader;
@@ -629,10 +657,7 @@ class AnkiCardBuilder {
   }
 
   static String _safeMediaName(String value, {required String extension}) {
-    final safe = value
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    final safe = sanitizeMediaFileName(value);
     return '${safe.isEmpty ? 'mangatan-mining' : safe}.$extension';
   }
 

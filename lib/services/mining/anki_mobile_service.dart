@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:mangayomi/services/mining/mining_models.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:mangayomi/utils/log/logger.dart';
 
 const _ankiMobileInfoUrl = 'anki://x-callback-url/infoForAdding';
 const _ankiMobileAddNoteUrl = 'anki://x-callback-url/addnote';
@@ -205,9 +207,8 @@ class AnkiMobileService {
       queryParameters: {'request': requestId},
     );
     final returned = _callbackCoordinator.registerInfoRequest(requestId);
-    final uri = Uri.parse(
-      _ankiMobileInfoUrl,
-    ).replace(queryParameters: {'x-success': callback.toString()});
+    final uri = Uri.parse(_ankiMobileInfoUrl)
+        .replace(queryParameters: {'x-success': callback.toString()});
     final opened = await _openUrl(uri);
     if (!opened) {
       _callbackCoordinator.cancelInfoRequest(requestId);
@@ -306,9 +307,10 @@ class AnkiMobileService {
           await _beginMediaImportBackgroundTask();
           backgroundTaskStarted = true;
         } catch (error, stackTrace) {
-          debugPrint(
+          AppLogger.log(
             'Could not start AnkiMobile media background task: '
             '$error\n$stackTrace',
+            logLevel: LogLevel.warning,
           );
         }
       }
@@ -327,9 +329,10 @@ class AnkiMobileService {
             try {
               await _endMediaImportBackgroundTask();
             } catch (error, stackTrace) {
-              debugPrint(
+              AppLogger.log(
                 'Could not end AnkiMobile media background task: '
                 '$error\n$stackTrace',
+                logLevel: LogLevel.warning,
               );
             }
           }
@@ -341,9 +344,10 @@ class AnkiMobileService {
         try {
           await _endMediaImportBackgroundTask();
         } catch (error, stackTrace) {
-          debugPrint(
+          AppLogger.log(
             'Could not end AnkiMobile media background task: '
             '$error\n$stackTrace',
+            logLevel: LogLevel.warning,
           );
         }
       }
@@ -400,7 +404,9 @@ class AnkiMobileMediaServer {
 
   String addBytes(String filename, Uint8List bytes) {
     final safeName = _safeName(filename);
-    final path = '/media/${_nextId++}-$safeName';
+    // Any app or web page on the device can reach loopback while the server
+    // is up, so only AnkiMobile, which gets the full URL, can name the file.
+    final path = '/media/${_nextId++}-${_randomToken()}-$safeName';
     _media[path] = _AnkiMobileMedia(
       bytes: Uint8List.fromList(bytes),
       contentType: _contentTypeFor(safeName),
@@ -442,13 +448,23 @@ class AnkiMobileMediaServer {
       if (request.method == 'GET') request.response.add(media.bytes);
       await request.response.close();
     } catch (error, stackTrace) {
-      debugPrint('AnkiMobile media server failed: $error\n$stackTrace');
+      AppLogger.log(
+        'AnkiMobile media server failed: $error\n$stackTrace',
+        logLevel: LogLevel.warning,
+      );
       try {
         request.response.statusCode = HttpStatus.internalServerError;
         await request.response.close();
       } catch (_) {}
     }
   }
+
+  static final _random = Random.secure();
+
+  static String _randomToken() => List.generate(
+    16,
+    (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
 
   static String _safeName(String filename) {
     final base = filename.split(RegExp(r'[/\\]')).last;

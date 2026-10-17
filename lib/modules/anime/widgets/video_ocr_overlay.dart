@@ -81,11 +81,10 @@ class VideoOcrOverlay extends StatefulWidget {
   State<VideoOcrOverlay> createState() => _VideoOcrOverlayState();
 }
 
-class _VideoOcrOverlayState extends State<VideoOcrOverlay> {
+class _VideoOcrOverlayState extends State<VideoOcrOverlay>
+    with _VideoOcrLookup<VideoOcrOverlay> {
   VideoOcrResult? _result;
   Object? _error;
-  _VideoOcrSelection? _selection;
-  DictionaryPopupHandle? _popup;
   MiningContext? _frameMiningContext;
 
   @override
@@ -128,66 +127,14 @@ class _VideoOcrOverlayState extends State<VideoOcrOverlay> {
     super.dispose();
   }
 
-  Future<void> _lookup(
-    BuildContext context,
-    OcrTextBlock block,
-    Rect rect,
-    Offset position,
-    int textOffset,
-  ) async {
-    final renderBox = context.findRenderObject();
-    final anchorOrigin = renderBox is RenderBox
-        ? renderBox.localToGlobal(rect.topLeft)
-        : rect.topLeft;
-    final anchor = anchorOrigin & rect.size;
-    final selection = _videoOcrSelectionAtOffset(block, textOffset);
-    if (selection.text.isEmpty) return;
-    _popup?.dismiss();
-    setState(() => _selection = selection);
-    final resolvedMiningContext =
-        _frameMiningContext?.copyWith(sentence: block.sentence) ??
-        await widget.miningContextBuilder(
-          block.sentence,
-          widget.imageBytes,
-          widget.imagePosition,
-        );
-    if (!mounted || !context.mounted) {
-      await resolvedMiningContext.sceneCapture?.dispose();
-      return;
-    }
-    final miningContext = Future.value(resolvedMiningContext);
-    final prefetch = DictionaryLookupPopup.prefetch(
-      selection.text,
-      miningContext: miningContext,
-    );
-    final handle = await DictionaryLookupPopup.show(
-      context: context,
-      anchor: anchor,
-      text: selection.text,
-      miningContext: miningContext,
-      prefetch: prefetch,
-      onMatchChanged: (count) {
-        if (!mounted || count <= 0) return;
-        setState(() {
-          _selection = selection.copyWith(matchLength: count);
-        });
-      },
-    );
-    if (!mounted) {
-      handle?.dismiss();
-      return;
-    }
-    _popup = handle;
-    if (handle != null) {
-      await handle.dismissed;
-      if (mounted && identical(_popup, handle)) {
-        setState(() {
-          _popup = null;
-          _selection = null;
-        });
-      }
-    }
-  }
+  @override
+  Future<MiningContext?> _miningContextFor(String sentence) async =>
+      _frameMiningContext?.copyWith(sentence: sentence) ??
+      await widget.miningContextBuilder(
+        sentence,
+        widget.imageBytes,
+        widget.imagePosition,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -370,7 +317,8 @@ class LiveVideoOcrOverlay extends StatefulWidget {
   State<LiveVideoOcrOverlay> createState() => _LiveVideoOcrOverlayState();
 }
 
-class _LiveVideoOcrOverlayState extends State<LiveVideoOcrOverlay> {
+class _LiveVideoOcrOverlayState extends State<LiveVideoOcrOverlay>
+    with _VideoOcrLookup<LiveVideoOcrOverlay> {
   static const _scanInterval = Duration(milliseconds: 2200);
 
   Timer? _timer;
@@ -378,8 +326,6 @@ class _LiveVideoOcrOverlayState extends State<LiveVideoOcrOverlay> {
   Object? _error;
   bool _scanning = false;
   String _lastSignature = '';
-  _VideoOcrSelection? _selection;
-  DictionaryPopupHandle? _popup;
   VideoOcrFrame? _recognizedFrame;
   MiningContext? _recognizedMiningContext;
 
@@ -455,67 +401,16 @@ class _LiveVideoOcrOverlayState extends State<LiveVideoOcrOverlay> {
     }
   }
 
-  Future<void> _lookup(
-    BuildContext context,
-    OcrTextBlock block,
-    Rect rect,
-    Offset position,
-    int textOffset,
-  ) async {
-    final renderBox = context.findRenderObject();
-    final anchorOrigin = renderBox is RenderBox
-        ? renderBox.localToGlobal(rect.topLeft)
-        : rect.topLeft;
-    final anchor = anchorOrigin & rect.size;
-    final selection = _videoOcrSelectionAtOffset(block, textOffset);
-    if (selection.text.isEmpty) return;
-    _popup?.dismiss();
-    setState(() => _selection = selection);
+  @override
+  Future<MiningContext?> _miningContextFor(String sentence) async {
     final frame = _recognizedFrame;
-    if (frame == null) return;
-    final resolvedMiningContext =
-        _recognizedMiningContext?.copyWith(sentence: block.sentence) ??
+    if (frame == null) return null;
+    return _recognizedMiningContext?.copyWith(sentence: sentence) ??
         await widget.miningContextBuilder(
-          block.sentence,
+          sentence,
           frame.bytes,
           frame.position,
         );
-    if (!mounted || !context.mounted) {
-      await resolvedMiningContext.sceneCapture?.dispose();
-      return;
-    }
-    final miningContext = Future.value(resolvedMiningContext);
-    final prefetch = DictionaryLookupPopup.prefetch(
-      selection.text,
-      miningContext: miningContext,
-    );
-    final handle = await DictionaryLookupPopup.show(
-      context: context,
-      anchor: anchor,
-      text: selection.text,
-      miningContext: miningContext,
-      prefetch: prefetch,
-      onMatchChanged: (count) {
-        if (!mounted || count <= 0) return;
-        setState(() {
-          _selection = selection.copyWith(matchLength: count);
-        });
-      },
-    );
-    if (!mounted) {
-      handle?.dismiss();
-      return;
-    }
-    _popup = handle;
-    if (handle != null) {
-      await handle.dismissed;
-      if (mounted && identical(_popup, handle)) {
-        setState(() {
-          _popup = null;
-          _selection = null;
-        });
-      }
-    }
   }
 
   @override
@@ -679,6 +574,71 @@ class _LiveVideoOcrOverlayState extends State<LiveVideoOcrOverlay> {
 }
 
 /// The displayed text and lookup hit targets share the same paragraph layout.
+/// The tap-to-look-up flow shared by the paused-frame and live OCR overlays.
+mixin _VideoOcrLookup<T extends StatefulWidget> on State<T> {
+  _VideoOcrSelection? _selection;
+  DictionaryPopupHandle? _popup;
+
+  /// Mining context for [sentence] in the recognized frame, or null when no
+  /// frame has been recognized yet.
+  Future<MiningContext?> _miningContextFor(String sentence);
+
+  Future<void> _lookup(
+    BuildContext context,
+    OcrTextBlock block,
+    Rect rect,
+    Offset position,
+    int textOffset,
+  ) async {
+    final renderBox = context.findRenderObject();
+    final anchorOrigin = renderBox is RenderBox
+        ? renderBox.localToGlobal(rect.topLeft)
+        : rect.topLeft;
+    final anchor = anchorOrigin & rect.size;
+    final selection = _videoOcrSelectionAtOffset(block, textOffset);
+    if (selection.text.isEmpty) return;
+    _popup?.dismiss();
+    setState(() => _selection = selection);
+    final resolvedMiningContext = await _miningContextFor(block.sentence);
+    if (resolvedMiningContext == null) return;
+    if (!mounted || !context.mounted) {
+      await resolvedMiningContext.sceneCapture?.dispose();
+      return;
+    }
+    final miningContext = Future.value(resolvedMiningContext);
+    final prefetch = DictionaryLookupPopup.prefetch(
+      selection.text,
+      miningContext: miningContext,
+    );
+    final handle = await DictionaryLookupPopup.show(
+      context: context,
+      anchor: anchor,
+      text: selection.text,
+      miningContext: miningContext,
+      prefetch: prefetch,
+      onMatchChanged: (count) {
+        if (!mounted || count <= 0) return;
+        setState(() {
+          _selection = selection.copyWith(matchLength: count);
+        });
+      },
+    );
+    if (!mounted) {
+      handle?.dismiss();
+      return;
+    }
+    _popup = handle;
+    if (handle == null) return;
+    await handle.dismissed;
+    if (mounted && identical(_popup, handle)) {
+      setState(() {
+        _popup = null;
+        _selection = null;
+      });
+    }
+  }
+}
+
 class VideoOcrText extends StatelessWidget {
   const VideoOcrText({
     super.key,
@@ -887,10 +847,12 @@ _VideoOcrSelection _videoOcrSelectionAtOffset(
   );
 }
 
-bool _isLookupBoundary(String character) =>
-    character.trim().isEmpty ||
-    RegExp(r'[\u3000-\u303f\uff01-\uff65、。！？「」『』（）［］【】…‥・,.!?;:()\[\]{}]')
-        .hasMatch(character);
+final _lookupBoundaryPattern = RegExp(
+  r'[\u3000-\u303f\uff01-\uff65、。！？「」『』（）［］【】…‥・,.!?;:()\[\]{}]',
+);
+final _asciiWordPattern = RegExp(r'[A-Za-z0-9_\-]');
 
-bool _isAsciiWord(String character) =>
-    RegExp(r'[A-Za-z0-9_\-]').hasMatch(character);
+bool _isLookupBoundary(String character) =>
+    character.trim().isEmpty || _lookupBoundaryPattern.hasMatch(character);
+
+bool _isAsciiWord(String character) => _asciiWordPattern.hasMatch(character);

@@ -42,6 +42,7 @@ class HoshidictsLookupBackend {
     bool lowRam = false,
   }) async {
     try {
+      await ensureYomitanDictionaryTitleIsSafe(zipPath);
       final kanjiArchive = await YomitanKanjiArchive.read(zipPath);
       if (kanjiArchive == null) {
         return DictionaryImportResult.fromHoshi(
@@ -314,6 +315,9 @@ class HoshidictsLookupBackend {
     required List<String> pitchPaths,
     List<String> kanjiPaths = const [],
   }) async {
+    // A failed rebuild can leave the native session half-configured; never
+    // let the previous profile key vouch for it afterwards.
+    _configured = false;
     final session = _session ??= await hoshidicts.createLookupSession();
     await hoshidicts.rebuildQuery(
       session: session,

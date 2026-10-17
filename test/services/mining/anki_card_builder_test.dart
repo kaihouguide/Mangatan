@@ -302,9 +302,8 @@ void main() {
     expect(draft.fields['SentenceAudio'], '[sound:sentence.opus]');
     expect(draft.mediaFiles, [sentenceAudio]);
     expect(
-      AnkiMiningProfile.fromJson({
-        'sentenceAudioFormat': 'opus',
-      }).sentenceAudioFormat,
+      AnkiMiningProfile.fromJson({'sentenceAudioFormat': 'opus'})
+          .sentenceAudioFormat,
       AnkiSentenceAudioFormat.opus,
     );
 
@@ -364,14 +363,57 @@ void main() {
         },
       ),
     );
-    await Future.wait([
-      audioStarted.future,
-      imageStarted.future,
-    ]).timeout(const Duration(seconds: 1));
+    await Future.wait([audioStarted.future, imageStarted.future])
+        .timeout(const Duration(seconds: 1));
     release.complete();
 
     final draft = await build;
     expect(draft.mediaFiles.single.filename, 'sentence.mp3');
+  });
+
+  test('a failed screenshot capture only drops the image', () async {
+    final result = HoshiLookupResult(
+      matched: '猫',
+      deinflected: '猫',
+      trace: const [],
+      preprocessorSteps: 0,
+      term: const HoshiTermResult(
+        expression: '猫',
+        reading: 'ねこ',
+        rules: 'n',
+        score: 1,
+        glossaries: [],
+        frequencies: [],
+        pitches: [],
+      ),
+    );
+    const profile = AnkiMiningProfile(
+      fieldMap: {
+        'Front': AnkiMarker.expression,
+        'Picture': AnkiMarker.screenshot,
+      },
+    );
+    Future<PreparedAnkiCard> prepare(Object error) async {
+      final pending = await const AnkiCardBuilder().buildPending(
+        result: result,
+        context: MiningContext(
+          sentence: '猫がいる。',
+          imageBytesLoader: () async => throw error,
+        ),
+        profile: profile,
+      );
+      return pending.prepare(null);
+    }
+
+    final prepared = await prepare(StateError('page failed to load'));
+    expect(prepared.draft.fields, {'Front': '猫', 'Picture': ''});
+    expect(prepared.warnings.single, contains('page failed to load'));
+
+    // Closing the crop dialog still cancels the whole card.
+    await expectLater(
+      prepare(const AnkiExportCancelledException()),
+      throwsA(isA<AnkiExportCancelledException>()),
+    );
   });
 
   test(

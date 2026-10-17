@@ -32,8 +32,9 @@ bool hasNewerDictionaryRevision(String? current, String? latest) {
   if (!numeric.hasMatch(currentValue) || !numeric.hasMatch(latestValue)) {
     return currentValue.compareTo(latestValue) < 0;
   }
-  final currentParts = currentValue.split('.').map(int.parse).toList();
-  final latestParts = latestValue.split('.').map(int.parse).toList();
+  // Date-stamped revisions such as 20240501123000 can exceed an int.
+  final currentParts = currentValue.split('.').map(BigInt.parse).toList();
+  final latestParts = latestValue.split('.').map(BigInt.parse).toList();
   final length = currentParts.length > latestParts.length
       ? currentParts.length
       : latestParts.length;
@@ -177,6 +178,12 @@ class DictionaryUpdateService {
           kanjiCount: update.dictionary.hasKanji ? BigInt.one : BigInt.zero,
           root: root,
         );
+        // The failure may have come after the backend loaded the new files.
+        // Point it back at the restored dictionary; the update error is the
+        // one worth reporting.
+        try {
+          await _backend.reloadFromStorage();
+        } catch (_) {}
         rethrow;
       }
     } finally {
@@ -227,6 +234,7 @@ class DictionaryUpdateService {
         .send(request)
         .timeout(const Duration(seconds: 60));
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.drain<void>().catchError((_) {});
       throw HttpException(
         'Dictionary download returned HTTP ${response.statusCode}',
         uri: uri,

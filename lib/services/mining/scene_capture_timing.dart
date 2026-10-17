@@ -125,17 +125,6 @@ SceneCaptureTiming resolveOcrSceneTiming({
   return SceneCaptureTiming(scene: range, audio: range);
 }
 
-Duration subtitleTimeToMediaTime(
-  Duration subtitleTime, {
-  required double subtitleSpeed,
-  required Duration subtitleDelay,
-}) {
-  final speed = subtitleSpeed.isFinite && subtitleSpeed > 0
-      ? subtitleSpeed
-      : 1.0;
-  return _subtitleToMedia(subtitleTime, speed: speed, delay: subtitleDelay);
-}
-
 SceneTimingRange _boundRange(
   SceneTimingRange value, {
   required Duration mediaDuration,

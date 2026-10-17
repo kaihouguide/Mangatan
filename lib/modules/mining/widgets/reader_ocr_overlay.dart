@@ -24,6 +24,7 @@ import 'package:mangayomi/services/mining/ocr_models.dart';
 import 'package:mangayomi/services/mining/ocr_block_reading.dart';
 import 'package:mangayomi/services/mining/profile_ocr_language.dart';
 import 'package:mangayomi/utils/extensions/others.dart';
+import 'package:mangayomi/utils/log/logger.dart';
 
 class ReaderOcrState {
   ReaderOcrState._();
@@ -107,6 +108,9 @@ class ReaderOcrState {
   }
 
   static Future<void> setEnabled(bool value) async {
+    // Like the other setters, let the stored preferences load first so they
+    // cannot overwrite this change when they arrive.
+    await initialize();
     enabled.value = value;
     await MiningPreferences.setOcrOverlayEnabled(value);
     if (!value) {
@@ -123,7 +127,10 @@ class ReaderOcrState {
     }
   }
 
-  static Future<void> toggle() => setEnabled(!enabled.value);
+  static Future<void> toggle() async {
+    await initialize();
+    await setEnabled(!enabled.value);
+  }
 
   /// Handles a tap on the reader's OCR toolbar button, honoring the configured
   /// [scanTrigger]. In automatic mode it toggles the overlay; in manual mode it
@@ -570,7 +577,10 @@ class ReaderOcrState {
             await preparePage?.call(page);
             await ReaderOcrController._preload(page);
           } catch (error) {
-            debugPrint('Reader OCR page ${page.pageIndex} failed: $error');
+            AppLogger.log(
+              'Reader OCR page ${page.pageIndex} failed: $error',
+              logLevel: LogLevel.warning,
+            );
           }
         }),
       );
@@ -625,7 +635,10 @@ class ReaderOcrState {
             await ReaderOcrController._preload(page);
           } catch (error) {
             failedPages++;
-            debugPrint('Pre-OCR page ${page.pageIndex} failed: $error');
+            AppLogger.log(
+              'Pre-OCR page ${page.pageIndex} failed: $error',
+              logLevel: LogLevel.warning,
+            );
           }
           if (generation == _scanGeneration) {
             completed++;
@@ -892,7 +905,10 @@ class ReaderOcrController extends ChangeNotifier {
     unawaited(ReaderOcrState.initialize());
   }
 
+  // Most recently used OCR results, oldest first. Pages are small (text and
+  // boxes), but a long session would otherwise keep every page it ever read.
   static final Map<String, Future<_ReaderOcrPage>> _cache = {};
+  static const _maxCachedPages = 500;
 
   final UChapDataPreload data;
   final GlobalKey imageKey;
@@ -939,7 +955,7 @@ class ReaderOcrController extends ChangeNotifier {
         notifyListeners();
       }
     } catch (error) {
-      debugPrint('Reader OCR failed: $error');
+      AppLogger.log('Reader OCR failed: $error', logLevel: LogLevel.warning);
     } finally {
       _loading = false;
       if (!_disposed) {
@@ -980,24 +996,29 @@ class ReaderOcrController extends ChangeNotifier {
         '${data.chapter?.id}:${data.index}:${data.pageIndex}:'
         '${engine.name}:$useMokuroWebsiteOcr:$sourceName:'
         '$language:$ocrAllowed';
-    try {
-      final page = await _cache.putIfAbsent(
-        key,
-        () => _recognize(
+    // Re-insert on every use so eviction drops the least recently read page.
+    final pending =
+        _cache.remove(key) ??
+        _recognize(
           data,
           engine: engine,
           sourceName: sourceName,
           useMokuroWebsiteOcr: useMokuroWebsiteOcr,
           language: language,
           ocrAllowed: ocrAllowed,
-        ),
-      );
+        );
+    _cache[key] = pending;
+    while (_cache.length > _maxCachedPages) {
+      _cache.remove(_cache.keys.first);
+    }
+    try {
+      final page = await pending;
       if (page.usesMokuroWebsiteData) {
         ReaderOcrState._setUsingMokuroWebsiteData();
       }
       return page;
     } catch (_) {
-      _cache.remove(key);
+      if (identical(_cache[key], pending)) _cache.remove(key);
       rethrow;
     }
   }
@@ -1848,17 +1869,6 @@ int _characterOffset(OcrTextBlock block, Offset local, Size size) {
               .fold<int>(0, (sum, value) => sum + value.length) +
           character)
       .toInt();
-}
-
-// ignore: unused_element
-String _extractLookupString(String text, int start) {
-  final stop = RegExp(r'[\s。、！？「」『』（）\[\]・,.;:!?]');
-  final buffer = StringBuffer();
-  for (var index = start; index < text.length && buffer.length < 80; index++) {
-    if (stop.hasMatch(text[index])) break;
-    buffer.write(text[index]);
-  }
-  return buffer.toString();
 }
 
 String _extractOcrLookupString(String text, int start) {

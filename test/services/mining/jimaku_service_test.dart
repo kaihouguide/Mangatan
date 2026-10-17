@@ -69,6 +69,40 @@ void main() {
     },
   );
 
+  test('sends the API key only to Jimaku file links', () async {
+    final keys = <String, String?>{};
+    final client = MockClient((request) async {
+      keys[request.url.toString()] = request.headers['Authorization'];
+      return http.Response('1\n00:00:01,000 --> 00:00:02,000\nhi\n', 200);
+    });
+    final directory = await Directory.systemTemp.createTemp('jimaku_key');
+    addTearDown(() => directory.delete(recursive: true));
+    final service = JimakuSubtitleService(client: client);
+
+    for (final url in [
+      'https://jimaku.cc/entry/1/download/a.srt',
+      'https://cdn.example.test/b.srt',
+      'http://jimaku.cc/c.srt',
+    ]) {
+      await service.downloadFile(
+        apiKey: 'jimaku-key',
+        file: JimakuFile(
+          url: Uri.parse(url),
+          name: Uri.parse(url).pathSegments.last,
+          size: 0,
+          lastModified: '',
+        ),
+        outputDirectory: directory,
+      );
+    }
+
+    expect(keys, {
+      'https://jimaku.cc/entry/1/download/a.srt': 'jimaku-key',
+      'https://cdn.example.test/b.srt': null,
+      'http://jimaku.cc/c.srt': null,
+    });
+  });
+
   test('selects the same exact-name entry as Chimahon', () {
     const entries = [
       JimakuEntry(id: 1, name: 'Psycho-Pass 2'),

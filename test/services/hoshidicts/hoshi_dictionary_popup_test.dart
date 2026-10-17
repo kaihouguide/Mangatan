@@ -243,18 +243,6 @@ void main() {
 
   test('resets popup state when replacing lookup results', () {
     expect(
-      hoshiReplaceRenderScript(2),
-      startsWith('window.resetHoshiAudioCaches?.();'),
-    );
-    expect(
-      hoshiReplaceRenderScript(2),
-      contains('window.resetHoshiNavigation?.();'),
-    );
-    expect(
-      hoshiReplaceRenderScript(2),
-      contains('window.resetHoshiDictionaryStyles?.();'),
-    );
-    expect(
       hoshiReplaceRenderScriptForEntries(const []),
       contains('window.resetHoshiAudioCaches?.();'),
     );

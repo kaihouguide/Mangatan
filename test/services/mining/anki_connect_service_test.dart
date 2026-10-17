@@ -278,9 +278,8 @@ void main() {
 
     Object? failure;
     try {
-      await AnkiConnectService(
-        client: client,
-      ).exportPending(pending, allowDuplicate: true);
+      await AnkiConnectService(client: client)
+          .exportPending(pending, allowDuplicate: true);
     } catch (error) {
       failure = error;
     }
@@ -362,9 +361,8 @@ void main() {
         ),
       );
 
-      final result = await AnkiConnectService(
-        client: client,
-      ).exportPending(pending);
+      final result = await AnkiConnectService(client: client)
+          .exportPending(pending);
 
       expect(result.noteId, 77);
       expect(result.warnings.single, contains('frozen still'));
@@ -435,12 +433,53 @@ void main() {
       ),
     );
 
-    final result = await AnkiConnectService(
-      client: client,
-    ).exportPending(pending);
+    final result = await AnkiConnectService(client: client)
+        .exportPending(pending);
 
     expect(result.noteId, 78);
     expect(result.warnings.single, contains('without an image'));
+  });
+
+  test('a failed AnkiWeb sync still reports the added note', () async {
+    final actions = <String>[];
+    final client = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      actions.add(body['action'] as String);
+      switch (body['action']) {
+        case 'modelFieldNames':
+          return http.Response('{"result": ["Front"], "error": null}', 200);
+        case 'canAddNotesWithErrorDetail':
+          return http.Response(
+            '{"result": [{"canAdd": true, "error": null}], "error": null}',
+            200,
+          );
+        case 'addNote':
+          return http.Response('{"result": 91, "error": null}', 200);
+        case 'sync':
+          return http.Response(
+            '{"result": null, "error": "auth not configured"}',
+            200,
+          );
+      }
+      throw StateError('Unexpected action: ${body['action']}');
+    });
+    const draft = AnkiCardDraft(
+      deckName: 'Mining',
+      modelName: 'Basic',
+      expression: '猫',
+      fields: {'Front': '猫'},
+    );
+    final pending = PendingAnkiCard(
+      placeholderDraft: draft,
+      prepare: (_) async => PreparedAnkiCard(draft: draft),
+    );
+
+    final result = await AnkiConnectService(client: client)
+        .exportPending(pending, syncOnCreate: true);
+
+    expect(result.noteId, 91);
+    expect(actions.last, 'sync');
+    expect(result.warnings.single, contains('auth not configured'));
   });
 
   test('can add a known duplicate when the profile permits it', () async {
@@ -561,9 +600,8 @@ void main() {
       return http.Response('{"result": [101, 102], "error": null}', 200);
     });
 
-    final cards = await AnkiConnectService(
-      client: client,
-    ).browseNotes([41, 42]);
+    final cards = await AnkiConnectService(client: client)
+        .browseNotes([41, 42]);
 
     expect(cards, [101, 102]);
   });
@@ -587,9 +625,8 @@ void main() {
       return http.Response('{"result": "shot.png", "error": null}', 200);
     });
 
-    final stored = await AnkiConnectService(
-      client: client,
-    ).storeMediaFile(filename: 'shot.png', data: bytes);
+    final stored = await AnkiConnectService(client: client)
+        .storeMediaFile(filename: 'shot.png', data: bytes);
 
     expect(stored, 'shot.png');
     expect(storeParams, isNotNull);

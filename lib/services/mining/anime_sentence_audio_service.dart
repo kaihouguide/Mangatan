@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -100,7 +101,7 @@ class AnimeSentenceAudioService {
       ),
     );
     try {
-      final result = await Process.run(
+      final result = await _runWithDeadline(
         tools.ffmpeg,
         sentenceAudioFfmpegArguments(
           source: source,
@@ -129,6 +130,27 @@ class AnimeSentenceAudioService {
       if (await output.exists()) await output.delete();
     }
   }
+}
+
+/// Streamed sources can stall indefinitely. Desktop scene capture bounds its
+/// ffmpeg runs the same way; an unbounded run would leave the card export
+/// waiting with no way to cancel it.
+Future<ProcessResult> _runWithDeadline(
+  String executable,
+  List<String> arguments, {
+  Duration timeout = const Duration(minutes: 2),
+}) async {
+  final process = await Process.start(executable, arguments);
+  final stdout = process.stdout.transform(systemEncoding.decoder).join();
+  final stderr = process.stderr.transform(systemEncoding.decoder).join();
+  final int exitCode;
+  try {
+    exitCode = await process.exitCode.timeout(timeout);
+  } on TimeoutException {
+    process.kill();
+    throw StateError('Sentence audio capture timed out.');
+  }
+  return ProcessResult(process.pid, exitCode, await stdout, await stderr);
 }
 
 SubtitleAudioTiming subtitleAudioTimingForCue({

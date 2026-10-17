@@ -22,6 +22,36 @@ void main() {
     }
   });
 
+  test('rejects dictionary titles that are not one folder name', () async {
+    for (final title in ['../escape', r'a\b', '..', 'C:escape']) {
+      final zip = File(
+        '${temporaryDirectory.path}${Platform.pathSeparator}unsafe.zip',
+      );
+      await zip.writeAsBytes(
+        ZipEncoder().encode(
+          Archive()..addFile(
+            ArchiveFile.string('index.json', jsonEncode({'title': title})),
+          ),
+        ),
+      );
+      await expectLater(
+        ensureYomitanDictionaryTitleIsSafe(zip.path),
+        throwsFormatException,
+        reason: title,
+      );
+    }
+  });
+
+  test('accepts ordinary dictionary titles', () async {
+    final zip = await _writeDictionaryZip(
+      temporaryDirectory,
+      title: 'JMdict [2024-05-01]',
+      kanjiBank: const [],
+      tagBank: const [],
+    );
+    await ensureYomitanDictionaryTitleIsSafe(zip.path);
+  });
+
   test('imports Yomitan V3 Kanji banks and resolves tag metadata', () async {
     final zip = await _writeDictionaryZip(
       temporaryDirectory,
@@ -111,10 +141,46 @@ void main() {
     ]);
   });
 
+  test('a damaged stored dictionary does not disable the others', () async {
+    Future<String> writeStore(String name, Object data) async {
+      final directory = Directory('${temporaryDirectory.path}/$name');
+      await directory.create();
+      await File('${directory.path}/$yomitanKanjiDataFileName')
+          .writeAsString(jsonEncode(data));
+      return directory.path;
+    }
+
+    final damaged = await writeStore('damaged', {
+      'title': 'Damaged',
+      'entries': [
+        {'character': '日'},
+      ],
+      'frequencies': {'not': 'a list'},
+    });
+    final valid = await writeStore('valid', {
+      'title': 'Valid',
+      'entries': [
+        {
+          'character': '日',
+          'meanings': ['day'],
+        },
+      ],
+    });
+
+    final store = YomitanKanjiStore();
+    await store.configure([damaged, valid]);
+
+    expect(store.lookup('日'), hasLength(1));
+  });
+
   test(
     'reads all provided Kanji dictionaries when samples are available',
     () async {
-      final samples = Directory(r'D:\Japanese\Yomitan Dictionaries\kanji');
+      // Point MANGATAN_KANJI_SAMPLES at a folder of real Kanji dictionary
+      // ZIPs to run this locally.
+      final samplesPath = Platform.environment['MANGATAN_KANJI_SAMPLES'];
+      if (samplesPath == null || samplesPath.isEmpty) return;
+      final samples = Directory(samplesPath);
       if (!samples.existsSync()) return;
 
       final archives =
@@ -124,7 +190,7 @@ void main() {
               .where((file) => file.path.toLowerCase().endsWith('.zip'))
               .toList()
             ..sort((a, b) => a.path.compareTo(b.path));
-      expect(archives, hasLength(7));
+      expect(archives, isNotEmpty);
       for (final archive in archives) {
         final parsed = await YomitanKanjiArchive.read(archive.path);
         expect(parsed, isNotNull, reason: archive.path);

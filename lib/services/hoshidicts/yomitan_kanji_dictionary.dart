@@ -9,6 +9,49 @@ import 'package:path/path.dart' as p;
 const yomitanKanjiDataFileName = '.mangatan-kanji.json';
 const yomitanKanjiContentType = 'mangatan-yomitan-kanji-v1';
 
+/// Rejects a dictionary whose `index.json` title cannot be used as a single
+/// directory name.
+///
+/// The native importer stores a dictionary at `outputDir/title`, so a title
+/// such as `../x` would place files outside the dictionary folder. Archives
+/// without a readable title are left for the importer to report.
+Future<void> ensureYomitanDictionaryTitleIsSafe(String zipPath) async {
+  final input = InputFileStream(zipPath);
+  try {
+    final archive = ZipDecoder().decodeStream(input);
+    ArchiveFile? indexFile;
+    for (final file in archive.files) {
+      if (file.isFile && file.name.replaceAll('\\', '/') == 'index.json') {
+        indexFile = file;
+        break;
+      }
+    }
+    if (indexFile == null) return;
+    final Object? index;
+    try {
+      index = jsonDecode(utf8.decode(indexFile.content));
+    } on FormatException {
+      return;
+    }
+    final title = index is Map ? index['title'] : null;
+    if (title is! String) return;
+    if (title.trim().isEmpty ||
+        title == '.' ||
+        title == '..' ||
+        title.contains('/') ||
+        title.contains('\\') ||
+        title.contains('\u0000') ||
+        // On Windows a drive prefix makes the joined path leave outputDir.
+        RegExp(r'^[A-Za-z]:').hasMatch(title)) {
+      throw FormatException(
+        'Dictionary title "$title" cannot be used as a folder name.',
+      );
+    }
+  } finally {
+    await input.close();
+  }
+}
+
 class DictionaryImportResult {
   const DictionaryImportResult({
     required this.success,
@@ -96,9 +139,9 @@ class YomitanKanjiArchive {
       final kanjiMetaFiles =
           files.entries
               .where(
-                (entry) => RegExp(
-                  r'(^|/)kanji_meta_bank_\d+\.json$',
-                ).hasMatch(entry.key),
+                (entry) =>
+                    RegExp(r'(^|/)kanji_meta_bank_\d+\.json$')
+                        .hasMatch(entry.key),
               )
               .toList()
             ..sort((a, b) => _bankNumber(a.key).compareTo(_bankNumber(b.key)));
@@ -188,9 +231,8 @@ class YomitanKanjiArchive {
   Future<void> persist(String outputDir) async {
     final directory = Directory(p.join(outputDir, storageName));
     await directory.create(recursive: true);
-    await File(
-      p.join(directory.path, 'index.json'),
-    ).writeAsString(jsonEncode(index));
+    await File(p.join(directory.path, 'index.json'))
+        .writeAsString(jsonEncode(index));
     await File(p.join(directory.path, yomitanKanjiDataFileName)).writeAsString(
       jsonEncode({
         'version': 1,
@@ -347,10 +389,17 @@ class YomitanKanjiStore {
     for (final path in paths) {
       final file = File(p.join(path, yomitanKanjiDataFileName));
       if (!await file.exists()) continue;
-      final decoded = jsonDecode(await file.readAsString());
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(await file.readAsString());
+      } on FormatException {
+        // One damaged dictionary must not disable the others.
+        continue;
+      }
       if (decoded is! Map<String, dynamic> ||
           decoded['title'] is! String ||
-          decoded['entries'] is! List) {
+          decoded['entries'] is! List ||
+          (decoded['frequencies'] != null && decoded['frequencies'] is! List)) {
         continue;
       }
       dictionaries.add(

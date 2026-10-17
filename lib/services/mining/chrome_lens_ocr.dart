@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:http/http.dart' as http;
 import 'package:mangayomi/services/mining/ocr_image_tiling.dart';
 import 'package:mangayomi/services/mining/ocr_models.dart';
+import 'package:mangayomi/services/mining/proto_wire.dart';
 
 class ChromeLensOcrResult {
   final int imageWidth;
@@ -83,13 +84,13 @@ class ChromeLensOcrClient {
     required int imageHeight,
     String language = 'ja',
   }) {
-    final root = _ProtoMessage.decode(bytes);
+    final root = ProtoWireMessage.decode(bytes);
     final objects = root.message(2);
     final text = objects?.message(3);
     final layout = text?.message(1);
     final blocks = <OcrTextBlock>[];
 
-    for (final paragraph in layout?.messages(1) ?? const <_ProtoMessage>[]) {
+    for (final paragraph in layout?.messages(1) ?? const <ProtoWireMessage>[]) {
       final lines = <String>[];
       final lineGeometries = <OcrLineGeometry>[];
       final lineRects = <_NormalizedRect>[];
@@ -268,7 +269,7 @@ class ChromeLensOcrClient {
     return trimmed.replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  static _LensGeometry? _readGeometry(_ProtoMessage? geometry) {
+  static _LensGeometry? _readGeometry(ProtoWireMessage? geometry) {
     final box = geometry?.message(1);
     if (box == null) return null;
     final centerX = box.float32(1) ?? 0;
@@ -389,91 +390,5 @@ class _ProtoWriter {
       remaining >>= 7;
     }
     _bytes.addByte(remaining);
-  }
-}
-
-class _ProtoMessage {
-  final Map<int, List<_ProtoField>> _fields;
-
-  const _ProtoMessage(this._fields);
-
-  factory _ProtoMessage.decode(Uint8List bytes) {
-    final fields = <int, List<_ProtoField>>{};
-    final cursor = _ProtoCursor(bytes);
-    while (!cursor.isDone) {
-      final tag = cursor.varint();
-      final field = tag >> 3;
-      final wireType = tag & 7;
-      if (field == 0) throw const FormatException('Invalid protobuf field');
-      final value = switch (wireType) {
-        0 => _ProtoField(wireType, cursor.varint()),
-        1 => _ProtoField(wireType, cursor.read(8)),
-        2 => _ProtoField(wireType, cursor.read(cursor.varint())),
-        5 => _ProtoField(wireType, cursor.read(4)),
-        _ => throw FormatException('Unsupported protobuf wire type $wireType'),
-      };
-      fields.putIfAbsent(field, () => []).add(value);
-    }
-    return _ProtoMessage(fields);
-  }
-
-  Iterable<_ProtoMessage> messages(int field) sync* {
-    for (final value in _fields[field] ?? const <_ProtoField>[]) {
-      if (value.wireType == 2 && value.value is Uint8List) {
-        yield _ProtoMessage.decode(value.value as Uint8List);
-      }
-    }
-  }
-
-  _ProtoMessage? message(int field) => messages(field).firstOrNull;
-
-  String string(int field) {
-    final value = _fields[field]?.firstOrNull;
-    if (value?.wireType != 2 || value?.value is! Uint8List) return '';
-    return utf8.decode(value!.value as Uint8List, allowMalformed: true);
-  }
-
-  double? float32(int field) {
-    final value = _fields[field]?.firstOrNull;
-    if (value?.wireType != 5 || value?.value is! Uint8List) return null;
-    final data = ByteData.sublistView(value!.value as Uint8List);
-    return data.getFloat32(0, Endian.little).toDouble();
-  }
-}
-
-class _ProtoField {
-  final int wireType;
-  final Object value;
-
-  const _ProtoField(this.wireType, this.value);
-}
-
-class _ProtoCursor {
-  final Uint8List bytes;
-  int offset = 0;
-
-  _ProtoCursor(this.bytes);
-
-  bool get isDone => offset >= bytes.length;
-
-  int varint() {
-    var result = 0;
-    var shift = 0;
-    while (offset < bytes.length && shift < 70) {
-      final byte = bytes[offset++];
-      result |= (byte & 0x7f) << shift;
-      if ((byte & 0x80) == 0) return result;
-      shift += 7;
-    }
-    throw const FormatException('Truncated protobuf varint');
-  }
-
-  Uint8List read(int length) {
-    if (length < 0 || offset + length > bytes.length) {
-      throw const FormatException('Truncated protobuf field');
-    }
-    final value = Uint8List.sublistView(bytes, offset, offset + length);
-    offset += length;
-    return value;
   }
 }
