@@ -9,6 +9,8 @@
 	</dict>
 	<key>NSDocumentUsageDescription</key>
 	<string>Mangatan needs access to your files to create and restore backups.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Mangatan connects to media servers and extension sources on your local network, such as Jellyfin.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Mangatan needs access to Downloads folder to save backups.</string>
 	<key>CFBundleDevelopmentRegion</key>

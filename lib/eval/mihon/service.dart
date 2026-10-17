@@ -400,6 +400,16 @@ class MihonExtensionService implements ExtensionService {
               androidProxyServer,
               e['imageUrl']?.toString() ?? '',
             ),
+            // Bridges that return direct image URLs (rather than proxy
+            // tokens) also return the request headers those URLs need.
+            headers: switch (e['headers']) {
+              final Map headers => {
+                for (final entry in headers.entries)
+                  if (entry.value != null)
+                    entry.key.toString(): entry.value.toString(),
+              },
+              _ => null,
+            },
           ),
         )
         .toList();

@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mangayomi/router/router.dart';
 
@@ -15,5 +16,13 @@ class AppNavigator {
   /// is currently no active navigator context (e.g. during startup).
   static void push(String location, {Object? extra}) {
     navigatorKey.currentContext?.push(location, extra: extra);
+  }
+
+  /// Shows a dialog above the current route from outside the widget tree,
+  /// for example from a toast action. A no-op without a navigator context.
+  static Future<T?> showAppDialog<T>(WidgetBuilder builder) async {
+    final context = navigatorKey.currentContext;
+    if (context == null) return null;
+    return showDialog<T>(context: context, builder: builder);
   }
 }

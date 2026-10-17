@@ -76,6 +76,7 @@ Future<http.Response> postMihonBridge(
         body: preparedBody.body,
         headers: _bridgeRequestHeaders(headers),
       );
+      _publishExtensionToasts(response);
       _validateMihonBridgeResponse(response, uri);
       preparedBody.rememberExtensionId(response);
       return response;
@@ -103,6 +104,30 @@ Future<http.Response> postMihonBridge(
 }
 
 const _extensionIdHeader = 'x-mangatan-extension-id';
+const _extensionToastsHeader = 'x-mangatan-toasts';
+final _extensionToasts = StreamController<String>.broadcast();
+
+/// Toasts extensions showed on the bridge, such as "Login successful".
+///
+/// Extensions often report a result only this way, sometimes from background
+/// work that finishes after the request that started it. The bridge attaches
+/// queued toasts to its next response as a base64 JSON list.
+Stream<String> get mihonExtensionToasts => _extensionToasts.stream;
+
+void _publishExtensionToasts(http.Response response) {
+  final encoded = response.headers[_extensionToastsHeader];
+  if (encoded == null || encoded.isEmpty) return;
+  try {
+    final toasts = jsonDecode(utf8.decode(base64.decode(encoded)));
+    if (toasts is! List) return;
+    for (final toast in toasts.whereType<String>()) {
+      if (toast.trim().isNotEmpty) _extensionToasts.add(toast);
+    }
+  } on FormatException {
+    // A malformed header only loses the toasts, never the response.
+  }
+}
+
 const _maximumRememberedExtensions = 128;
 final _extensionIds = <String, String>{};
 

@@ -17,7 +17,6 @@ import 'package:mangayomi/modules/more/settings/browse/providers/browse_state_pr
 import 'package:mangayomi/utils/log/logger.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:path/path.dart' as path;
-import 'package:mangayomi/repositories/settings_repository.dart';
 
 @visibleForTesting
 String? embeddedMihonBaseUrlFromResponse(Map<Object?, Object?>? response) {
@@ -111,6 +110,17 @@ class MExtensionServerPlatform {
     _writeBaseUrl = proxyServerState.set;
     _writeRuntimeBaseUrl = proxyServerState.setRuntime;
     _restoreSavedBaseUrl = proxyServerState.restoreSaved;
+  }
+
+  /// The desktop server this process launched, if any. Static because the
+  /// platform object can be recreated while the process keeps running.
+  static String? _desktopServerStartedThisSession;
+
+  /// Whether the configured JRE and JAR exist, so a replacement can start.
+  Future<bool> _hasConfiguredDesktopServer() async {
+    final settings = isar.settings.getSync(227);
+    return await _isFile(settings?.jrePath ?? '') &&
+        await _isFile(settings?.extensionServerPath ?? '');
   }
 
   Future<bool> check() async {
@@ -381,7 +391,12 @@ class MExtensionServerPlatform {
       if (isDesktop &&
           isRunning &&
           _isLoopbackServer(currentBaseUrl) &&
-          !await _supportsMangatanMihonBridge(currentBaseUrl)) {
+          ((currentBaseUrl != _desktopServerStartedThisSession &&
+                  await _hasConfiguredDesktopServer()) ||
+              !await _supportsMangatanMihonBridge(currentBaseUrl))) {
+        // A server left running by an earlier app session keeps that
+        // session's JAR and, on macOS, its Local Network permission, which
+        // dies with the old app and then blocks every LAN source. Replace it.
         await _stopDesktopServer(currentBaseUrl);
         isRunning = false;
       }
@@ -439,6 +454,7 @@ class MExtensionServerPlatform {
             return;
           }
           if (isReady) {
+            _desktopServerStartedThisSession = baseUrl;
             _setBaseUrl(baseUrl);
             _log('Mihon bridge is ready at $baseUrl.');
             return;

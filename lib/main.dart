@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:app_links/app_links.dart';
 import 'package:archive/archive.dart';
@@ -16,11 +17,11 @@ import 'package:hive_flutter/adapters.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
+import 'package:mangayomi/eval/mihon/bridge_http_client.dart';
 import 'package:mangayomi/models/custom_button.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/models/settings.dart';
 import 'package:mangayomi/models/source.dart';
-import 'package:mangayomi/repositories/custom_button_repository.dart';
 import 'package:mangayomi/repositories/track_repository.dart';
 import 'package:mangayomi/models/track.dart' as track;
 import 'package:mangayomi/models/track_search.dart';
@@ -54,7 +55,6 @@ import 'package:mangayomi/services/mining/anki_mobile_service.dart';
 import 'package:mangayomi/services/youtube/youtube_preferences.dart';
 import 'package:mangayomi/src/rust/frb_generated.dart';
 import 'package:mangayomi/utils/discord_rpc.dart';
-import 'package:mangayomi/services/crash_native.dart';
 import 'package:mangayomi/services/crash_report.dart';
 import 'package:mangayomi/utils/log/logger.dart';
 import 'package:mangayomi/utils/client_id.dart';
@@ -73,10 +73,7 @@ import 'package:mangayomi/utils/window_geometry.dart';
 import 'package:mangayomi/modules/manga/reader/subsampling_scale_image_view/subsampling_scale_image_view.dart';
 import 'package:mangayomi/modules/widgets/app_ui_scale.dart';
 import 'package:mangayomi/modules/more/settings/appearance/providers/app_ui_scale_state_provider.dart';
-import 'package:go_router/go_router.dart';
-import 'package:mangayomi/models/track_preference.dart';
-import 'package:mangayomi/modules/more/settings/general/providers/memory_probe_provider.dart';
-import 'package:mangayomi/modules/widgets/memory_overlay.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 late Isar isar;
 DiscordRPC? discordRpc;
@@ -336,6 +333,7 @@ class _MyAppState extends ConsumerState<MyApp>
         SingleTickerProviderStateMixin {
   late AppLinks _appLinks;
   StreamSubscription<Uri>? _linkSubscription;
+  late final StreamSubscription<String> _extensionToastSubscription;
   GoogleDriveDebugDiagnosticHandler? _googleDriveDiagnosticHandler;
   Uri? lastUri;
   late final AnimationController _disabledProgressController;
@@ -346,6 +344,9 @@ class _MyAppState extends ConsumerState<MyApp>
     super.initState();
     _disabledProgressController = AnimationController(vsync: this, value: 0.5);
     _mExtensionServer = MExtensionServerPlatform(ref, persistent: true);
+    _extensionToastSubscription = mihonExtensionToasts.listen(
+      (message) => botToast(message, second: 4),
+    );
     WidgetsBinding.instance.addObserver(this);
     if (!isMobile) windowManager.addListener(this);
     initializeDateFormatting();
@@ -406,7 +407,12 @@ class _MyAppState extends ConsumerState<MyApp>
   Future<void> _startBridgeAndRefreshFactorySources() async {
     try {
       await _mExtensionServer.startServer();
-      await ref.read(refreshInstalledMihonFactorySourcesProvider.future);
+      // The refresh rewrites sources and their preferences for tens of
+      // seconds. Holding the sync lock makes a Chimahon download-only wait for
+      // it, instead of failing because local data changed after its preview.
+      await ChimahonRestoreSyncCoordinator.shared.duringSync(
+        () => ref.read(refreshInstalledMihonFactorySourcesProvider.future),
+      );
     } on Object catch (error) {
       AppLogger.log(
         'Mihon source refresh failed (${error.runtimeType}).',
@@ -571,6 +577,7 @@ class _MyAppState extends ConsumerState<MyApp>
     }
     unawaited(_mExtensionServer.stopServer());
     _linkSubscription?.cancel();
+    _extensionToastSubscription.cancel();
     _googleDriveDiagnosticHandler?.close();
     discordRpc?.destroy();
     stopwebviewServer();
@@ -597,7 +604,25 @@ class _MyAppState extends ConsumerState<MyApp>
   void onWindowClose() {
     WindowGeometry.save();
     // Workaround for libepoxy error when closing app; caused by media-kit
-    if (Platform.isLinux) exit(0);
+    if (Platform.isLinux) {
+      unawaited(_stopExtensionServerForExit().whenComplete(() => exit(0)));
+    }
+  }
+
+  /// Quitting a desktop app does not dispose this widget, so [dispose] never
+  /// stops the extension server. The JVM would outlive the app and be reused
+  /// by the next launch, which on macOS also loses Local Network access.
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    await _stopExtensionServerForExit();
+    return AppExitResponse.exit;
+  }
+
+  Future<void> _stopExtensionServerForExit() async {
+    if (!isDesktop) return;
+    try {
+      await _mExtensionServer.stopServer().timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   void _initDeepLinks() {
@@ -742,16 +767,18 @@ class _MyAppState extends ConsumerState<MyApp>
                       child: Text(l10n.add),
                       onPressed: () async {
                         if (context.mounted) Navigator.of(context).pop();
-                        await isar.writeTxn(() async {
-                          await isar.customButtons.put(
-                            customButton
-                              ..pos = await isar.customButtons.count()
-                              ..isFavourite = false
-                              ..id = null
-                              ..updatedAt =
-                                  DateTime.now().millisecondsSinceEpoch,
-                          );
-                        });
+                        await dbWriteQueue.run(
+                          () => isar.writeTxn(() async {
+                            await isar.customButtons.put(
+                              customButton
+                                ..pos = await isar.customButtons.count()
+                                ..isFavourite = false
+                                ..id = null
+                                ..updatedAt =
+                                    DateTime.now().millisecondsSinceEpoch,
+                            );
+                          }),
+                        );
                         botToast(l10n.custom_buttons_added);
                       },
                     ),

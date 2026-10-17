@@ -29,15 +29,52 @@ void main() {
         'https://bridge.mangayomi.30062022.xyz',
       );
       expect(
-        mihonBridgeDalvikUri(
-          'https://bridge.mangayomi.30062022.xyz/',
-        ).toString(),
+        mihonBridgeDalvikUri('https://bridge.mangayomi.30062022.xyz/')
+            .toString(),
         'https://bridge.mangayomi.30062022.xyz/dalvik',
       );
       expect(
         () => mihonBridgeDalvikUri('ftp://192.168.1.20'),
         throwsFormatException,
       );
+    });
+
+    test('publishes extension toasts from any bridge response', () async {
+      final toasts = <String>[];
+      final subscription = mihonExtensionToasts.listen(toasts.add);
+      addTearDown(subscription.cancel);
+      String encode(Object value) =>
+          base64.encode(utf8.encode(jsonEncode(value)));
+      final responses = [
+        http.Response(
+          '[]',
+          200,
+          headers: {
+            'x-mangatan-toasts': encode(['Login successful', 'ログイン成功']),
+          },
+        ),
+        // Failures still deliver toasts, and bad headers are ignored.
+        http.Response(
+          '{"error":"Failed to login"}',
+          500,
+          headers: {
+            'x-mangatan-toasts': encode(['Login failed']),
+          },
+        ),
+        http.Response('[]', 200, headers: {'x-mangatan-toasts': '%%%'}),
+      ];
+      final client = MockClient((_) async => responses.removeAt(0));
+      final uri = Uri.parse('http://127.0.0.1:3710/dalvik');
+
+      await postMihonBridge(client, uri, body: {'method': 'a'});
+      await expectLater(
+        postMihonBridge(client, uri, body: {'method': 'b'}),
+        throwsA(anything),
+      );
+      await postMihonBridge(client, uri, body: {'method': 'c'});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(toasts, ['Login successful', 'ログイン成功', 'Login failed']);
     });
 
     test('recognizes only local bridge endpoints as loopback', () {
