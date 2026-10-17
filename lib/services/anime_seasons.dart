@@ -1,6 +1,7 @@
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/eval/model/m_manga.dart';
 import 'package:mangayomi/models/manga.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 /// The season flag layout used by Anikku 0.2 and its Mihon/Chimahon backup
 /// schema. Keep these values in one place because the same bit field is also
@@ -45,7 +46,9 @@ abstract final class AnimeSeasonFlags {
   static const sortFetchDate = 0x0000c000;
   static const sortMask = 0x0000e000;
 
+  static const gridDisplayModeShift = 16;
   static const gridDisplayModeMask = 0x00030000;
+  static const gridDisplaySizeShift = 18;
   static const gridDisplaySizeMask = 0x003c0000;
   static const overlayDownloadedMask = 0x00400000;
   static const overlayUnseenMask = 0x00800000;
@@ -55,22 +58,211 @@ abstract final class AnimeSeasonFlags {
   static const displayModeNumber = 0x08000000;
   static const displayModeMask = 0x08000000;
 
-  /// Returns the Anikku sort portion while accepting the early low-bit
-  /// Chimahon projection, whose source-order value is also zero.
-  static int sortMode(int flags) {
-    final legacyMode = flags & sortMask;
-    if (legacyMode != sortSource) return legacyMode;
-    return sortSource;
-  }
+  /// What Anikku and Animiru apply to an anime that has never had season
+  /// settings: newest season first by source order, a compact grid, and the
+  /// unseen, local and continue-watching overlays.
+  static const defaults =
+      sortDescending |
+      sortSource |
+      overlayUnseenMask |
+      overlayLocalMask |
+      overlayContinueMask;
+
+  /// [flags] as stored, or [defaults] for an anime never configured.
+  static int effective(int? flags) => flags ?? defaults;
+
+  static int sortMode(int flags) => flags & sortMask;
 
   static bool isAscending(int flags) =>
       flags & sortDirectionMask == sortAscending;
 
-  static int withSort(int flags, int sort) =>
-      (flags & ~sortMask) | (sort & sortMask);
+  /// Anikku's sort control: choosing the current sort flips its direction,
+  /// and choosing another sort starts it ascending.
+  static int withSortOrFlip(int flags, int sort) {
+    if (sortMode(flags) == sort & sortMask) {
+      return flags ^ sortDirectionMask;
+    }
+    return (flags & ~(sortMask | sortDirectionMask)) |
+        (sort & sortMask) |
+        sortAscending;
+  }
 
-  static int withFilter(int flags, int filter, int mask) =>
-      (flags & ~mask) | (filter & mask);
+  static AnimeSeasonFilter filter(int flags, int include, int exclude) {
+    final mask = include | exclude;
+    return switch (flags & mask) {
+      final value when value == include => AnimeSeasonFilter.include,
+      final value when value == exclude => AnimeSeasonFilter.exclude,
+      _ => AnimeSeasonFilter.any,
+    };
+  }
+
+  static int withFilter(
+    int flags,
+    int include,
+    int exclude,
+    AnimeSeasonFilter state,
+  ) {
+    final value = switch (state) {
+      AnimeSeasonFilter.any => 0,
+      AnimeSeasonFilter.include => include,
+      AnimeSeasonFilter.exclude => exclude,
+    };
+    return (flags & ~(include | exclude)) | value;
+  }
+
+  static bool hasActiveFilters(int flags) => flags & filtersMask != 0;
+
+  static AnimeSeasonDisplayMode displayMode(int flags) =>
+      AnimeSeasonDisplayMode.values[(flags & gridDisplayModeMask) >>
+          gridDisplayModeShift];
+
+  static int withDisplayMode(int flags, AnimeSeasonDisplayMode mode) =>
+      (flags & ~gridDisplayModeMask) | (mode.index << gridDisplayModeShift);
+
+  /// Grid columns, or rows of list entries; zero means automatic.
+  static int gridSize(int flags) =>
+      (flags & gridDisplaySizeMask) >> gridDisplaySizeShift;
+
+  static int withGridSize(int flags, int size) =>
+      (flags & ~gridDisplaySizeMask) |
+      ((size.clamp(0, 15) << gridDisplaySizeShift) & gridDisplaySizeMask);
+
+  static bool isSet(int flags, int mask) => flags & mask == mask;
+
+  static int withBit(int flags, int mask, bool enabled) =>
+      enabled ? flags | mask : flags & ~mask;
+}
+
+/// A tri-state season filter, as in Anikku's filter sheet.
+enum AnimeSeasonFilter { any, include, exclude }
+
+/// Season presentation, in Anikku's wire order.
+enum AnimeSeasonDisplayMode {
+  compactGrid,
+  comfortableGrid,
+  coverOnlyGrid,
+  list,
+}
+
+/// Episode and download totals for one season, mirroring Anikku's
+/// `SeasonAnime` plus the per-item download count.
+class AnimeSeasonStats {
+  const AnimeSeasonStats({
+    this.totalCount = 0,
+    this.seenCount = 0,
+    this.bookmarkCount = 0,
+    this.fillermarkCount = 0,
+    this.downloadCount = 0,
+    this.latestUpload = 0,
+    this.fetchedAt = 0,
+    this.lastSeen = 0,
+  });
+
+  final int totalCount;
+  final int seenCount;
+  final int bookmarkCount;
+  final int fillermarkCount;
+  final int downloadCount;
+  final int latestUpload;
+  final int fetchedAt;
+  final int lastSeen;
+
+  int get unseenCount => totalCount - seenCount;
+  bool get seen => totalCount == seenCount;
+  bool get hasStarted => seenCount > 0;
+}
+
+/// One season with its statistics.
+typedef AnimeSeasonEntry = ({Manga season, AnimeSeasonStats stats});
+
+/// Applies the season filters and sort in [flags] the way Anikku does:
+/// "completed" is the source's status, "downloaded" includes local seasons,
+/// and ties fall back to the title.
+List<AnimeSeasonEntry> filterAndSortAnimeSeasons(
+  Iterable<AnimeSeasonEntry> entries,
+  int flags,
+) {
+  bool keep(int include, int exclude, bool value) =>
+      switch (AnimeSeasonFlags.filter(flags, include, exclude)) {
+        AnimeSeasonFilter.any => true,
+        AnimeSeasonFilter.include => value,
+        AnimeSeasonFilter.exclude => !value,
+      };
+
+  final kept = entries.where((entry) {
+    final (:season, :stats) = entry;
+    return keep(
+          AnimeSeasonFlags.showUnseen,
+          AnimeSeasonFlags.showSeen,
+          !stats.seen,
+        ) &&
+        keep(
+          AnimeSeasonFlags.showDownloaded,
+          AnimeSeasonFlags.showNotDownloaded,
+          stats.downloadCount > 0 || season.isLocalArchive == true,
+        ) &&
+        keep(
+          AnimeSeasonFlags.showStarted,
+          AnimeSeasonFlags.showNotStarted,
+          stats.hasStarted,
+        ) &&
+        keep(
+          AnimeSeasonFlags.showCompleted,
+          AnimeSeasonFlags.showNotCompleted,
+          season.status == Status.completed,
+        ) &&
+        keep(
+          AnimeSeasonFlags.showBookmarked,
+          AnimeSeasonFlags.showNotBookmarked,
+          stats.bookmarkCount > 0,
+        ) &&
+        keep(
+          AnimeSeasonFlags.showFillermarked,
+          AnimeSeasonFlags.showNotFillermarked,
+          stats.fillermarkCount > 0,
+        );
+  }).toList();
+
+  int byTitle(AnimeSeasonEntry a, AnimeSeasonEntry b) => (a.season.name ?? '')
+      .toLowerCase()
+      .compareTo((b.season.name ?? '').toLowerCase());
+
+  int bySort(AnimeSeasonEntry a, AnimeSeasonEntry b) =>
+      switch (AnimeSeasonFlags.sortMode(flags)) {
+        AnimeSeasonFlags.sortSeasonNumber =>
+          (a.season.seasonNumber ?? -1).compareTo(b.season.seasonNumber ?? -1),
+        AnimeSeasonFlags.sortUploadDate => a.stats.latestUpload.compareTo(
+          b.stats.latestUpload,
+        ),
+        AnimeSeasonFlags.sortAlphabetical => byTitle(a, b),
+        AnimeSeasonFlags.sortUnseen => a.stats.unseenCount.compareTo(
+          b.stats.unseenCount,
+        ),
+        AnimeSeasonFlags.sortLastSeen => a.stats.lastSeen.compareTo(
+          b.stats.lastSeen,
+        ),
+        AnimeSeasonFlags.sortFetchDate => a.stats.fetchedAt.compareTo(
+          b.stats.fetchedAt,
+        ),
+        _ => (a.season.seasonSourceOrder ?? 0).compareTo(
+          b.season.seasonSourceOrder ?? 0,
+        ),
+      };
+
+  final ascending = AnimeSeasonFlags.isAscending(flags);
+  kept.sort((a, b) {
+    final order = ascending ? bySort(a, b) : bySort(b, a);
+    return order != 0 ? order : byTitle(a, b);
+  });
+  return kept;
+}
+
+/// Anikku's "Season N" title, dropping a whole number's decimal.
+String animeSeasonNumberLabel(double? number) {
+  if (number == null || number < 0) return '?';
+  return number == number.truncateToDouble()
+      ? number.toInt().toString()
+      : number.toString();
 }
 
 final _seasonNumberPattern = RegExp(r'([0-9]+)(\.[0-9]+)?(\.?[a-z]+)?');
@@ -212,68 +404,77 @@ Future<List<int>> storeAnimeSeasons(
     if (seenUrls.add(season.link!)) deduplicatedSeasons.add(season);
   }
   final result = <int>[];
-  await database.writeTxn(() async {
-    final all = (await database.mangas.where().findAll())
-        .where((m) => sameAnimeSource(m, parent))
-        .toList();
-    final ancestors = <String>{parent.link!};
-    var ancestorUrl = parent.animeParentUrl;
-    while (ancestorUrl != null && ancestors.add(ancestorUrl)) {
-      ancestorUrl = all
-          .where((m) => m.link == ancestorUrl)
-          .firstOrNull
-          ?.animeParentUrl;
-    }
-    if (urls.any(ancestors.contains)) {
-      throw StateError('The source returned a cyclic season relationship.');
-    }
-    for (final existing in all) {
-      if (existing.animeParentUrl == parent.link &&
-          !urls.contains(existing.link)) {
-        existing.animeParentUrl = null;
-        existing.updatedAt = DateTime.now().millisecondsSinceEpoch;
-        await database.mangas.put(existing);
+  await dbWriteQueue.run(
+    () => database.writeTxn(() async {
+      final all = (await database.mangas.where().findAll())
+          .where((m) => sameAnimeSource(m, parent))
+          .toList();
+      final ancestors = <String>{parent.link!};
+      var ancestorUrl = parent.animeParentUrl;
+      while (ancestorUrl != null && ancestors.add(ancestorUrl)) {
+        ancestorUrl = all
+            .where((m) => m.link == ancestorUrl)
+            .firstOrNull
+            ?.animeParentUrl;
       }
-    }
-    final seen = <String>{};
-    for (final (order, detail) in deduplicatedSeasons.indexed) {
-      if (!seen.add(detail.link!)) continue;
-      final matches = all.where((m) => m.link == detail.link).toList();
-      if (matches.length > 1) {
-        throw StateError('Multiple local entries match a season.');
+      if (urls.any(ancestors.contains)) {
+        throw StateError('The source returned a cyclic season relationship.');
       }
-      final season =
-          matches.firstOrNull ??
-          Manga(
-            source: parent.source,
-            sourceId: parent.sourceId,
-            mihonSourceId: parent.mihonSourceId,
-            lang: parent.lang,
-            link: detail.link,
-            name: detail.name,
-            author: detail.author,
-            artist: detail.artist,
-            genre: detail.genre,
-            imageUrl: detail.imageUrl,
-            description: detail.description,
-            status: detail.status ?? Status.unknown,
-            itemType: ItemType.anime,
-          );
-      season
-        ..animeParentUrl = parent.link
-        ..animeFetchType = detail.animeFetchType ?? 1
-        ..seasonNumber = recognizeAnimeSeasonNumber(
-          parent.name ?? '',
-          detail.name ?? '',
-          detail.seasonNumber,
-        )
-        ..seasonSourceOrder = order
-        ..backgroundUrl = detail.backgroundUrl ?? season.backgroundUrl
-        ..updateSourceTitle(detail.name)
-        ..updatedAt = DateTime.now().millisecondsSinceEpoch;
-      result.add(await database.mangas.put(season));
-    }
-    await database.mangas.put(parent);
-  });
+      for (final existing in all) {
+        if (existing.animeParentUrl == parent.link &&
+            !urls.contains(existing.link)) {
+          existing.animeParentUrl = null;
+          existing.updatedAt = DateTime.now().millisecondsSinceEpoch;
+          await database.mangas.put(existing);
+        }
+      }
+      final seen = <String>{};
+      for (final (order, detail) in deduplicatedSeasons.indexed) {
+        if (!seen.add(detail.link!)) continue;
+        final matches = all.where((m) => m.link == detail.link).toList();
+        if (matches.length > 1) {
+          throw StateError('Multiple local entries match a season.');
+        }
+        final season =
+            matches.firstOrNull ??
+            Manga(
+              source: parent.source,
+              sourceId: parent.sourceId,
+              mihonSourceId: parent.mihonSourceId,
+              lang: parent.lang,
+              link: detail.link,
+              name: detail.name,
+              author: detail.author,
+              artist: detail.artist,
+              genre: detail.genre,
+              imageUrl: detail.imageUrl,
+              description: detail.description,
+              status: detail.status ?? Status.unknown,
+              itemType: ItemType.anime,
+            );
+        season
+          ..animeParentUrl = parent.link
+          ..animeFetchType = detail.animeFetchType ?? 1
+          ..seasonNumber = recognizeAnimeSeasonNumber(
+            parent.name ?? '',
+            detail.name ?? '',
+            detail.seasonNumber,
+          )
+          ..seasonSourceOrder = order
+          ..backgroundUrl = detail.backgroundUrl ?? season.backgroundUrl
+          ..imageUrl = (detail.imageUrl?.isNotEmpty ?? false)
+              ? detail.imageUrl
+              : season.imageUrl
+          ..status = switch (detail.status) {
+            null || Status.unknown => season.status,
+            final status => status,
+          }
+          ..updateSourceTitle(detail.name)
+          ..updatedAt = DateTime.now().millisecondsSinceEpoch;
+        result.add(await database.mangas.put(season));
+      }
+      await database.mangas.put(parent);
+    }),
+  );
   return result;
 }

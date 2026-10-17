@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:mangayomi/modules/manga/detail/tv/tv_anime_detail_view.dart';
+import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:mangayomi/modules/manga/detail/widgets/anime_season_list.dart';
 
 import 'package:mangayomi/services/download_manager/next_downloads.dart';
@@ -85,6 +87,7 @@ import 'package:mangayomi/repositories/download_repository.dart';
 import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/repositories/track_repository.dart';
 import 'package:mangayomi/utils/manga_cover_actions.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 class MangaDetailView extends ConsumerStatefulWidget {
   final Function(bool) isExtended;
@@ -388,6 +391,12 @@ class _MangaDetailViewState extends ConsumerState<MangaDetailView>
 
   @override
   Widget build(BuildContext context) {
+    // On Android TV, anime gets a dedicated d-pad split detail (info left,
+    // episodes or seasons right). Manga/novel and phones/desktop keep the
+    // classic detail.
+    if (isTv && widget.itemType == ItemType.anime) {
+      return TvAnimeDetailView(manga: widget.manga!);
+    }
     // Watch all sort/filter providers so the list rebuilds whenever
     // the user changes settings in _showDraggableMenu().
     ref.watch(scanlatorsFilterStateProvider(widget.manga!));
@@ -420,7 +429,6 @@ class _MangaDetailViewState extends ConsumerState<MangaDetailView>
             final chapters = widget.manga!.getSortedFilteredChapters(
               sourceChapters: chapterRows,
             );
-            ref.read(chaptersListttStateProvider.notifier).set(chapters);
             _notifyUnrecognizedChapterNumbers();
             return _buildWidget(chapters: chapters);
           },
@@ -886,7 +894,9 @@ class _MangaDetailViewState extends ConsumerState<MangaDetailView>
               children: [
                 if (context.isTablet || seasonOverview)
                   SizedBox(
-                    width: seasonOverview ? context.width(1) : context.width(0.5),
+                    width: seasonOverview
+                        ? context.width(1)
+                        : context.width(0.5),
                     height: context.height(1),
                     child: SingleChildScrollView(
                       physics: seasonOverview
@@ -896,180 +906,201 @@ class _MangaDetailViewState extends ConsumerState<MangaDetailView>
                     ),
                   ),
                 Expanded(
-                  child: seasonOverview ? const SizedBox.shrink() : Scrollbar(
-                    interactive: true,
-                    thickness: 12,
-                    radius: const Radius.circular(10),
-                    controller: _scrollController,
-                    child: CustomScrollView(
-                      controller: _scrollController,
-                      slivers: [
-                        SliverPadding(
-                          padding: const EdgeInsets.only(top: 0, bottom: 60),
-                          sliver: SuperSliverList.builder(
-                            itemCount: chapters.length + 1,
-                            itemBuilder: (context, index) {
-                              final l10n = l10nLocalizations(context)!;
-                              int finalIndex = index - 1;
-                              if (index == 0) {
-                                return context.isTablet
-                                    ? Column(
-                                        children: [
-                                          Padding(
-                                            padding: const EdgeInsets.all(8.0),
-                                            child: Row(
-                                              mainAxisAlignment: isLocalArchive
-                                                  ? MainAxisAlignment
-                                                        .spaceBetween
-                                                  : MainAxisAlignment.start,
+                  child: seasonOverview
+                      ? const SizedBox.shrink()
+                      : Scrollbar(
+                          interactive: true,
+                          thickness: 12,
+                          radius: const Radius.circular(10),
+                          controller: _scrollController,
+                          child: CustomScrollView(
+                            controller: _scrollController,
+                            slivers: [
+                              SliverPadding(
+                                padding: const EdgeInsets.only(
+                                  top: 0,
+                                  bottom: 60,
+                                ),
+                                sliver: SuperSliverList.builder(
+                                  itemCount: chapters.length + 1,
+                                  itemBuilder: (context, index) {
+                                    final l10n = l10nLocalizations(context)!;
+                                    int finalIndex = index - 1;
+                                    if (index == 0) {
+                                      return context.isTablet
+                                          ? Column(
                                               children: [
-                                                Container(
-                                                  height: chapters.isEmpty
-                                                      ? context.height(1)
-                                                      : null,
-                                                  color: Theme.of(context)
-                                                      .scaffoldBackgroundColor,
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 8,
-                                                        ),
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
+                                                Padding(
+                                                  padding: const EdgeInsets.all(
+                                                    8.0,
+                                                  ),
+                                                  child: Row(
+                                                    mainAxisAlignment:
+                                                        isLocalArchive
+                                                        ? MainAxisAlignment
+                                                              .spaceBetween
+                                                        : MainAxisAlignment
                                                               .start,
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        Text(
-                                                          widget
-                                                                      .manga!
-                                                                      .itemType !=
-                                                                  ItemType.anime
-                                                              ? l10n.n_chapters(
-                                                                  chapters
-                                                                      .length,
-                                                                )
-                                                              : l10n.n_episodes(
-                                                                  chapters
-                                                                      .length,
+                                                    children: [
+                                                      Container(
+                                                        height: chapters.isEmpty
+                                                            ? context.height(1)
+                                                            : null,
+                                                        color: Theme.of(
+                                                          context,
+                                                        ).scaffoldBackgroundColor,
+                                                        child: Padding(
+                                                          padding:
+                                                              const EdgeInsets.symmetric(
+                                                                horizontal: 8,
+                                                              ),
+                                                          child: Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            mainAxisSize:
+                                                                MainAxisSize
+                                                                    .min,
+                                                            children: [
+                                                              Text(
+                                                                widget.manga!.itemType !=
+                                                                        ItemType
+                                                                            .anime
+                                                                    ? l10n.n_chapters(
+                                                                        chapters
+                                                                            .length,
+                                                                      )
+                                                                    : l10n.n_episodes(
+                                                                        chapters
+                                                                            .length,
+                                                                      ),
+                                                                style: const TextStyle(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
                                                                 ),
-                                                          style:
-                                                              const TextStyle(
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
                                                               ),
-                                                        ),
-                                                        Builder(
-                                                          builder: (context) {
-                                                            final missing = widget
-                                                                .manga!
-                                                                .missingChapterCount();
-                                                            if (missing <= 0) {
-                                                              return const SizedBox.shrink();
-                                                            }
-                                                            return Text(
-                                                              widget.manga!.itemType !=
-                                                                      ItemType
-                                                                          .anime
-                                                                  ? l10n.missing_chapters(
-                                                                      missing,
-                                                                    )
-                                                                  : l10n.missing_episodes(
-                                                                      missing,
+                                                              Builder(
+                                                                builder: (context) {
+                                                                  final missing =
+                                                                      widget
+                                                                          .manga!
+                                                                          .missingChapterCount();
+                                                                  if (missing <=
+                                                                      0) {
+                                                                    return const SizedBox.shrink();
+                                                                  }
+                                                                  return Text(
+                                                                    widget.manga!.itemType !=
+                                                                            ItemType.anime
+                                                                        ? l10n.missing_chapters(
+                                                                            missing,
+                                                                          )
+                                                                        : l10n.missing_episodes(
+                                                                            missing,
+                                                                          ),
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Colors
+                                                                          .red[400],
                                                                     ),
-                                                              style: TextStyle(
-                                                                fontSize: 12,
-                                                                color: Colors
-                                                                    .red[400],
+                                                                  );
+                                                                },
                                                               ),
-                                                            );
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      if (isLocalArchive)
+                                                        ElevatedButton.icon(
+                                                          style: ElevatedButton.styleFrom(
+                                                            padding:
+                                                                const EdgeInsets.all(
+                                                                  5,
+                                                                ),
+                                                            shape: RoundedRectangleBorder(
+                                                              borderRadius:
+                                                                  BorderRadius.circular(
+                                                                    5,
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                          icon: Icon(
+                                                            Icons.add,
+                                                            color: context
+                                                                .secondaryColor,
+                                                          ),
+                                                          label: Text(
+                                                            widget
+                                                                        .manga!
+                                                                        .itemType !=
+                                                                    ItemType
+                                                                        .anime
+                                                                ? l10n.add_chapters
+                                                                : l10n.add_episodes,
+                                                            style: TextStyle(
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: context
+                                                                  .secondaryColor,
+                                                            ),
+                                                          ),
+                                                          onPressed: () async {
+                                                            final manga =
+                                                                widget.manga;
+                                                            if (manga!.source ==
+                                                                "torrent") {
+                                                              addTorrent(
+                                                                context,
+                                                                manga: manga,
+                                                              );
+                                                            } else {
+                                                              try {
+                                                                await ref.read(
+                                                                  importArchivesFromFileProvider(
+                                                                    itemType: manga
+                                                                        .itemType,
+                                                                    manga,
+                                                                    init: false,
+                                                                    splitChapters:
+                                                                        false,
+                                                                  ).future,
+                                                                );
+                                                              } catch (error) {
+                                                                botToast(
+                                                                  'Import failed: $error',
+                                                                );
+                                                              }
+                                                            }
                                                           },
                                                         ),
-                                                      ],
-                                                    ),
+                                                    ],
                                                   ),
                                                 ),
-                                                if (isLocalArchive)
-                                                  ElevatedButton.icon(
-                                                    style: ElevatedButton.styleFrom(
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                            5,
-                                                          ),
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              5,
-                                                            ),
-                                                      ),
-                                                    ),
-                                                    icon: Icon(
-                                                      Icons.add,
-                                                      color: context
-                                                          .secondaryColor,
-                                                    ),
-                                                    label: Text(
-                                                      widget.manga!.itemType !=
-                                                              ItemType.anime
-                                                          ? l10n.add_chapters
-                                                          : l10n.add_episodes,
-                                                      style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        color: context
-                                                            .secondaryColor,
-                                                      ),
-                                                    ),
-                                                    onPressed: () async {
-                                                      final manga =
-                                                          widget.manga;
-                                                      if (manga!.source ==
-                                                          "torrent") {
-                                                        addTorrent(
-                                                          context,
-                                                          manga: manga,
-                                                        );
-                                                      } else {
-                                                        await ref.watch(
-                                                          importArchivesFromFileProvider(
-                                                            itemType:
-                                                                manga.itemType,
-                                                            manga,
-                                                            init: false,
-                                                            splitChapters:
-                                                                false,
-                                                          ).future,
-                                                        );
-                                                      }
-                                                    },
-                                                  ),
                                               ],
-                                            ),
-                                          ),
-                                        ],
-                                      )
-                                    : _bodyContainer(
-                                        chapterLength: chapters.length,
-                                      );
-                              }
-                              return ChapterListTileWidget(
-                                chapter: chapters[finalIndex],
-                                manga: widget.manga!,
-                                chapterList: chapterList,
-                                allChapters: chapters,
-                                sourceExist: widget.sourceExist,
-                                displayMode:
-                                    chapterDisplayMode ??
-                                    SortChapter.sourceTitleDisplay,
-                              );
-                            },
+                                            )
+                                          : _bodyContainer(
+                                              chapterLength: chapters.length,
+                                            );
+                                    }
+                                    return ChapterListTileWidget(
+                                      chapter: chapters[finalIndex],
+                                      manga: widget.manga!,
+                                      chapterList: chapterList,
+                                      allChapters: chapters,
+                                      sourceExist: widget.sourceExist,
+                                      displayMode:
+                                          chapterDisplayMode ??
+                                          SortChapter.sourceTitleDisplay,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
                 ),
               ],
             ),
@@ -1301,14 +1332,17 @@ class _MangaDetailViewState extends ConsumerState<MangaDetailView>
                                       onPressed: () async {
                                         final navigator = Navigator.of(context);
                                         if (isLocalArchive) {
-                                          await isar.writeTxn(() async {
-                                            final idsToDelete = selectedChapters
-                                                .map((c) => c.id!)
-                                                .toList();
-                                            await isar.chapters.deleteAll(
-                                              idsToDelete,
-                                            );
-                                          });
+                                          await dbWriteQueue.run(
+                                            () => isar.writeTxn(() async {
+                                              final idsToDelete =
+                                                  selectedChapters
+                                                      .map((c) => c.id!)
+                                                      .toList();
+                                              await isar.chapters.deleteAll(
+                                                idsToDelete,
+                                              );
+                                            }),
+                                          );
                                         } else if (selectedLocalOverlayChapters
                                             .isNotEmpty) {
                                           final result =
@@ -1999,14 +2033,18 @@ class _MangaDetailViewState extends ConsumerState<MangaDetailView>
                                     if (manga!.source == "torrent") {
                                       addTorrent(context, manga: manga);
                                     } else {
-                                      await ref.watch(
-                                        importArchivesFromFileProvider(
-                                          itemType: manga.itemType,
-                                          manga,
-                                          init: false,
-                                          splitChapters: false,
-                                        ).future,
-                                      );
+                                      try {
+                                        await ref.read(
+                                          importArchivesFromFileProvider(
+                                            itemType: manga.itemType,
+                                            manga,
+                                            init: false,
+                                            splitChapters: false,
+                                          ).future,
+                                        );
+                                      } catch (error) {
+                                        botToast('Import failed: $error');
+                                      }
                                     }
                                   },
                                 ),
@@ -2561,13 +2599,10 @@ class _MangaDetailViewState extends ConsumerState<MangaDetailView>
                 const SizedBox(width: 15),
                 TextButton(
                   onPressed: () {
-                    isar.writeTxnSync(() {
-                      final manga = widget.manga!;
-                      manga.description = description.text;
-                      manga.updateDisplayTitle(name.text);
-                      manga.updatedAt = DateTime.now().millisecondsSinceEpoch;
-                      isar.mangas.putSync(manga);
-                    });
+                    final manga = widget.manga!;
+                    manga.description = description.text;
+                    manga.updateDisplayTitle(name.text);
+                    mangaRepository.save(manga);
                     Navigator.pop(context);
                   },
                   child: Text(l10n.edit),

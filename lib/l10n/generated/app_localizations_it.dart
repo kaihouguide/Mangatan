@@ -3469,6 +3469,40 @@ class AppLocalizationsIt extends AppLocalizations {
   String get season_number => 'Season number';
 
   @override
+  String get migrate_source => 'Migrate source';
+
+  @override
+  String season_n(String number) {
+    return 'Season $number';
+  }
+
+  @override
+  String season_count(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count seasons',
+      one: '1 season',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get filler => 'Filler';
+
+  @override
+  String get episode_fetch_date => 'Episode fetch date';
+
+  @override
+  String get unwatched_episodes => 'Unwatched episodes';
+
+  @override
+  String get season_title => 'Season title';
+
+  @override
+  String get no_seasons_match_filters => 'No seasons match the current filters';
+
+  @override
   String get library_statistics => 'Library statistics';
 
   @override

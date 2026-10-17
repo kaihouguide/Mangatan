@@ -1,5 +1,3 @@
-import 'package:mangayomi/modules/manga/detail/widgets/anime_season_list.dart';
-
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -8,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/manga.dart';
+import 'package:mangayomi/modules/manga/detail/widgets/anime_season_list.dart';
 import 'package:mangayomi/modules/manga/detail/widgets/tracking_menu.dart';
 import 'package:mangayomi/modules/library/widgets/library_entry_utils.dart';
 import 'package:mangayomi/modules/manga/detail/providers/isar_providers.dart';
@@ -15,17 +14,15 @@ import 'package:mangayomi/modules/manga/detail/providers/update_manga_detail_pro
 import 'package:mangayomi/modules/more/providers/algorithm_weights_state_provider.dart';
 import 'package:mangayomi/modules/widgets/category_selection_dialog.dart';
 import 'package:mangayomi/repositories/history_repository.dart';
-import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/repositories/track_repository.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:mangayomi/utils/extensions/manga_extensions.dart';
 import 'package:mangayomi/utils/extensions/string_extensions.dart';
 import 'package:mangayomi/utils/utils.dart';
-import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/history.dart';
-import 'package:mangayomi/models/track_preference.dart';
+import 'package:mangayomi/providers/l10n_providers.dart';
+import 'package:mangayomi/repositories/manga_repository.dart';
 
 /// TV-only, d-pad-first anime detail. Equal split, screen-padded: the hero
 /// (cover, title, meta, synopsis) and a vertical list of actions on the left,
@@ -282,15 +279,16 @@ class _TvAnimeDetailViewState extends ConsumerState<TvAnimeDetailView> {
     );
   }
 
-  void _toggleLibrary() {
+  Future<void> _toggleLibrary() async {
     final model = manga;
     final now = DateTime.now().millisecondsSinceEpoch;
-    isar.writeTxnSync(() {
+    await mangaRepository.writeTransaction(() {
       model.updateFavorite(!(model.favorite ?? false));
       model.dateAdded = model.favorite! ? now : 0;
       model.updatedAt = now;
       isar.mangas.putSync(model);
     });
+    if (!mounted) return;
     setState(() {});
   }
 
@@ -619,49 +617,49 @@ class _LeftInfo extends StatelessWidget {
                       focusNode: actionFocus[2],
                       accent: accent,
                       icon: Icons.label_outline,
-                      label: 'Categories',
+                      label: context.l10n.categories,
                       onPressed: onCategories,
                     ),
                     _VActionButton(
                       focusNode: actionFocus[8],
                       accent: accent,
                       icon: Icons.sync_alt,
-                      label: 'Tracking',
+                      label: context.l10n.tracking,
                       onPressed: onTracking,
                     ),
                     _VActionButton(
                       focusNode: actionFocus[3],
                       accent: accent,
                       icon: Icons.public,
-                      label: 'Open in browser',
+                      label: context.l10n.open_in_browser,
                       onPressed: onBrowser,
                     ),
                     _VActionButton(
                       focusNode: actionFocus[4],
                       accent: accent,
                       icon: Icons.recommend_outlined,
-                      label: 'Recommendations',
+                      label: context.l10n.recommendations,
                       onPressed: onRecommendations,
                     ),
                     _VActionButton(
                       focusNode: actionFocus[5],
                       accent: accent,
                       icon: Icons.format_list_numbered,
-                      label: 'Watch order',
+                      label: context.l10n.watch_order,
                       onPressed: onWatchOrder,
                     ),
                     _VActionButton(
                       focusNode: actionFocus[6],
                       accent: accent,
                       icon: Icons.swap_horiz,
-                      label: 'Migrate',
+                      label: context.l10n.migrate,
                       onPressed: onMigrate,
                     ),
                     _VActionButton(
                       focusNode: actionFocus[7],
                       accent: accent,
                       icon: Icons.dynamic_feed,
-                      label: 'Migrate source',
+                      label: context.l10n.migrate_source,
                       onPressed: onMassMigrate,
                     ),
                   ],

@@ -374,14 +374,18 @@ class _MangaInfoHeaderState extends ConsumerState<MangaInfoHeader> {
                                             )
                                           : true;
                                       if (!context.mounted) return;
-                                      await ref.watch(
-                                        importArchivesFromFileProvider(
-                                          itemType: manga.itemType,
-                                          manga,
-                                          init: false,
-                                          splitChapters: splitChapters,
-                                        ).future,
-                                      );
+                                      try {
+                                        await ref.read(
+                                          importArchivesFromFileProvider(
+                                            itemType: manga.itemType,
+                                            manga,
+                                            init: false,
+                                            splitChapters: splitChapters,
+                                          ).future,
+                                        );
+                                      } catch (error) {
+                                        botToast('Import failed: $error');
+                                      }
                                     }
                                   },
                                 ),

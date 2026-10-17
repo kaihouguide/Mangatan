@@ -1363,6 +1363,29 @@
   "chapter_swipe_disabled": "Disabled",
   "seasons": "Seasons",
   "season_number": "Season number",
+  "migrate_source": "Migrate source",
+  "season_n": "Season {number}",
+  "@season_n": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "season_count": "{count, plural, =1{1 season} other{{count} seasons}}",
+  "@season_count": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "filler": "Filler",
+  "unwatched_count": "Unwatched count",
+  "episode_fetch_date": "Episode fetch date",
+  "unwatched_episodes": "Unwatched episodes",
+  "season_title": "Season title",
+  "no_seasons_match_filters": "No seasons match the current filters",
   "library_statistics": "Library statistics",
   "url_must_end_with_dot_json": "URL must end with .json",
   "extension_server_directory_is_package_managed": "The extension server folder is managed by your package manager. Installing into {fallbackDirectory} instead.",

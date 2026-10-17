@@ -15,16 +15,15 @@ import 'package:mangayomi/services/get_detail.dart';
 import 'package:mangayomi/modules/mass_migration/services/mass_migration_service.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/constant.dart';
+import 'package:mangayomi/utils/error_toast.dart';
 import 'package:mangayomi/modules/manga/detail/manga_detail_view.dart';
 import 'package:mangayomi/modules/manga/detail/providers/state_providers.dart';
 import 'package:mangayomi/modules/more/providers/incognito_mode_state_provider.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:mangayomi/utils/extensions/manga_extensions.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/category.dart';
 import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/history.dart';
+import 'package:mangayomi/modules/manga/detail/providers/isar_providers.dart';
 
 String mangaDetailValueOrFallback(String? value, String fallback) =>
     value == null || value.isEmpty ? fallback : value;
@@ -49,6 +48,12 @@ class MangaDetailsView extends ConsumerStatefulWidget {
 }
 
 class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
+  // One subscription for the page's lifetime; recreating the stream on every
+  // rebuild made the button fall back to "Watch" until history re-emitted.
+  late final Stream<List<History>> _history = historyRepository.watchByMangaId(
+    widget.manga.id!,
+  );
+
   /// "Add to library" entry point: checks whether this exact title is
   /// already favorited under a different source first, so the same manga
   /// can't end up as two separate library entries by accident. Only warns —
@@ -95,9 +100,10 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
         singleManga: model,
       );
     } else {
-      model.favorite = true;
+      // put, not save: updateFavorite already set the sync clock's updatedAt.
+      model.updateFavorite(true);
       model.dateAdded = DateTime.now().millisecondsSinceEpoch;
-      await mangaRepository.save(model);
+      await mangaRepository.put(model);
     }
   }
 
@@ -151,17 +157,25 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
       link: newManga.link,
       imageUrl: newManga.imageUrl,
     );
-    final preview = await ref.read(
-      getDetailProvider(url: newManga.link!, source: destinationSource).future,
-    );
-    await migrateLibraryItem(
-      ref: ref,
-      oldManga: oldManga,
-      selectedManga: selectedManga,
-      preview: preview,
-      destinationSource: destinationSource,
-    );
-    await mangaRepository.deleteLibrarySourceGroup([newManga]);
+    try {
+      final preview = await ref.read(
+        getDetailProvider(
+          url: newManga.link!,
+          source: destinationSource,
+        ).future,
+      );
+      await migrateLibraryItem(
+        ref: ref,
+        oldManga: oldManga,
+        selectedManga: selectedManga,
+        preview: preview,
+        destinationSource: destinationSource,
+      );
+      await mangaRepository.deleteLibrarySourceGroup([newManga]);
+    } catch (error, stack) {
+      toastError(error, stack: stack, source: 'library-duplicate-migrate');
+      return;
+    }
     if (context.mounted) Navigator.pop(context);
   }
 
@@ -197,53 +211,50 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
     return Scaffold(
       floatingActionButton: Consumer(
         builder: (context, ref, child) {
-          final chaptersList = ref.watch(chaptersListttStateProvider);
+          if (ref.watch(isLongPressedStateProvider)) return Container();
+          // Read this title's own episodes. A shared "current chapter list"
+          // would be overwritten by any other detail page still open below
+          // this one, such as the series page behind a season.
+          final rows =
+              ref
+                  .watch(getChaptersStreamProvider(mangaId: widget.manga.id!))
+                  .value ??
+              const <Chapter>[];
+          final chaptersList = widget.manga.getSortedFilteredChapters(
+            sourceChapters: rows,
+          );
           final isExtended = ref.watch(isExtendedStateProvider);
-          return ref.watch(isLongPressedStateProvider)
-              ? Container()
-              : chaptersList.isNotEmpty &&
-                    chaptersList
-                        .where((element) => !element.isRead!)
-                        .toList()
-                        .isNotEmpty
-              ? StreamBuilder(
-                  stream: historyRepository.watchByItemType(
-                    widget.manga.itemType,
-                  ),
-                  builder: (context, snapshot) {
-                    String buttonLabel = widget.manga.itemType != ItemType.anime
-                        ? l10n.read
-                        : l10n.watch;
-                    Chapter? historyChapter;
-                    final incognitoMode = ref.watch(incognitoModeStateProvider);
-                    if (snapshot.hasData && snapshot.data!.isNotEmpty) {
-                      final entries = snapshot.data!
-                          .where(
-                            (element) => element.mangaId == widget.manga.id,
-                          )
-                          .toList();
-
-                      if (entries.isNotEmpty && !incognitoMode) {
-                        historyChapter = entries.last.chapter.value;
-                        buttonLabel = l10n.resume;
-                      }
-                    }
-                    final chapter = selectResumeChapter(
-                      widget.manga.getChapterListForReading(
-                        sourceChapters: chaptersList,
-                      ),
-                      historyChapter: historyChapter,
-                    );
-                    return CustomFloatingActionBtn(
-                      isExtended: !isExtended,
-                      label: buttonLabel,
-                      onPressed: () {
-                        chapter?.pushToReaderView(context);
-                      },
-                    );
-                  },
-                )
-              : Container();
+          if (!chaptersList.any((element) => element.isRead != true)) {
+            return Container();
+          }
+          return StreamBuilder<List<History>>(
+            stream: _history,
+            builder: (context, snapshot) {
+              String buttonLabel = widget.manga.itemType != ItemType.anime
+                  ? l10n.read
+                  : l10n.watch;
+              Chapter? historyChapter;
+              final incognitoMode = ref.watch(incognitoModeStateProvider);
+              final entries = snapshot.data ?? const <History>[];
+              if (entries.isNotEmpty && !incognitoMode) {
+                historyChapter = entries.last.chapter.value;
+                buttonLabel = l10n.resume;
+              }
+              final chapter = selectResumeChapter(
+                widget.manga.getChapterListForReading(
+                  sourceChapters: chaptersList,
+                ),
+                historyChapter: historyChapter,
+              );
+              return CustomFloatingActionBtn(
+                isExtended: !isExtended,
+                label: buttonLabel,
+                onPressed: () {
+                  chapter?.pushToReaderView(context);
+                },
+              );
+            },
+          );
         },
       ),
       body: MangaDetailView(
@@ -292,11 +303,9 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
                   ),
                   onPressed: () async {
                     final model = widget.manga;
-                    isar.writeTxnSync(() {
-                      model.updateFavorite(false);
-                      model.dateAdded = 0;
-                      isar.mangas.putSync(model);
-                    });
+                    model.updateFavorite(false);
+                    model.dateAdded = 0;
+                    await mangaRepository.put(model);
                   },
                   child: Column(
                     children: [
@@ -316,25 +325,7 @@ class _MangaDetailsViewState extends ConsumerState<MangaDetailsView> {
                   backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                   elevation: 0,
                 ),
-                onPressed: () async {
-                  final model = widget.manga;
-                  final checkCategoryList = categoryRepository
-                      .isNotEmptyByItemType(model.itemType);
-                  if (checkCategoryList) {
-                    showCategorySelectionDialog(
-                      context: context,
-                      ref: ref,
-                      itemType: model.itemType,
-                      singleManga: model,
-                    );
-                  } else {
-                    isar.writeTxnSync(() {
-                      model.updateFavorite(true);
-                      model.dateAdded = DateTime.now().millisecondsSinceEpoch;
-                      isar.mangas.putSync(model);
-                    });
-                  }
-                },
+                onPressed: () => _onAddToLibraryPressed(context),
                 child: Column(
                   children: [
                     Icon(

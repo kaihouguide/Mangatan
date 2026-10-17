@@ -489,14 +489,7 @@ class _MigrationMangaGlobalImageCardState
                       onPressed: () {
                         context.push(
                           "/categories",
-                          extra: (
-                            true,
-                            widget.oldManga.itemType == ItemType.manga
-                                ? 0
-                                : widget.oldManga.itemType == ItemType.anime
-                                ? 1
-                                : 2,
-                          ),
+                          extra: (true, widget.oldManga.itemType),
                         );
                         Navigator.pop(context);
                       },

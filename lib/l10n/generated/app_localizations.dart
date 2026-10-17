@@ -6163,6 +6163,54 @@ abstract class AppLocalizations {
   /// **'Season number'**
   String get season_number;
 
+  /// No description provided for @migrate_source.
+  ///
+  /// In en, this message translates to:
+  /// **'Migrate source'**
+  String get migrate_source;
+
+  /// No description provided for @season_n.
+  ///
+  /// In en, this message translates to:
+  /// **'Season {number}'**
+  String season_n(String number);
+
+  /// No description provided for @season_count.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 season} other{{count} seasons}}'**
+  String season_count(int count);
+
+  /// No description provided for @filler.
+  ///
+  /// In en, this message translates to:
+  /// **'Filler'**
+  String get filler;
+
+  /// No description provided for @episode_fetch_date.
+  ///
+  /// In en, this message translates to:
+  /// **'Episode fetch date'**
+  String get episode_fetch_date;
+
+  /// No description provided for @unwatched_episodes.
+  ///
+  /// In en, this message translates to:
+  /// **'Unwatched episodes'**
+  String get unwatched_episodes;
+
+  /// No description provided for @season_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Season title'**
+  String get season_title;
+
+  /// No description provided for @no_seasons_match_filters.
+  ///
+  /// In en, this message translates to:
+  /// **'No seasons match the current filters'**
+  String get no_seasons_match_filters;
+
   /// No description provided for @library_statistics.
   ///
   /// In en, this message translates to:

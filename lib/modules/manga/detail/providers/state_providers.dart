@@ -333,20 +333,6 @@ class ChapterSetDownloadState extends _$ChapterSetDownloadState {
 }
 
 @riverpod
-class ChaptersListttState extends _$ChaptersListttState {
-  @override
-  List<Chapter> build() {
-    return [];
-  }
-
-  void set(List<Chapter> chapters) async {
-    // Yield to the event loop to avoid setState during build
-    await Future(() {});
-    state = chapters;
-  }
-}
-
-@riverpod
 class ScanlatorsFilterState extends _$ScanlatorsFilterState {
   @override
   (List<String>, List<String>, List<String>) build(Manga manga) {

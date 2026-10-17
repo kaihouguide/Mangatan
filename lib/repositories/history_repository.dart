@@ -71,6 +71,11 @@ class HistoryRepository {
       .chapter((q) => q.manga((q) => q.itemTypeEqualTo(itemType)))
       .watch(fireImmediately: true);
 
+  Stream<List<History>> watchByMangaId(int mangaId) => isar.historys
+      .filter()
+      .mangaIdEqualTo(mangaId)
+      .watch(fireImmediately: true);
+
   // idIsNotNull() removed — every Isar document has a non-null id.
   // The itemType hash-index on History + the link traversal does the filtering.
   Stream<List<History>> watchByItemTypeAndSearch(
