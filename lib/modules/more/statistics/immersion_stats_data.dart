@@ -2,6 +2,8 @@
 /// `StatsData` / `StatsScreenState`.
 library;
 
+import 'package:mangayomi/services/statistics/immersion_stats_models.dart';
+
 /// Which library the screen is reporting on.
 enum ImmersionStatsType { all, manga, novels }
 
@@ -202,16 +204,17 @@ ImmersionStatsDateRange immersionStatsDateRange(
   final today = _dateOnly(now ?? DateTime.now());
   switch (scale) {
     case ImmersionStatsDateScale.day:
-      final date = today.add(Duration(days: offset));
+      final date = addStatsDays(today, offset);
       return ImmersionStatsDateRange(date, date);
     case ImmersionStatsDateScale.week:
-      final shifted = today.add(Duration(days: offset * 7));
-      final start = _startOfWeek(shifted);
-      return ImmersionStatsDateRange(start, start.add(const Duration(days: 6)));
+      final start = _startOfWeek(addStatsDays(today, offset * 7));
+      return ImmersionStatsDateRange(start, addStatsDays(start, 6));
     case ImmersionStatsDateScale.month:
       final start = _addMonths(DateTime(today.year, today.month), offset);
-      final end = _addMonths(start, 1).subtract(const Duration(days: 1));
-      return ImmersionStatsDateRange(start, _dateOnly(end));
+      return ImmersionStatsDateRange(
+        start,
+        addStatsDays(_addMonths(start, 1), -1),
+      );
     case ImmersionStatsDateScale.year:
       final start = DateTime(today.year + offset);
       return ImmersionStatsDateRange(start, DateTime(start.year, 12, 31));
@@ -224,7 +227,23 @@ DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
 /// Chimahon's weeks start on Monday (`with(DayOfWeek.MONDAY)`).
 DateTime _startOfWeek(DateTime date) =>
-    _dateOnly(date).subtract(Duration(days: date.weekday - DateTime.monday));
+    addStatsDays(date, DateTime.monday - date.weekday);
+
+/// Moves [date] by whole calendar days and drops its time of day.
+///
+/// Adding a `Duration` of days to a local time is wrong across a daylight
+/// saving change: the result lands an hour off, on the previous day's 23:00
+/// or the next day's 01:00.
+DateTime addStatsDays(DateTime date, int days) =>
+    DateTime(date.year, date.month, date.day + days);
+
+/// Calendar days from [from] to [to], ignoring time of day and daylight
+/// saving changes.
+int statsDaysBetween(DateTime from, DateTime to) => DateTime.utc(
+  to.year,
+  to.month,
+  to.day,
+).difference(DateTime.utc(from.year, from.month, from.day)).inDays;
 
 /// Adds months without overflowing into the next month for short months.
 DateTime _addMonths(DateTime date, int months) {
@@ -234,3 +253,162 @@ DateTime _addMonths(DateTime date, int months) {
   final lastDay = DateTime(year, month + 1, 0).day;
   return DateTime(year, month, date.day > lastDay ? lastDay : date.day);
 }
+
+/// Consecutive days ending today (or yesterday) with any recorded reading.
+int immersionReadingStreak(
+  List<MangaStatsEntry> mangaStats,
+  List<NovelStatsEntry> novelStats, {
+  DateTime? now,
+}) {
+  final days = <DateTime>{};
+  for (final entry in mangaStats) {
+    final date = parseStatsDateKey(entry.dateKey);
+    if (date != null) days.add(date);
+  }
+  for (final entry in novelStats) {
+    final date = parseStatsDateKey(entry.dateKey);
+    if (date != null) days.add(date);
+  }
+  if (days.isEmpty) return 0;
+
+  var current = _dateOnly(now ?? DateTime.now());
+  // Not having read yet today does not break a streak; it resumes from
+  // yesterday.
+  if (!days.contains(current)) {
+    current = addStatsDays(current, -1);
+  }
+  var streak = 0;
+  while (days.contains(current)) {
+    streak++;
+    current = addStatsDays(current, -1);
+  }
+  return streak;
+}
+
+/// The bars for the hero chart: a week of days, a month of weeks, a year of
+/// months, or the last five years.
+List<ImmersionHistoryPoint> immersionHistoryPoints({
+  required List<MangaStatsEntry> mangaStats,
+  required List<NovelStatsEntry> novelStats,
+  required ImmersionStatsDateScale scale,
+  required int offset,
+  DateTime? now,
+}) {
+  final today = _dateOnly(now ?? DateTime.now());
+  final range = immersionStatsDateRange(scale, offset, now: today);
+
+  int durationFor(DateTime start, DateTime end) {
+    final window = ImmersionStatsDateRange(start, end);
+    var total = 0;
+    for (final entry in mangaStats) {
+      if (window.containsKey(entry.dateKey)) total += entry.readingTimeMs;
+    }
+    for (final entry in novelStats) {
+      if (window.containsKey(entry.dateKey)) total += entry.readingTimeMs;
+    }
+    return total;
+  }
+
+  switch (scale) {
+    case ImmersionStatsDateScale.day:
+      final weekStart = _startOfWeek(range.start);
+      return [
+        for (var i = 0; i < 7; i++)
+          () {
+            final date = addStatsDays(weekStart, i);
+            return ImmersionHistoryPoint(
+              label: _weekdayLabels[date.weekday - 1],
+              durationMs: durationFor(date, date),
+              dateOffset: statsDaysBetween(today, date),
+            );
+          }(),
+      ];
+    case ImmersionStatsDateScale.week:
+      // Bars cover the weeks of the month the selected week falls in; the
+      // Thursday of an ISO week always lies inside its owning month.
+      final anchor = addStatsDays(range.start, 3);
+      final monthStart = DateTime(anchor.year, anchor.month);
+      final monthEnd = DateTime(anchor.year, anchor.month + 1, 0);
+      final firstMonday = _startOfWeek(monthStart);
+      final lastMonday = _startOfWeek(monthEnd);
+      final weeks = statsDaysBetween(firstMonday, lastMonday) ~/ 7 + 1;
+      final currentMonday = _startOfWeek(today);
+      return [
+        for (var i = 0; i < (weeks < 4 ? 4 : weeks); i++)
+          () {
+            final weekStart = addStatsDays(firstMonday, i * 7);
+            final weekEnd = addStatsDays(weekStart, 6);
+            return ImmersionHistoryPoint(
+              label: 'W${_isoWeekNumber(weekStart)}',
+              durationMs: durationFor(weekStart, weekEnd),
+              dateOffset: statsDaysBetween(currentMonday, weekStart) ~/ 7,
+            );
+          }(),
+      ];
+    case ImmersionStatsDateScale.month:
+      return [
+        for (var month = 1; month <= 12; month++)
+          () {
+            final start = DateTime(range.start.year, month);
+            final end = DateTime(range.start.year, month + 1, 0);
+            return ImmersionHistoryPoint(
+              label: _monthLabels[month - 1],
+              durationMs: durationFor(start, end),
+              dateOffset:
+                  (start.year - today.year) * 12 + (start.month - today.month),
+            );
+          }(),
+      ];
+    case ImmersionStatsDateScale.year:
+    case ImmersionStatsDateScale.allTime:
+      return [
+        for (var yearsAgo = 4; yearsAgo >= 0; yearsAgo--)
+          () {
+            final year = today.year - yearsAgo;
+            return ImmersionHistoryPoint(
+              label: year.toString(),
+              durationMs: durationFor(DateTime(year), DateTime(year, 12, 31)),
+              dateOffset: -yearsAgo,
+            );
+          }(),
+      ];
+  }
+}
+
+/// ISO-8601 week number, matching Chimahon's `WEEK_OF_WEEK_BASED_YEAR`.
+int _isoWeekNumber(DateTime date) {
+  final thursday = addStatsDays(date, DateTime.thursday - date.weekday);
+  final firstThursday = DateTime(thursday.year, 1, 4);
+  final firstThursdayOfYear = addStatsDays(
+    firstThursday,
+    DateTime.thursday - firstThursday.weekday,
+  );
+  return 1 + statsDaysBetween(firstThursdayOfYear, thursday) ~/ 7;
+}
+
+/// The most recent valid date among [dateKeys].
+DateTime? latestStatsDate(Iterable<String> dateKeys) {
+  DateTime? latest;
+  for (final key in dateKeys) {
+    final date = parseStatsDateKey(key);
+    if (date == null) continue;
+    if (latest == null || date.isAfter(latest)) latest = date;
+  }
+  return latest;
+}
+
+const _weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const _monthLabels = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];

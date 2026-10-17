@@ -203,4 +203,107 @@ void main() {
     expect(withProfile.copyWith(offset: -1).profileId, 'ja');
     expect(withProfile.copyWith(clearProfileId: true).profileId, isNull);
   });
+
+  // Europe and North America change clocks on a Sunday in late March and late
+  // October. These dates straddle those changes; run `flutter test` with `TZ`
+  // set to a zone that observes daylight saving to exercise them.
+  group('daylight saving changes', () {
+    final afterSpringChange = DateTime(2026, 3, 30, 9);
+
+    test('calendar day arithmetic ignores the lost or gained hour', () {
+      expect(addStatsDays(DateTime(2026, 3, 30), -1), DateTime(2026, 3, 29));
+      expect(addStatsDays(DateTime(2026, 10, 19), 7), DateTime(2026, 10, 26));
+      expect(
+        statsDaysBetween(DateTime(2026, 3, 30), DateTime(2026, 3, 23)),
+        -7,
+      );
+      expect(statsDaysBetween(DateTime(2026, 3, 1), DateTime(2026, 3, 31)), 30);
+    });
+
+    test('stepping back a day lands on the previous date', () {
+      final range = immersionStatsDateRange(
+        ImmersionStatsDateScale.day,
+        -1,
+        now: afterSpringChange,
+      );
+      expect(range.start, DateTime(2026, 3, 29));
+    });
+
+    test('a streak continues across the change', () {
+      final streak = immersionReadingStreak(
+        [
+          for (final day in [27, 28, 29, 30])
+            MangaStatsEntry(dateKey: '2026-03-$day', readingTimeMs: 1000),
+        ],
+        const [],
+        now: afterSpringChange,
+      );
+      expect(streak, 4);
+    });
+
+    test('day bars point at their own date', () {
+      final points = immersionHistoryPoints(
+        mangaStats: const [
+          MangaStatsEntry(dateKey: '2026-03-23', readingTimeMs: 5000),
+        ],
+        novelStats: const [],
+        scale: ImmersionStatsDateScale.day,
+        offset: -7,
+        now: afterSpringChange,
+      );
+      expect(points.first.label, 'Mon');
+      expect(points.first.durationMs, 5000);
+      expect(points.first.dateOffset, -7);
+    });
+
+    test('week bars stay Monday to Sunday after the autumn change', () {
+      final points = immersionHistoryPoints(
+        mangaStats: const [
+          MangaStatsEntry(dateKey: '2026-10-26', readingTimeMs: 3000),
+          MangaStatsEntry(dateKey: '2026-11-01', readingTimeMs: 4000),
+        ],
+        novelStats: const [],
+        scale: ImmersionStatsDateScale.week,
+        offset: 0,
+        now: DateTime(2026, 10, 28, 9),
+      );
+      final week = points.singleWhere((point) => point.dateOffset == 0);
+      expect(week.label, 'W44');
+      expect(week.durationMs, 7000);
+    });
+  });
+
+  group('history', () {
+    test('a streak survives not having read yet today', () {
+      final streak = immersionReadingStreak(
+        const [
+          MangaStatsEntry(dateKey: '2026-07-16'),
+          MangaStatsEntry(dateKey: '2026-07-17'),
+        ],
+        const [NovelStatsEntry(dateKey: '2026-07-15')],
+        now: now,
+      );
+      expect(streak, 3);
+    });
+
+    test('a gap ends the streak', () {
+      final streak = immersionReadingStreak(
+        const [
+          MangaStatsEntry(dateKey: '2026-07-18'),
+          MangaStatsEntry(dateKey: '2026-07-16'),
+        ],
+        const [],
+        now: now,
+      );
+      expect(streak, 1);
+    });
+
+    test('the latest date ignores malformed keys', () {
+      expect(
+        latestStatsDate(['2026-07-01', 'garbage', '2026-07-09', '2026-06-30']),
+        DateTime(2026, 7, 9),
+      );
+      expect(latestStatsDate(['garbage']), isNull);
+    });
+  });
 }

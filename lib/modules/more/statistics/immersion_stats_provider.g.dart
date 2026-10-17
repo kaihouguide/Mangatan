@@ -85,7 +85,7 @@ final class ImmersionStatsProvider
   }
 }
 
-String _$immersionStatsHash() => r'ae2f805c1dc163cd622340dcc23d23617cd20bce';
+String _$immersionStatsHash() => r'1dab33a8047bb4e128ac8943d68e9239646a9ddf';
 
 /// Aggregates immersion statistics for one filter combination.
 ///
@@ -202,7 +202,7 @@ final class ImmersionStatsTitlesProvider
 }
 
 String _$immersionStatsTitlesHash() =>
-    r'5c97ca5fccf3abd372386adbae789b3fb353fa1c';
+    r'5349d9f9f46697cf386e05a2cf3b78927e21c78f';
 
 /// The per-title list backing the "In library" card drill-down.
 

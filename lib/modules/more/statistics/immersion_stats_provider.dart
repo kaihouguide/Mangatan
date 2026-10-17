@@ -84,7 +84,9 @@ Future<ImmersionStatsOverview> immersionStats(
     // Chimahon keeps the id-0 bucket (reading with no library entry) even when
     // non-library titles are excluded, because it is not attributable.
     mangaStats = mangaStats
-        .where((entry) => entry.mangaId == 0 || libraryIds.contains(entry.mangaId))
+        .where(
+          (entry) => entry.mangaId == 0 || libraryIds.contains(entry.mangaId),
+        )
         .toList();
   }
   final unscopedMangaStats = mangaStats;
@@ -181,15 +183,15 @@ Future<ImmersionStatsOverview> immersionStats(
   // The streak and chart deliberately use the *unscoped* rows: a streak is a
   // property of the whole history, and the chart shows periods outside the
   // selected window so it can be navigated.
-  final streak = _readingStreak(unscopedMangaStats, unscopedNovelStats);
-  final historyPoints = _historyPoints(
+  final streak = immersionReadingStreak(unscopedMangaStats, unscopedNovelStats);
+  final historyPoints = immersionHistoryPoints(
     mangaStats: unscopedMangaStats,
     novelStats: unscopedNovelStats,
     scale: query.scale,
     offset: query.offset,
   );
 
-  final days = range.end.difference(range.start).inDays + 1;
+  final days = statsDaysBetween(range.start, range.end) + 1;
   final avgPerDay =
       query.scale != ImmersionStatsDateScale.day &&
           query.scale != ImmersionStatsDateScale.allTime &&
@@ -217,9 +219,10 @@ Future<ImmersionStatsOverview> immersionStats(
                 .where((manga) => manga.isLocalArchive == true)
                 .length +
             profileFilteredNovels.length,
-      ImmersionStatsType.manga => profileFilteredManga
-          .where((manga) => manga.isLocalArchive == true)
-          .length,
+      ImmersionStatsType.manga =>
+        profileFilteredManga
+            .where((manga) => manga.isLocalArchive == true)
+            .length,
       ImmersionStatsType.novels => profileFilteredNovels.length,
     },
     totalReadDurationMs: totalTimeMs,
@@ -291,7 +294,7 @@ Future<List<ImmersionStatsTitle>> immersionStatsTitles(
         title: manga.name ?? '',
         author: manga.author,
         mangaId: id,
-        lastReadDate: _latestDate(stats.map((entry) => entry.dateKey)),
+        lastReadDate: latestStatsDate(stats.map((entry) => entry.dateKey)),
         readDurationMs: stats.fold(
           0,
           (sum, entry) => sum + entry.readingTimeMs,
@@ -313,7 +316,7 @@ Future<List<ImmersionStatsTitle>> immersionStatsTitles(
         author: book.author,
         isNovel: true,
         mangaId: book.mangaId,
-        lastReadDate: _latestDate(stats.map((entry) => entry.dateKey)),
+        lastReadDate: latestStatsDate(stats.map((entry) => entry.dateKey)),
         readDurationMs: stats.fold(
           0,
           (sum, entry) => sum + entry.readingTimeMs,
@@ -375,9 +378,7 @@ Future<List<DictionaryProfile>> immersionStatsProfiles(Ref ref) =>
 void _watchStatsRevision(Ref ref) {
   void onChanged() => ref.invalidateSelf();
   ImmersionStatsStorage.revision.addListener(onChanged);
-  ref.onDispose(
-    () => ImmersionStatsStorage.revision.removeListener(onChanged),
-  );
+  ref.onDispose(() => ImmersionStatsStorage.revision.removeListener(onChanged));
 }
 
 // --------------------------------------------------------------- library IO
@@ -499,15 +500,14 @@ Future<List<MangaStatsEntry>> _filterMangaStatsByProfile(
     // Reading with no library entry cannot be attributed to a profile, so it
     // is excluded from a profile-scoped view rather than counted everywhere.
     if (entry.mangaId == 0) continue;
-    final resolved = byMangaId.putIfAbsent(entry.mangaId, () => null);
-    final profile =
-        resolved ??
-        await () async {
-          final manga = await isar.mangas.get(entry.mangaId);
-          final id = manga == null ? null : await _mangaProfileId(manga);
-          byMangaId[entry.mangaId] = id;
-          return id;
-        }();
+    final String? profile;
+    if (byMangaId.containsKey(entry.mangaId)) {
+      profile = byMangaId[entry.mangaId];
+    } else {
+      final manga = await isar.mangas.get(entry.mangaId);
+      profile = manga == null ? null : await _mangaProfileId(manga);
+      byMangaId[entry.mangaId] = profile;
+    }
     if (profile == profileId) kept.add(entry);
   }
   return kept;
@@ -692,168 +692,3 @@ int _scoreScale(int syncId) => syncId == 2 ? 100 : 10;
 
 double _tenPointScore(int score, int scale) =>
     scale <= 0 ? 0 : score * 10 / scale;
-
-/// Consecutive days ending today (or yesterday) with any recorded reading.
-int _readingStreak(
-  List<MangaStatsEntry> mangaStats,
-  List<NovelStatsEntry> novelStats,
-) {
-  final days = <DateTime>{};
-  for (final entry in mangaStats) {
-    final date = parseStatsDateKey(entry.dateKey);
-    if (date != null) days.add(date);
-  }
-  for (final entry in novelStats) {
-    final date = parseStatsDateKey(entry.dateKey);
-    if (date != null) days.add(date);
-  }
-  if (days.isEmpty) return 0;
-
-  final now = DateTime.now();
-  var current = DateTime(now.year, now.month, now.day);
-  // Not having read yet today does not break a streak; it resumes from
-  // yesterday.
-  if (!days.contains(current)) {
-    current = current.subtract(const Duration(days: 1));
-  }
-  var streak = 0;
-  while (days.contains(current)) {
-    streak++;
-    current = current.subtract(const Duration(days: 1));
-  }
-  return streak;
-}
-
-/// The bars for the hero chart: a week of days, a month of weeks, a year of
-/// months, or the last five years.
-List<ImmersionHistoryPoint> _historyPoints({
-  required List<MangaStatsEntry> mangaStats,
-  required List<NovelStatsEntry> novelStats,
-  required ImmersionStatsDateScale scale,
-  required int offset,
-}) {
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final range = immersionStatsDateRange(scale, offset, now: now);
-
-  int durationFor(DateTime start, DateTime end) {
-    final window = ImmersionStatsDateRange(start, end);
-    var total = 0;
-    for (final entry in mangaStats) {
-      if (window.containsKey(entry.dateKey)) total += entry.readingTimeMs;
-    }
-    for (final entry in novelStats) {
-      if (window.containsKey(entry.dateKey)) total += entry.readingTimeMs;
-    }
-    return total;
-  }
-
-  switch (scale) {
-    case ImmersionStatsDateScale.day:
-      final weekStart = range.start.subtract(
-        Duration(days: range.start.weekday - DateTime.monday),
-      );
-      return [
-        for (var i = 0; i < 7; i++)
-          () {
-            final date = weekStart.add(Duration(days: i));
-            return ImmersionHistoryPoint(
-              label: _weekdayLabels[date.weekday - 1],
-              durationMs: durationFor(date, date),
-              dateOffset: date.difference(today).inDays,
-            );
-          }(),
-      ];
-    case ImmersionStatsDateScale.week:
-      // Bars cover the weeks of the month the selected week falls in; the
-      // Thursday of an ISO week always lies inside its owning month.
-      final anchor = range.start.add(const Duration(days: 3));
-      final monthStart = DateTime(anchor.year, anchor.month);
-      final monthEnd = DateTime(anchor.year, anchor.month + 1, 0);
-      final firstMonday = monthStart.subtract(
-        Duration(days: monthStart.weekday - DateTime.monday),
-      );
-      final lastMonday = monthEnd.subtract(
-        Duration(days: monthEnd.weekday - DateTime.monday),
-      );
-      final weeks = (lastMonday.difference(firstMonday).inDays ~/ 7) + 1;
-      final currentMonday = today.subtract(
-        Duration(days: today.weekday - DateTime.monday),
-      );
-      return [
-        for (var i = 0; i < (weeks < 4 ? 4 : weeks); i++)
-          () {
-            final weekStart = firstMonday.add(Duration(days: i * 7));
-            final weekEnd = weekStart.add(const Duration(days: 6));
-            return ImmersionHistoryPoint(
-              label: 'W${_isoWeekNumber(weekStart)}',
-              durationMs: durationFor(weekStart, weekEnd),
-              dateOffset: weekStart.difference(currentMonday).inDays ~/ 7,
-            );
-          }(),
-      ];
-    case ImmersionStatsDateScale.month:
-      return [
-        for (var month = 1; month <= 12; month++)
-          () {
-            final start = DateTime(range.start.year, month);
-            final end = DateTime(range.start.year, month + 1, 0);
-            return ImmersionHistoryPoint(
-              label: _monthLabels[month - 1],
-              durationMs: durationFor(start, end),
-              dateOffset:
-                  (start.year - today.year) * 12 + (start.month - today.month),
-            );
-          }(),
-      ];
-    case ImmersionStatsDateScale.year:
-    case ImmersionStatsDateScale.allTime:
-      return [
-        for (var yearsAgo = 4; yearsAgo >= 0; yearsAgo--)
-          () {
-            final year = today.year - yearsAgo;
-            return ImmersionHistoryPoint(
-              label: year.toString(),
-              durationMs: durationFor(DateTime(year), DateTime(year, 12, 31)),
-              dateOffset: -yearsAgo,
-            );
-          }(),
-      ];
-  }
-}
-
-/// ISO-8601 week number, matching Chimahon's `WEEK_OF_WEEK_BASED_YEAR`.
-int _isoWeekNumber(DateTime date) {
-  final thursday = date.add(Duration(days: DateTime.thursday - date.weekday));
-  final firstThursday = DateTime(thursday.year, 1, 4);
-  final firstThursdayOfYear = firstThursday.add(
-    Duration(days: DateTime.thursday - firstThursday.weekday),
-  );
-  return 1 + thursday.difference(firstThursdayOfYear).inDays ~/ 7;
-}
-
-DateTime? _latestDate(Iterable<String> dateKeys) {
-  DateTime? latest;
-  for (final key in dateKeys) {
-    final date = parseStatsDateKey(key);
-    if (date == null) continue;
-    if (latest == null || date.isAfter(latest)) latest = date;
-  }
-  return latest;
-}
-
-const _weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const _monthLabels = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
