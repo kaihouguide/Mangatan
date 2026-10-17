@@ -23,6 +23,10 @@ Future<dynamic> updateMangaDetail(
   required bool isInit,
   bool showToast = true,
 }) async {
+  // Callers read this provider without listening to it, so Riverpod would
+  // dispose it during the network request and every `ref.mounted` check below
+  // would silently drop the fetched details. Stay alive until it finishes.
+  final keepAlive = ref.keepAlive();
   try {
     final manga = mangaRepository.findById(mangaId!);
     if (manga == null) return;
@@ -337,5 +341,7 @@ Future<dynamic> updateMangaDetail(
     } else {
       rethrow;
     }
+  } finally {
+    keepAlive.close();
   }
 }

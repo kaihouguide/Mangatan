@@ -19,6 +19,7 @@ import 'package:mangayomi/modules/widgets/bottom_text_widget.dart';
 import 'package:mangayomi/modules/widgets/cover_view_widget.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 class MangaImageCardWidget extends ConsumerWidget {
   final Source source;
@@ -271,8 +272,8 @@ Future<void> pushToMangaReaderDetail({
   bool useMaterialRoute = false,
   bool addToFavourite = false,
 }) async {
-  int? mangaId =
-      (await mangaRepository.findLocalArchiveByName(getManga?.name))?.id;
+  int? mangaId = (await mangaRepository.findLocalArchiveByName(getManga?.name))
+      ?.id;
 
   if (mangaId == null) {
     if (archiveId == null) {
@@ -293,34 +294,7 @@ Future<void> pushToMangaReaderDetail({
             artist: getManga.artist ?? '',
             sourceId: sourceId,
           );
-      final empty = await isar.mangas
-          .filter()
-          .langEqualTo(lang)
-          .titleMatchesSourceIdentity(manga.sourceTitle ?? manga.name)
-          .sourceEqualTo(manga.source)
-          .isEmpty();
-      if (empty) {
-        await mangaRepository.save(manga);
-      }
-
-      final foundMangas = await isar.mangas
-          .filter()
-          .langEqualTo(lang)
-          .titleMatchesSourceIdentity(manga.sourceTitle ?? manga.name)
-          .sourceEqualTo(manga.source)
-          .findAll();
-      Manga? matchedManga;
-      for (final foundManga in foundMangas) {
-        if (foundManga.sourceId == null || foundManga.sourceId == sourceId) {
-          matchedManga = foundManga;
-          break;
-        }
-      }
-      if (matchedManga == null) {
-        await mangaRepository.save(manga);
-        matchedManga = manga;
-      }
-      mangaId = matchedManga.id!;
+      mangaId = await resolveBrowsedMangaId(manga, lang, sourceId);
     } else {
       mangaId = archiveId;
     }
@@ -367,10 +341,52 @@ Future<void> pushToMangaReaderDetail({
     }
   } else {
     final getManga = await isar.mangas.get(mangaId);
-    await isar.writeTxn(() async {
-      await isar.mangas.put(
-        getManga!..updateFavorite(!(getManga.favorite ?? false)),
-      );
-    });
+    await dbWriteQueue.run(
+      () => isar.writeTxn(() async {
+        await isar.mangas.put(
+          getManga!..updateFavorite(!(getManga.favorite ?? false)),
+        );
+      }),
+    );
   }
+}
+
+/// Finds the stored entry for a browsed title, saving [manga] when there is
+/// none, and returns its ID.
+@visibleForTesting
+Future<int> resolveBrowsedMangaId(
+  Manga manga,
+  String lang,
+  int? sourceId,
+) async {
+  // Also match by source ID: a Mihon factory source's name follows its
+  // preferences (Jellyfin's custom label), and a name change must not
+  // save the same title a second time.
+  QueryBuilder<Manga, Manga, QAfterFilterCondition> sameEntry() => isar.mangas
+      .filter()
+      .langEqualTo(lang)
+      .titleMatchesSourceIdentity(manga.sourceTitle ?? manga.name)
+      .group(
+        (q) => sourceId == null
+            ? q.sourceEqualTo(manga.source)
+            : q.sourceEqualTo(manga.source).or().sourceIdEqualTo(sourceId),
+      );
+  final empty = await sameEntry().isEmpty();
+  if (empty) {
+    await mangaRepository.save(manga);
+  }
+
+  final foundMangas = await sameEntry().findAll();
+  Manga? matchedManga;
+  for (final foundManga in foundMangas) {
+    if (foundManga.sourceId == null || foundManga.sourceId == sourceId) {
+      matchedManga = foundManga;
+      break;
+    }
+  }
+  if (matchedManga == null) {
+    await mangaRepository.save(manga);
+    matchedManga = manga;
+  }
+  return matchedManga.id!;
 }
