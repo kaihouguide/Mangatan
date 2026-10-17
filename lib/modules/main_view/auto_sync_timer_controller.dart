@@ -6,19 +6,6 @@ typedef PeriodicTimerFactory =
 typedef AutoSyncTimerErrorHandler =
     void Function(Object error, StackTrace stackTrace);
 
-/// Fixed internal signal used to stop automatic sync after a reported failure.
-///
-/// Sync services return failure instead of throwing so manual callers retain
-/// their existing toast-only behavior. Automatic callers convert that result
-/// into this exception for [AutoSyncTimerController] to handle.
-class AutoSyncAttemptFailed implements Exception {
-  const AutoSyncAttemptFailed();
-}
-
-Future<void> runAutoSyncOrThrow(Future<bool> Function() startSync) async {
-  if (!await startSync()) throw const AutoSyncAttemptFailed();
-}
-
 Timer _createPeriodicTimer(
   Duration interval,
   void Function(Timer timer) callback,

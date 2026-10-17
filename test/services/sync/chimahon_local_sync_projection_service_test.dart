@@ -364,7 +364,6 @@ void main() {
       expect(
         snapshot.backup.backupNovelCategories.map((category) => category.name),
         unorderedEquals([
-          'Default',
           'Local EPUB category',
           'Locally created empty category',
         ]),

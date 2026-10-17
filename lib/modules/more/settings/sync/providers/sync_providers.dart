@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:isar_community/isar.dart';
@@ -71,13 +71,14 @@ class Synching extends _$Synching {
     final preference =
         isar.syncPreferences.getSync(syncId!) ?? SyncPreference(syncId: 1);
     if (preference.migrateLegacySyncYomiCredentials(_newChimahonDeviceId())) {
-      isar.writeTxnSync(() => isar.syncPreferences.putSync(preference));
+      // build() cannot await; the queue still runs this before any later write.
+      unawaited(syncPreferenceRepository.save(preference));
     }
     return preference;
   }
 
-  void login(String server, String email, String authToken) {
-    _updateCurrentPreference((current) {
+  Future<void> login(String server, String email, String authToken) async {
+    await _updateCurrentPreference((current) {
       current
         ..server = server
         ..email = email
@@ -87,15 +88,14 @@ class Synching extends _$Synching {
     ref.invalidate(syncServerProvider(syncId: syncId!));
   }
 
-  void logout() {
-    _updateCurrentPreference((current) => current.authToken = null);
+  Future<void> logout() async {
+    await _updateCurrentPreference((current) => current.authToken = null);
     ref.invalidateSelf();
     ref.invalidate(syncServerProvider(syncId: syncId!));
   }
 
-  void setGoogleDriveConnected(bool connected) {
-    _setGoogleDriveConnection(connected: connected);
-  }
+  Future<void> setGoogleDriveConnected(bool connected) =>
+      _setGoogleDriveConnection(connected: connected);
 
   GoogleDriveConnectionIntentToken captureGoogleDriveConnectionIntent() =>
       _googleDriveConnectionIntentGeneration.capture();
@@ -103,7 +103,7 @@ class Synching extends _$Synching {
   void invalidateGoogleDriveConnectionIntent() =>
       _googleDriveConnectionIntentGeneration.recordConfigurationChange();
 
-  void persistGoogleDriveConnectionIfIntentCurrent({
+  Future<void> persistGoogleDriveConnectionIfIntentCurrent({
     required GoogleDriveConnectionIntentToken intent,
     required ChimahonMediaSyncSelection? mediaSelection,
     bool mediaSelectionInitialized = true,
@@ -120,7 +120,7 @@ class Synching extends _$Synching {
     expectedMediaSelectionState: expectedMediaSelectionState,
   );
 
-  void _setGoogleDriveConnection({
+  Future<void> _setGoogleDriveConnection({
     required bool connected,
     GoogleDriveConnectionIntentToken? expectedConnectionIntent,
     ChimahonMediaSyncSelection? mediaSelection,
@@ -128,8 +128,8 @@ class Synching extends _$Synching {
     bool mediaSelectionUserSelected = false,
     String? mediaSelectionScopeToken,
     ChimahonMediaSyncSelectionState? expectedMediaSelectionState,
-  }) {
-    isar.writeTxnSync(() {
+  }) async {
+    await syncPreferenceRepository.writeTransaction(() {
       final current = isar.syncPreferences.getSync(syncId!) ?? state;
       if (expectedConnectionIntent != null) {
         _googleDriveConnectionIntentGeneration.requireCurrent(
@@ -177,11 +177,11 @@ class Synching extends _$Synching {
     ref.invalidateSelf();
   }
 
-  void setChimahonMediaSelection(
+  Future<void> setChimahonMediaSelection(
     ChimahonMediaSyncSelection selection, {
     bool initialized = true,
-  }) {
-    isar.writeTxnSync(() {
+  }) async {
+    await syncPreferenceRepository.writeTransaction(() {
       final current = isar.syncPreferences.getSync(syncId!) ?? state;
       final nextGeneration = current.chimahonMediaSelectionGeneration + 1;
       isar.syncPreferences.putSync(
@@ -197,14 +197,14 @@ class Synching extends _$Synching {
     ref.invalidateSelf();
   }
 
-  bool setChimahonMediaSelectionIfUnchanged({
+  Future<bool> setChimahonMediaSelectionIfUnchanged({
     required ChimahonMediaSyncSelectionState expected,
     required ChimahonMediaSyncSelection updated,
     bool updatedInitialized = true,
     bool updatedUserSelected = false,
     required String? updatedScopeToken,
-  }) {
-    final applied = isar.writeTxnSync(() {
+  }) async {
+    final applied = await syncPreferenceRepository.writeTransaction(() {
       final current = isar.syncPreferences.getSync(syncId!);
       if (current == null ||
           !applyChimahonMediaSelectionIfUnchanged(
@@ -224,15 +224,21 @@ class Synching extends _$Synching {
     return applied;
   }
 
-  void setChimahonSyncManga(bool value) => _setChimahonMediaField(manga: value);
+  Future<void> setChimahonSyncManga(bool value) =>
+      _setChimahonMediaField(manga: value);
 
-  void setChimahonSyncAnime(bool value) => _setChimahonMediaField(anime: value);
+  Future<void> setChimahonSyncAnime(bool value) =>
+      _setChimahonMediaField(anime: value);
 
-  void setChimahonSyncNovels(bool value) =>
+  Future<void> setChimahonSyncNovels(bool value) =>
       _setChimahonMediaField(novels: value);
 
-  void _setChimahonMediaField({bool? manga, bool? anime, bool? novels}) {
-    isar.writeTxnSync(() {
+  Future<void> _setChimahonMediaField({
+    bool? manga,
+    bool? anime,
+    bool? novels,
+  }) async {
+    await syncPreferenceRepository.writeTransaction(() {
       final current = isar.syncPreferences.getSync(syncId!) ?? state;
       applyChimahonMediaSelectionUserEdit(
         current,
@@ -245,11 +251,11 @@ class Synching extends _$Synching {
     ref.invalidateSelf();
   }
 
-  void saveSyncYomiCredentials({
+  Future<void> saveSyncYomiCredentials({
     required String server,
     required String apiToken,
-  }) {
-    _updateCurrentPreference((current) {
+  }) async {
+    await _updateCurrentPreference((current) {
       current
         ..syncYomiServer = server
         ..syncYomiApiToken = apiToken
@@ -258,8 +264,8 @@ class Synching extends _$Synching {
     ref.invalidateSelf();
   }
 
-  void disconnectSyncYomi() {
-    _updateCurrentPreference((current) {
+  Future<void> disconnectSyncYomi() async {
+    await _updateCurrentPreference((current) {
       current
         ..syncYomiServer = null
         ..syncYomiApiToken = null;
@@ -267,8 +273,8 @@ class Synching extends _$Synching {
     ref.invalidateSelf();
   }
 
-  void saveWebDavConnection({required String server}) {
-    _updateCurrentPreference((current) {
+  Future<void> saveWebDavConnection({required String server}) async {
+    await _updateCurrentPreference((current) {
       current
         ..server = server
         ..googleDriveConnected = true
@@ -277,8 +283,8 @@ class Synching extends _$Synching {
     ref.invalidateSelf();
   }
 
-  void disconnectWebDav() {
-    _updateCurrentPreference((current) {
+  Future<void> disconnectWebDav() async {
+    await _updateCurrentPreference((current) {
       current
         ..server = null
         ..googleDriveConnected = false;
@@ -286,56 +292,52 @@ class Synching extends _$Synching {
     ref.invalidateSelf();
   }
 
-  String ensureChimahonDeviceId() {
-    late String value;
-    isar.writeTxnSync(() {
-      final current = isar.syncPreferences.getSync(syncId!) ?? state;
-      final existing = current.chimahonDeviceId;
-      if (existing != null && existing.isNotEmpty) {
-        value = existing;
-        return;
-      }
-      value = _newChimahonDeviceId();
-      isar.syncPreferences.putSync(current..chimahonDeviceId = value);
-    });
-    return value;
+  Future<String> ensureChimahonDeviceId() =>
+      syncPreferenceRepository.writeTransaction(() {
+        final current = isar.syncPreferences.getSync(syncId!) ?? state;
+        final existing = current.chimahonDeviceId;
+        if (existing != null && existing.isNotEmpty) return existing;
+        final value = _newChimahonDeviceId();
+        isar.syncPreferences.putSync(current..chimahonDeviceId = value);
+        return value;
+      });
+
+  Future<void> setSince(int timestamp) async {
+    await _updateCurrentPreference((current) => current.since = timestamp);
+    ref.invalidateSelf();
   }
 
-  void setLastSyncManga(int timestamp) {
-    _updateCurrentPreference((current) => current.lastSyncManga = timestamp);
+  Future<void> setLastSync(int timestamp) async {
+    await _updateCurrentPreference((current) => current.lastSync = timestamp);
+    ref.invalidateSelf();
   }
 
-  void setLastSyncHistory(int timestamp) {
-    _updateCurrentPreference((current) => current.lastSyncHistory = timestamp);
-  }
+  Future<void> setServer(String? server) =>
+      _updateCurrentPreference((current) => current.server = server);
 
-  void setLastSyncUpdate(int timestamp) {
-    _updateCurrentPreference((current) => current.lastSyncUpdate = timestamp);
-  }
-
-  void setServer(String? server) {
-    _updateCurrentPreference((current) => current.server = server);
-  }
-
-  void setSyncOn(bool value) {
-    _updateCurrentPreference((current) => current.syncOn = value);
+  Future<void> setSyncOn(bool value) async {
+    await _updateCurrentPreference((current) => current.syncOn = value);
     // MainScreen listens to this provider to cancel or resume its timer.
     ref.invalidateSelf();
   }
 
-  void setAutoSyncFrequency(int value) {
-    _updateCurrentPreference((current) => current.autoSyncFrequency = value);
+  Future<void> setAutoSyncFrequency(int value) async {
+    // Recorded before queuing, so a restore already waiting in the queue
+    // cannot overwrite this edit.
     _autoSyncPauseGeneration.recordUserEdit();
+    await _updateCurrentPreference(
+      (current) => current.autoSyncFrequency = value,
+    );
     ref.invalidateSelf();
   }
 
   /// Immediately pauses the persisted automatic-sync interval and returns the
   /// process-local CAS token required to restore it after a failed operation.
-  AutoSyncPauseToken pauseAutoSyncForExternalOperation() {
+  Future<AutoSyncPauseToken> pauseAutoSyncForExternalOperation() async {
     final id = syncId!;
     late final AutoSyncPauseToken token;
     var changed = false;
-    isar.writeTxnSync(() {
+    await syncPreferenceRepository.writeTransaction(() {
       final current = isar.syncPreferences.getSync(id) ?? state;
       token = _autoSyncPauseGeneration.beginPause(current.autoSyncFrequency);
       if (current.autoSyncFrequency > 0) {
@@ -350,11 +352,13 @@ class Synching extends _$Synching {
 
   /// Restores a failed operation's pause only if no user frequency edit (even
   /// an explicit zero-to-zero edit) or newer pause occurred in the meantime.
-  bool restoreAutoSyncAfterFailedExternalOperation(AutoSyncPauseToken token) {
+  Future<bool> restoreAutoSyncAfterFailedExternalOperation(
+    AutoSyncPauseToken token,
+  ) async {
     final id = syncId!;
     if (token.syncId != id) return false;
     var restored = false;
-    isar.writeTxnSync(() {
+    await syncPreferenceRepository.writeTransaction(() {
       final current = isar.syncPreferences.getSync(id) ?? state;
       if (!_autoSyncPauseGeneration.canRestore(
         token,
@@ -371,48 +375,38 @@ class Synching extends _$Synching {
     return restored;
   }
 
-  void setSyncHistories(bool value) {
-    _updateCurrentPreference((current) => current.syncHistories = value);
-    ref.invalidateSelf();
-  }
-
-  void setSyncUpdates(bool value) {
-    _updateCurrentPreference((current) => current.syncUpdates = value);
-    ref.invalidateSelf();
-  }
-
-  void setSyncSettings(bool value) {
-    _updateCurrentPreference((current) => current.syncSettings = value);
-    ref.invalidateSelf();
-  }
-
-  void setSyncMode(SyncMode value) {
-    _updateCurrentPreference((current) {
+  Future<void> setSyncMode(SyncMode value) async {
+    // Recorded before queuing, so a pending Google Drive connection is
+    // rejected even if its write is already waiting in the queue.
+    _googleDriveConnectionIntentGeneration.recordConfigurationChange();
+    await _updateCurrentPreference((current) {
       current
         ..syncMode = value
         ..chimahonDeviceId = value == SyncMode.chimahon
             ? current.chimahonDeviceId ?? _newChimahonDeviceId()
             : current.chimahonDeviceId;
     });
-    _googleDriveConnectionIntentGeneration.recordConfigurationChange();
     ref.invalidateSelf();
   }
 
-  void setChimahonSyncProvider(ChimahonSyncProvider value) {
-    _updateCurrentPreference((current) => current.chimahonSyncProvider = value);
+  Future<void> setChimahonSyncProvider(ChimahonSyncProvider value) async {
     _googleDriveConnectionIntentGeneration.recordConfigurationChange();
+    await _updateCurrentPreference(
+      (current) => current.chimahonSyncProvider = value,
+    );
     ref.invalidateSelf();
   }
 
-  void _updateCurrentPreference(void Function(SyncPreference) update) {
-    isar.writeTxnSync(() {
-      mutateCurrentSyncPreference(
-        readCurrent: () => isar.syncPreferences.getSync(syncId!) ?? state,
-        mutate: update,
-        writeCurrent: isar.syncPreferences.putSync,
-      );
-    });
-  }
+  // Queued so a settings or sync write never opens a synchronous transaction
+  // while a queued async write (such as reading progress) is still open.
+  Future<void> _updateCurrentPreference(void Function(SyncPreference) update) =>
+      syncPreferenceRepository.writeTransaction(() {
+        mutateCurrentSyncPreference(
+          readCurrent: () => isar.syncPreferences.getSync(syncId!) ?? state,
+          mutate: update,
+          writeCurrent: isar.syncPreferences.putSync,
+        );
+      });
 
   AutoSyncPauseGeneration get _autoSyncPauseGeneration =>
       _autoSyncPauseGenerations.putIfAbsent(

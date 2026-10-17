@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
-import 'package:mangayomi/main.dart';
+import 'package:mangayomi/modules/more/settings/sync/providers/sync_connection_status_provider.dart';
+import 'package:mangayomi/modules/more/settings/sync/providers/sync_progress_provider.dart';
 import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.dart';
 import 'package:mangayomi/modules/more/settings/sync/widgets/auto_sync_frequency_option.dart';
 import 'package:mangayomi/utils/date.dart';
 import 'package:mangayomi/models/sync_preference.dart';
 import 'package:mangayomi/modules/more/settings/sync/widgets/sync_listile.dart';
+import 'package:mangayomi/modules/more/settings/sync/widgets/sync_error_details_dialog.dart';
 import 'package:mangayomi/providers/l10n_providers.dart';
 import 'package:mangayomi/services/sync_server.dart';
 import 'package:mangayomi/services/sync/google_drive_oauth.dart';
@@ -21,12 +25,10 @@ import 'package:mangayomi/services/sync/webdav_credential_store.dart';
 import 'package:mangayomi/services/sync/webdav_sync_storage.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/log/logger.dart';
+import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/modules/more/settings/sync/providers/sync_connection_status_provider.dart';
 import 'package:mangayomi/repositories/sync_preference_repository.dart';
-import 'package:mangayomi/utils/platform_utils.dart';
 
 final _googleDriveConnectionSingleFlight = GoogleDriveConnectionSingleFlight();
 
@@ -97,6 +99,12 @@ class SyncScreen extends ConsumerWidget {
                 ? (syncPreference.syncYomiApiToken?.isNotEmpty ?? false) &&
                       (syncPreference.syncYomiServer?.isNotEmpty ?? false)
                 : syncPreference.authToken?.isNotEmpty ?? false;
+            final connectionStatus = isChimahon || !isLogged
+                ? null
+                : ref.watch(syncConnectionStateProvider(syncId: 1));
+            final progress = ref.watch(syncProgressProvider(syncId: 1));
+            final canSync =
+                syncPreference.syncOn && isLogged && !progress.active;
             return Column(
               children: [
                 SwitchListTile(
@@ -278,7 +286,7 @@ class SyncScreen extends ConsumerWidget {
                         'sync buttons; Chimahon clients ignore these files.',
                       ),
                       trailing: const Icon(Icons.refresh_outlined),
-                      onTap: !syncPreference.syncOn || !isLogged
+                      onTap: !canSync
                           ? null
                           : () => ref
                                 .read(syncServerProvider(syncId: 1).notifier)
@@ -382,42 +390,6 @@ class SyncScreen extends ConsumerWidget {
                   ),
                 ),
                 if (!isChimahon)
-                  SwitchListTile(
-                    value: syncPreference.syncHistories,
-                    title: Text(context.l10n.sync_enable_histories),
-                    onChanged: syncPreference.syncOn
-                        ? (value) {
-                            ref
-                                .read(synchingProvider(syncId: 1).notifier)
-                                .setSyncHistories(value);
-                          }
-                        : null,
-                  ),
-                if (!isChimahon)
-                  SwitchListTile(
-                    value: syncPreference.syncUpdates,
-                    title: Text(context.l10n.sync_enable_updates),
-                    onChanged: syncPreference.syncOn
-                        ? (value) {
-                            ref
-                                .read(synchingProvider(syncId: 1).notifier)
-                                .setSyncUpdates(value);
-                          }
-                        : null,
-                  ),
-                if (!isChimahon)
-                  SwitchListTile(
-                    value: syncPreference.syncSettings,
-                    title: Text(context.l10n.sync_enable_settings),
-                    onChanged: syncPreference.syncOn
-                        ? (value) {
-                            ref
-                                .read(synchingProvider(syncId: 1).notifier)
-                                .setSyncSettings(value);
-                          }
-                        : null,
-                  ),
-                if (!isChimahon)
                   Padding(
                     padding: const EdgeInsets.only(
                       left: 15,
@@ -437,7 +409,7 @@ class SyncScreen extends ConsumerWidget {
                                 'Could not launch $serverUrl',
                                 logLevel: LogLevel.error,
                               );
-                              botToast('Could not launch $serverUrl');
+                              botToast(l10n.could_not_launch_url(serverUrl));
                             }
                           },
                           label: Text(l10n.get_sync_server),
@@ -472,8 +444,10 @@ class SyncScreen extends ConsumerWidget {
                   onTap: () async {
                     if (isGoogleDrive) {
                       await _connectGoogleDrive(context);
+                    } else if (isChimahon) {
+                      _showChimahonLoginDialog(context, ref, syncPreference);
                     } else {
-                      _showDialogLogin(context, ref, syncPreference);
+                      _showNativeLoginDialog(context, ref, syncPreference);
                     }
                   },
                   id: 1,
@@ -501,6 +475,8 @@ class SyncScreen extends ConsumerWidget {
                             .disconnectSyncYomi()
                       : null,
                 ),
+                if (connectionStatus != null)
+                  _connectionStatusTile(context, ref, connectionStatus),
                 ListTile(
                   title: Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -525,45 +501,20 @@ class SyncScreen extends ConsumerWidget {
                     ),
                   ),
                 ),
-                ListTile(
-                  title: Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Icon(Icons.sync, color: context.secondaryColor),
-                        const SizedBox(width: 10),
-                        Column(
-                          children: [
-                            const SizedBox(width: 20),
-                            Text(
-                              "${l10n.last_sync_manga}: ${dateFormat((syncPreference.lastSyncManga ?? 0).toString(), ref: ref, context: context)} ${dateFormatHour((syncPreference.lastSyncManga ?? 0).toString(), context)}",
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: context.secondaryColor,
-                              ),
-                            ),
-                            const SizedBox(width: 20),
-                            Text(
-                              "${l10n.last_sync_history}: ${dateFormat((syncPreference.lastSyncHistory ?? 0).toString(), ref: ref, context: context)} ${dateFormatHour((syncPreference.lastSyncHistory ?? 0).toString(), context)}",
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: context.secondaryColor,
-                              ),
-                            ),
-                            const SizedBox(width: 20),
-                            Text(
-                              "${l10n.last_sync_update}: ${dateFormat((syncPreference.lastSyncUpdate ?? 0).toString(), ref: ref, context: context)} ${dateFormatHour((syncPreference.lastSyncUpdate ?? 0).toString(), context)}",
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: context.secondaryColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                if (syncPreference.lastSync != null)
+                  ListTile(
+                    leading: Icon(
+                      Icons.history_toggle_off,
+                      color: context.secondaryColor,
+                    ),
+                    title: Text(
+                      "${l10n.last_sync} ${dateFormat(syncPreference.lastSync!.toString(), ref: ref, context: context)} ${dateFormatHour(syncPreference.lastSync!.toString(), context)}",
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.secondaryColor,
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 20),
                 Wrap(
                   spacing: 20,
@@ -572,7 +523,7 @@ class SyncScreen extends ConsumerWidget {
                     Column(
                       children: [
                         IconButton(
-                          onPressed: !syncPreference.syncOn || !isLogged
+                          onPressed: !canSync
                               ? null
                               : () {
                                   ref
@@ -583,7 +534,7 @@ class SyncScreen extends ConsumerWidget {
                                 },
                           icon: Icon(
                             Icons.sync,
-                            color: !syncPreference.syncOn || !isLogged
+                            color: !canSync
                                 ? context.secondaryColor
                                 : context.primaryColor,
                           ),
@@ -595,12 +546,12 @@ class SyncScreen extends ConsumerWidget {
                     Column(
                       children: [
                         IconButton(
-                          onPressed: !syncPreference.syncOn || !isLogged
+                          onPressed: !canSync
                               ? null
                               : () => _showConfirmDialog(context, ref, true),
                           icon: Icon(
                             Icons.file_upload_outlined,
-                            color: !syncPreference.syncOn || !isLogged
+                            color: !canSync
                                 ? context.secondaryColor
                                 : context.primaryColor,
                           ),
@@ -612,12 +563,14 @@ class SyncScreen extends ConsumerWidget {
                     Column(
                       children: [
                         IconButton(
-                          onPressed: !syncPreference.syncOn || !isLogged
+                          onPressed: !canSync
                               ? null
-                              : () => _startDownloadWithPreview(context, ref),
+                              : isChimahon
+                              ? () => _startDownloadWithPreview(context, ref)
+                              : () => _showConfirmDialog(context, ref, false),
                           icon: Icon(
                             Icons.file_download_outlined,
-                            color: !syncPreference.syncOn || !isLogged
+                            color: !canSync
                                 ? context.secondaryColor
                                 : context.primaryColor,
                           ),
@@ -627,11 +580,81 @@ class SyncScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
+                if (progress.active)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 15,
+                      vertical: 8,
+                    ),
+                    child: Column(
+                      children: [
+                        LinearProgressIndicator(value: progress.fraction),
+                        const SizedBox(height: 6),
+                        Text(
+                          progress.fraction != null
+                              ? l10n.sync_progress_percent(
+                                  (progress.fraction! * 100).round(),
+                                )
+                              : l10n.sync_progress_indeterminate,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: context.secondaryColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 const SizedBox(height: 20),
               ],
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _connectionStatusTile(
+    BuildContext context,
+    WidgetRef ref,
+    SyncConnectionStatus status,
+  ) {
+    final l10n = l10nLocalizations(context)!;
+    final (icon, color, label) = switch (status) {
+      SyncConnectionStatus.notConfigured => (
+        Icons.link_off,
+        context.secondaryColor,
+        l10n.sync_status_not_configured,
+      ),
+      SyncConnectionStatus.checking => (
+        Icons.sync,
+        context.secondaryColor,
+        l10n.sync_status_checking,
+      ),
+      SyncConnectionStatus.connected => (
+        Icons.check_circle,
+        Colors.green,
+        l10n.sync_status_connected,
+      ),
+      SyncConnectionStatus.unauthorized => (
+        Icons.error_outline,
+        Colors.red,
+        l10n.sync_status_unauthorized,
+      ),
+      SyncConnectionStatus.unreachable => (
+        Icons.error_outline,
+        Colors.red,
+        l10n.sync_status_unreachable,
+      ),
+    };
+    return ListTile(
+      dense: true,
+      leading: Icon(icon, color: color, size: 20),
+      title: Text(label, style: TextStyle(fontSize: 13, color: color)),
+      trailing: IconButton(
+        icon: const Icon(Icons.refresh, size: 20),
+        onPressed: () {
+          ref.read(syncConnectionStateProvider(syncId: 1).notifier).recheck();
+        },
       ),
     );
   }
@@ -718,25 +741,133 @@ class SyncScreen extends ConsumerWidget {
         );
   }
 
-  void _showDialogLogin(
+  // Only a server address is asked for here - there's no username/password
+  // field. Logging in opens the system browser to that server's own login
+  // page (OAuth/PKCE against the server's /api/oauth/authorize), so this
+  // dialog never sees or handles a credential itself.
+  void _showNativeLoginDialog(
     BuildContext context,
     WidgetRef ref,
     SyncPreference syncPreference,
   ) {
-    final isChimahonSync = syncPreference.syncMode == SyncMode.chimahon;
+    final serverController = TextEditingController(text: syncPreference.server);
+    String server = syncPreference.server ?? "";
+    String errorMessage = "";
+    bool isLoading = false;
+    final l10n = l10nLocalizations(context)!;
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text(
+              l10n.login_into("SyncServer"),
+              style: const TextStyle(fontSize: 30),
+            ),
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: TextFormField(
+                        controller: serverController,
+                        autofocus: !isTv,
+                        onChanged: (value) => setState(() {
+                          server = value;
+                        }),
+                        decoration: InputDecoration(
+                          hintText: l10n.sync_server,
+                          filled: false,
+                          contentPadding: const EdgeInsets.all(12),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: const BorderSide(width: 0.4),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: const BorderSide(),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(5),
+                            borderSide: const BorderSide(),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      errorMessage,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                    const SizedBox(height: 20),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: SizedBox(
+                        width: context.width(1),
+                        height: 50,
+                        child: ElevatedButton.icon(
+                          onPressed: isLoading || server.trim().isEmpty
+                              ? null
+                              : () async {
+                                  setState(() {
+                                    isLoading = true;
+                                    errorMessage = "";
+                                  });
+                                  final res = await ref
+                                      .read(
+                                        syncServerProvider(syncId: 1).notifier,
+                                      )
+                                      .login(l10n, server);
+                                  if (!res.$1) {
+                                    setState(() {
+                                      isLoading = false;
+                                      errorMessage = res.$2;
+                                    });
+                                  } else {
+                                    if (context.mounted) {
+                                      Navigator.pop(context);
+                                    }
+                                  }
+                                },
+                          icon: isLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.open_in_browser),
+                          label: Text(l10n.sync_login_browser),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showChimahonLoginDialog(
+    BuildContext context,
+    WidgetRef ref,
+    SyncPreference syncPreference,
+  ) {
     final isWebDav =
-        isChimahonSync &&
         syncPreference.chimahonSyncProvider == ChimahonSyncProvider.webDav;
     final serverController = TextEditingController(
-      text: isWebDav
-          ? syncPreference.server
-          : isChimahonSync
-          ? syncPreference.syncYomiServer
-          : syncPreference.server,
+      text: isWebDav ? syncPreference.server : syncPreference.syncYomiServer,
     );
-    final emailController = TextEditingController(
-      text: isWebDav ? '' : syncPreference.email,
-    );
+    final emailController = TextEditingController();
     final passwordController = TextEditingController();
     String server = serverController.text;
     String email = emailController.text;
@@ -751,15 +882,11 @@ class SyncScreen extends ConsumerWidget {
         builder: (context, setState) {
           return AlertDialog(
             title: Text(
-              isWebDav
-                  ? 'Connect WebDAV'
-                  : isChimahonSync
-                  ? 'Connect SyncYomi'
-                  : l10n.login_into("SyncServer"),
+              isWebDav ? 'Connect WebDAV' : 'Connect SyncYomi',
               style: const TextStyle(fontSize: 30),
             ),
             content: SizedBox(
-              height: isChimahonSync && !isWebDav ? 300 : 400,
+              height: isWebDav ? 400 : 300,
               width: MediaQuery.of(context).size.width,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -794,7 +921,7 @@ class SyncScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  if (!isChimahonSync || isWebDav) ...[
+                  if (isWebDav) ...[
                     const SizedBox(height: 10),
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -805,9 +932,7 @@ class SyncScreen extends ConsumerWidget {
                           email = value;
                         }),
                         decoration: InputDecoration(
-                          hintText: isWebDav
-                              ? 'WebDAV username'
-                              : l10n.email_adress,
+                          hintText: 'WebDAV username',
                           filled: false,
                           contentPadding: const EdgeInsets.all(12),
                           enabledBorder: OutlineInputBorder(
@@ -831,17 +956,15 @@ class SyncScreen extends ConsumerWidget {
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     child: TextFormField(
                       controller: passwordController,
-                      obscureText: (!isChimahonSync || isWebDav) && obscureText,
+                      obscureText: isWebDav && obscureText,
                       onChanged: (value) => setState(() {
                         password = value;
                       }),
                       decoration: InputDecoration(
                         hintText: isWebDav
                             ? 'WebDAV password or app token'
-                            : isChimahonSync
-                            ? 'SyncYomi API token'
-                            : l10n.sync_password,
-                        suffixIcon: isChimahonSync && !isWebDav
+                            : 'SyncYomi API token',
+                        suffixIcon: !isWebDav
                             ? null
                             : IconButton(
                                 onPressed: () => setState(() {
@@ -892,27 +1015,21 @@ class SyncScreen extends ConsumerWidget {
                                         email,
                                         password,
                                       )
-                                    : isChimahonSync
-                                    ? _saveSyncYomiCredentials(
+                                    : await _saveSyncYomiCredentials(
                                         ref,
                                         server,
                                         password,
-                                      )
-                                    : await ref
-                                          .read(
-                                            syncServerProvider(syncId: 1)
-                                                .notifier,
-                                          )
-                                          .login(l10n, server, email, password);
+                                      );
+                                // The dialog can be dismissed while the
+                                // connection test is still running.
+                                if (!context.mounted) return;
                                 if (!res.$1) {
                                   setState(() {
                                     isLoading = false;
                                     errorMessage = res.$2;
                                   });
                                 } else {
-                                  if (context.mounted) {
-                                    Navigator.pop(context);
-                                  }
+                                  Navigator.pop(context);
                                 }
                               },
                         child: isLoading
@@ -930,15 +1047,15 @@ class SyncScreen extends ConsumerWidget {
     );
   }
 
-  (bool, String) _saveSyncYomiCredentials(
+  Future<(bool, String)> _saveSyncYomiCredentials(
     WidgetRef ref,
     String server,
     String token,
-  ) {
+  ) async {
     if (server.trim().isEmpty || token.trim().isEmpty) {
       return (false, 'SyncYomi server and API token required');
     }
-    ref
+    await ref
         .read(synchingProvider(syncId: 1).notifier)
         .saveSyncYomiCredentials(server: server.trim(), apiToken: token.trim());
     botToast('SyncYomi token saved');
@@ -970,7 +1087,7 @@ class SyncScreen extends ConsumerWidget {
         storage.close();
       }
       await const SecureWebDavCredentialStore().writeCredentials(credentials);
-      ref
+      await ref
           .read(synchingProvider(syncId: 1).notifier)
           .saveWebDavConnection(server: normalizedServer);
       botToast('WebDAV connected');
@@ -992,16 +1109,18 @@ class SyncScreen extends ConsumerWidget {
       return;
     }
     final container = ProviderScope.containerOf(context, listen: false);
-    await _googleDriveConnectionSingleFlight.run(() {
-      // Pause synchronously before waiting on the shared coordinator. This
-      // closes the window where a timer can begin while an existing sync is
-      // finishing, without stacking pause tokens for duplicate Connect clicks.
-      final pauseToken = container
-          .read(synchingProvider(syncId: 1).notifier)
-          .pauseAutoSyncForExternalOperation();
+    await _googleDriveConnectionSingleFlight.run(() async {
+      // Capture the intent synchronously so a configuration change made while
+      // the pause is queued still cancels this connection.
       final connectionIntent = container
           .read(synchingProvider(syncId: 1).notifier)
           .captureGoogleDriveConnectionIntent();
+      // Pause before waiting on the shared coordinator. This closes the window
+      // where a timer can begin while an existing sync is finishing, without
+      // stacking pause tokens for duplicate Connect clicks.
+      final pauseToken = await container
+          .read(synchingProvider(syncId: 1).notifier)
+          .pauseAutoSyncForExternalOperation();
       var connectionSaved = false;
       return ChimahonRestoreSyncCoordinator.shared
           .duringSync(() async {
@@ -1009,7 +1128,7 @@ class SyncScreen extends ConsumerWidget {
             final oauth = GoogleDriveOAuthClient();
             try {
               final tokens = await oauth.signIn();
-              final deviceId = container
+              final deviceId = await container
                   .read(synchingProvider(syncId: 1).notifier)
                   .ensureChimahonDeviceId();
               final storage = GoogleDriveSyncStorage(
@@ -1074,36 +1193,38 @@ class SyncScreen extends ConsumerWidget {
                     second: 5,
                   );
                 }
-              } catch (error) {
+              } catch (error, stackTrace) {
                 if (context.mounted) {
-                  botToast(
+                  showSyncFailureToast(
                     safeSyncUserMessage(
                       error,
                       context: SyncUserMessageContext.googleDriveConnection,
                     ),
-                    second: 8,
+                    error,
+                    stackTrace,
                   );
                 }
               } finally {
                 storage.close();
               }
-            } catch (error) {
+            } catch (error, stackTrace) {
               if (context.mounted) {
-                botToast(
+                showSyncFailureToast(
                   safeSyncUserMessage(
                     error,
                     context: SyncUserMessageContext.googleDriveConnection,
                   ),
-                  second: 8,
+                  error,
+                  stackTrace,
                 );
               }
             } finally {
               oauth.close();
             }
           })
-          .whenComplete(() {
+          .whenComplete(() async {
             if (!connectionSaved) {
-              container
+              await container
                   .read(synchingProvider(syncId: 1).notifier)
                   .restoreAutoSyncAfterFailedExternalOperation(pauseToken);
             }
@@ -1134,16 +1255,17 @@ class SyncScreen extends ConsumerWidget {
   Future<void> _disconnectWebDav(BuildContext context, WidgetRef ref) async {
     try {
       await const SecureWebDavCredentialStore().clearCredentials();
-      ref.read(synchingProvider(syncId: 1).notifier).disconnectWebDav();
+      await ref.read(synchingProvider(syncId: 1).notifier).disconnectWebDav();
       botToast('WebDAV disconnected');
-    } catch (error) {
+    } catch (error, stackTrace) {
       if (context.mounted) {
-        botToast(
+        showSyncFailureToast(
           safeSyncUserMessage(
             error,
             context: SyncUserMessageContext.webDavDisconnection,
           ),
-          second: 8,
+          error,
+          stackTrace,
         );
       }
     }
@@ -1155,11 +1277,11 @@ class SyncScreen extends ConsumerWidget {
 @visibleForTesting
 Future<String?> disconnectGoogleDriveCredentialSafely({
   required GoogleDriveRefreshTokenStore tokenStore,
-  required void Function() markDisconnected,
+  required FutureOr<void> Function() markDisconnected,
 }) async {
   try {
     await tokenStore.clearRefreshToken();
-    markDisconnected();
+    await markDisconnected();
     return null;
   } catch (error) {
     return safeSyncUserMessage(
@@ -1176,8 +1298,8 @@ Future<String?> disconnectGoogleDriveCredentialSafely({
 Future<void> persistGoogleDriveConnectionWithTokenRollback({
   required GoogleDriveRefreshTokenStore tokenStore,
   required String newRefreshToken,
-  required void Function() persistConnection,
-  required void Function() markDisconnected,
+  required FutureOr<void> Function() persistConnection,
+  required FutureOr<void> Function() markDisconnected,
 }) async {
   String? previousRefreshToken;
   var previousTokenKnown = false;
@@ -1190,7 +1312,7 @@ Future<void> persistGoogleDriveConnectionWithTokenRollback({
 
   await tokenStore.writeRefreshToken(newRefreshToken);
   try {
-    persistConnection();
+    await persistConnection();
   } catch (error, stackTrace) {
     var priorRestored = false;
     if (previousTokenKnown && previousRefreshToken != null) {
@@ -1208,7 +1330,7 @@ Future<void> persistGoogleDriveConnectionWithTokenRollback({
         // Preserve the original database failure for the caller.
       }
       try {
-        markDisconnected();
+        await markDisconnected();
       } catch (_) {
         // Preserve the original database failure for the caller.
       }

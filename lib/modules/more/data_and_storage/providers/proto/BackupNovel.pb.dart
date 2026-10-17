@@ -15,6 +15,8 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 
+import 'BackupChapter.pb.dart' as $0;
+
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 class BackupNovel extends $pb.GeneratedMessage {
@@ -30,6 +32,8 @@ class BackupNovel extends $pb.GeneratedMessage {
     $core.Iterable<BackupNovelStat>? stats,
     $core.Iterable<$core.String>? categoryIds,
     $core.String? lang,
+    $core.Iterable<$0.BackupChapter>? chapters,
+    $core.Iterable<BackupNovelHistory>? history,
   }) {
     final result = create();
     if (id != null) result.id = id;
@@ -43,6 +47,8 @@ class BackupNovel extends $pb.GeneratedMessage {
     if (stats != null) result.stats.addAll(stats);
     if (categoryIds != null) result.categoryIds.addAll(categoryIds);
     if (lang != null) result.lang = lang;
+    if (chapters != null) result.chapters.addAll(chapters);
+    if (history != null) result.history.addAll(history);
     return result;
   }
 
@@ -72,6 +78,10 @@ class BackupNovel extends $pb.GeneratedMessage {
         subBuilder: BackupNovelStat.create)
     ..pPS(10, _omitFieldNames ? '' : 'categoryIds', protoName: 'categoryIds')
     ..aOS(11, _omitFieldNames ? '' : 'lang')
+    ..pPM<$0.BackupChapter>(12, _omitFieldNames ? '' : 'chapters',
+        subBuilder: $0.BackupChapter.create)
+    ..pPM<BackupNovelHistory>(13, _omitFieldNames ? '' : 'history',
+        subBuilder: BackupNovelHistory.create)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -180,6 +190,93 @@ class BackupNovel extends $pb.GeneratedMessage {
   $core.bool hasLang() => $_has(10);
   @$pb.TagNumber(11)
   void clearLang() => $_clearField(11);
+
+  /// Chimahon 2.4 database-backed books carry their chapter rows and reading
+  /// history. Mangatan does not model them, but must carry them losslessly.
+  @$pb.TagNumber(12)
+  $pb.PbList<$0.BackupChapter> get chapters => $_getList(11);
+
+  @$pb.TagNumber(13)
+  $pb.PbList<BackupNovelHistory> get history => $_getList(12);
+}
+
+class BackupNovelHistory extends $pb.GeneratedMessage {
+  factory BackupNovelHistory({
+    $core.String? chapterUrl,
+    $fixnum.Int64? lastRead,
+    $fixnum.Int64? timeRead,
+  }) {
+    final result = create();
+    if (chapterUrl != null) result.chapterUrl = chapterUrl;
+    if (lastRead != null) result.lastRead = lastRead;
+    if (timeRead != null) result.timeRead = timeRead;
+    return result;
+  }
+
+  BackupNovelHistory._();
+
+  factory BackupNovelHistory.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory BackupNovelHistory.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'BackupNovelHistory',
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'chapterUrl', protoName: 'chapterUrl')
+    ..aInt64(2, _omitFieldNames ? '' : 'lastRead', protoName: 'lastRead')
+    ..aInt64(3, _omitFieldNames ? '' : 'timeRead', protoName: 'timeRead')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  BackupNovelHistory clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  BackupNovelHistory copyWith(void Function(BackupNovelHistory) updates) =>
+      super.copyWith((message) => updates(message as BackupNovelHistory))
+          as BackupNovelHistory;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static BackupNovelHistory create() => BackupNovelHistory._();
+  @$core.override
+  BackupNovelHistory createEmptyInstance() => create();
+  static $pb.PbList<BackupNovelHistory> createRepeated() =>
+      $pb.PbList<BackupNovelHistory>();
+  @$core.pragma('dart2js:noInline')
+  static BackupNovelHistory getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<BackupNovelHistory>(create);
+  static BackupNovelHistory? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get chapterUrl => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set chapterUrl($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasChapterUrl() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearChapterUrl() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get lastRead => $_getI64(1);
+  @$pb.TagNumber(2)
+  set lastRead($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasLastRead() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearLastRead() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get timeRead => $_getI64(2);
+  @$pb.TagNumber(3)
+  set timeRead($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTimeRead() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTimeRead() => $_clearField(3);
 }
 
 class BackupNovelCategory extends $pb.GeneratedMessage {

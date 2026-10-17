@@ -17,13 +17,13 @@ void main() {
 
     mutateCurrentSyncPreference(
       readCurrent: () => storedAfterUserEdit,
-      mutate: (current) => current.lastSyncManga = 123,
+      mutate: (current) => current.lastSync = 123,
       writeCurrent: (current) => written = current,
     );
 
     expect(written, same(storedAfterUserEdit));
     expect(written, isNot(same(cachedBeforeNetwork)));
-    expect(written?.lastSyncManga, 123);
+    expect(written?.lastSync, 123);
     expect(written?.chimahonSyncAnime, isFalse);
     expect(written?.chimahonMediaSelectionUserSelected, isTrue);
     expect(written?.chimahonMediaSelectionGeneration, 4);

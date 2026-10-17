@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
 import 'package:mangayomi/models/manga.dart';
+import 'package:mangayomi/modules/more/data_and_storage/providers/backup_decoder.dart';
+import 'package:mangayomi/modules/more/data_and_storage/providers/backup_format.dart';
 import 'package:mangayomi/modules/more/data_and_storage/providers/pre_import_backup.dart';
 import 'package:mangayomi/modules/more/data_and_storage/providers/restore.dart';
 import 'package:mangayomi/modules/more/data_and_storage/widgets/rollback_last_change_tile.dart';
@@ -32,7 +34,9 @@ import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 Future<bool> performRestore(BuildContext context, WidgetRef ref) async {
   String? safetyBackupPath;
   try {
-    final file = await FilePicker.pickFile();
+    final file = await FilePicker.pickFile(
+      linuxOptions: const LinuxOptions(lockParentWindow: true),
+    );
     if (file?.path == null || !context.mounted) return false;
     final path = file!.path!;
     // A successful restore pushes to the sync server automatically, so a

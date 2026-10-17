@@ -86,7 +86,7 @@ final class DoRestoreProvider
   }
 }
 
-String _$doRestoreHash() => r'a9aaea3478194a96c61c96500a13ed9bff9e4b8b';
+String _$doRestoreHash() => r'38e3eec4816621c5f709b499eecec53498add7a8';
 
 final class DoRestoreFamily extends $Family
     with
@@ -207,7 +207,7 @@ final class RestoreBackupProvider
   }
 }
 
-String _$restoreBackupHash() => r'1044870ad126f818eef3bfd334139039ed664462';
+String _$restoreBackupHash() => r'4a62bccc3deffa39da7f60f515f4acda283311b9';
 
 final class RestoreBackupFamily extends $Family
     with
@@ -301,7 +301,7 @@ final class RestoreKotatsuBackupProvider
 }
 
 String _$restoreKotatsuBackupHash() =>
-    r'98c85ef14f1eed0c1b2f4930520aab386e3538db';
+    r'3b6d3d74922dffce8f953c79bb3e9140fae5106e';
 
 final class RestoreKotatsuBackupFamily extends $Family
     with $FunctionalFamilyOverride<FutureOr<void>, Archive> {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:mangayomi/services/sync/chimahon_anime_seasons.dart';
 import 'package:crypto/crypto.dart';
@@ -1131,6 +1132,15 @@ class ChimahonSyncMerger {
       if (!merged.hasLang() && fallback.hasLang()) {
         merged.lang = fallback.lang;
       }
+      // Chimahon keeps the newer record's chapter rows and history whole.
+      // Mangatan's projection never carries them, so a newer Mangatan record
+      // is a projection gap and must not erase Chimahon's lists.
+      if (merged.chapters.isEmpty && fallback.chapters.isNotEmpty) {
+        merged.chapters.addAll(fallback.chapters.map((row) => row.deepCopy()));
+      }
+      if (merged.history.isEmpty && fallback.history.isNotEmpty) {
+        merged.history.addAll(fallback.history.map((row) => row.deepCopy()));
+      }
       if (!merged.hasCover() && fallback.hasCover()) {
         merged.cover = fallback.cover;
       }
@@ -1243,11 +1253,51 @@ class ChimahonSyncMerger {
           left.lastStatisticModified > right.lastStatisticModified ||
           (left.lastStatisticModified == right.lastStatisticModified &&
               leftWinsTie);
-      return _copyWithMergedUnknownFields(
+      final merged = _copyWithMergedUnknownFields(
         leftWins ? left : right,
         leftWins ? right : left,
       );
+      return _mergeNovelStatDay(merged, left, right);
     }).toList();
+  }
+
+  /// Mirrors Chimahon's `mergeNovelStatDay`. Database-backed Chimahon backups
+  /// write `lastStatisticModified = 0`, so a timestamp cannot pick a winner;
+  /// the counters only grow, so the larger value per field already contains
+  /// the other side's reading.
+  BackupNovelStat _mergeNovelStatDay(
+    BackupNovelStat merged,
+    BackupNovelStat left,
+    BackupNovelStat right,
+  ) {
+    final newer =
+        right.charactersRead > left.charactersRead ||
+            (right.charactersRead == left.charactersRead &&
+                right.readingTime > left.readingTime)
+        ? right
+        : left;
+    int minNonZero(int first, int second) => first <= 0
+        ? second
+        : second <= 0
+        ? first
+        : math.min(first, second);
+    return merged
+      ..charactersRead = math.max(left.charactersRead, right.charactersRead)
+      ..readingTime = math.max(left.readingTime, right.readingTime)
+      ..minReadingSpeed = minNonZero(
+        left.minReadingSpeed,
+        right.minReadingSpeed,
+      )
+      ..altMinReadingSpeed = minNonZero(
+        left.altMinReadingSpeed,
+        right.altMinReadingSpeed,
+      )
+      ..lastReadingSpeed = newer.lastReadingSpeed
+      ..maxReadingSpeed = math.max(left.maxReadingSpeed, right.maxReadingSpeed)
+      ..lastStatisticModified =
+          left.lastStatisticModified > right.lastStatisticModified
+          ? left.lastStatisticModified
+          : right.lastStatisticModified;
   }
 
   List<T> _mergeByKey<T extends GeneratedMessage, K>(

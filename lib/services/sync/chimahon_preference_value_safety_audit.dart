@@ -2,6 +2,7 @@ import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupMi
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupPreference.pb.dart';
 import 'package:mangayomi/services/sync/chimahon_preference_safety_policy.dart';
 import 'package:protobuf/protobuf.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 /// Focused value-level proof for three-way preference selections.
 class ChimahonPreferenceValueSafetyAudit {
@@ -225,7 +226,7 @@ class ChimahonPreferenceValueSafetyAudit {
   }) {
     if (!_sameKnownFields(expected, actual)) {
       _add(failures, valueCode, identity);
-    } else if (!_sameBytes(expected, actual)) {
+    } else if (!sameMessageBytes(expected, actual)) {
       _add(failures, unknownCode, identity);
     }
   }
@@ -271,7 +272,7 @@ class ChimahonPreferenceValueSafetyAudit {
   bool _sameKnownFields(BackupPreference left, BackupPreference right) {
     final leftKnown = _withoutEnvelopeUnknownFields(left);
     final rightKnown = _withoutEnvelopeUnknownFields(right);
-    return _sameBytes(leftKnown, rightKnown);
+    return sameMessageBytes(leftKnown, rightKnown);
   }
 
   BackupPreference _withoutEnvelopeUnknownFields(BackupPreference value) {
@@ -320,16 +321,6 @@ class ChimahonPreferenceValueSafetyAudit {
       for (var byte = 0; byte < suffixBytes.length; byte++) {
         if (actualBytes[byte] != suffixBytes[byte]) return false;
       }
-    }
-    return true;
-  }
-
-  bool _sameBytes(BackupPreference left, BackupPreference right) {
-    final leftBytes = left.writeToBuffer();
-    final rightBytes = right.writeToBuffer();
-    if (leftBytes.length != rightBytes.length) return false;
-    for (var index = 0; index < leftBytes.length; index++) {
-      if (leftBytes[index] != rightBytes[index]) return false;
     }
     return true;
   }

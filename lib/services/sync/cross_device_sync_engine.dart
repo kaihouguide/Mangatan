@@ -14,6 +14,7 @@ import 'package:mangayomi/services/sync/chimahon_sync_merger.dart';
 import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
 import 'package:mangayomi/services/sync/cross_device_sync_metrics.dart';
 import 'package:protobuf/protobuf.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 typedef SyncBackupExporter = Future<BackupMihon> Function();
 typedef SyncBackupImporter = Future<void> Function(BackupMihon backup);
@@ -403,7 +404,7 @@ class CrossDeviceSyncEngine {
     return remoteSnapshot?.isCompleteRecovery == true &&
         remoteSnapshot!.revision?.isNotEmpty == true &&
         remoteProtobufBytes != null &&
-        _sameBytes(remoteProtobufBytes, prepared.proposedProtobufBytes);
+        sameBytes(remoteProtobufBytes, prepared.proposedProtobufBytes);
   }
 
   Future<String?> _confirmNoOpRemote(_PreparedSyncPayload prepared) async {
@@ -416,9 +417,9 @@ class CrossDeviceSyncEngine {
     }
 
     try {
-      if (_sameBytes(current.bytes, prepared.bytes)) return current.revision;
+      if (sameBytes(current.bytes, prepared.bytes)) return current.revision;
       final currentProtobufBytes = codec.decode(current.bytes).protobufBytes;
-      if (!_sameBytes(currentProtobufBytes, prepared.proposedProtobufBytes)) {
+      if (!sameBytes(currentProtobufBytes, prepared.proposedProtobufBytes)) {
         throw const SyncConflictException();
       }
     } on ChimahonSyncFormatException {
@@ -904,7 +905,7 @@ class CrossDeviceSyncEngine {
         remoteSnapshot?.isCompleteRecovery == true &&
         remoteSnapshot!.revision?.isNotEmpty == true &&
         decodedRemote != null &&
-        _sameBytes(proposedProtobufBytes, decodedRemote.protobufBytes);
+        sameBytes(proposedProtobufBytes, decodedRemote.protobufBytes);
     final bytes = canReuseCompleteRemoteBytes
         ? remoteSnapshot.bytes
         : metrics == null
@@ -1183,15 +1184,6 @@ class CrossDeviceSyncEngine {
 
   bool _sameBackup(BackupMihon left, BackupMihon right) {
     return left == right;
-  }
-
-  bool _sameBytes(List<int> left, List<int> right) {
-    if (identical(left, right)) return true;
-    if (left.length != right.length) return false;
-    for (var index = 0; index < left.length; index++) {
-      if (left[index] != right[index]) return false;
-    }
-    return true;
   }
 }
 

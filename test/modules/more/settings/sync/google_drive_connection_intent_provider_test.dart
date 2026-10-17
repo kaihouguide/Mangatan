@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
@@ -8,6 +9,7 @@ import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart' as app;
 import 'package:mangayomi/models/sync_preference.dart';
 import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 import 'package:mangayomi/services/sync/google_drive_connection_intent.dart';
 
 void main() {
@@ -52,72 +54,129 @@ void main() {
     }
   });
 
-  test('automatic health disconnect does not cancel a queued Connect', () {
-    final intent = container
-        .read(synchingProvider(syncId: 1).notifier)
-        .captureGoogleDriveConnectionIntent();
-
-    // Token expiry and other health updates are not explicit user intent.
-    container
-        .read(synchingProvider(syncId: 1).notifier)
-        .setGoogleDriveConnected(false);
-
-    expect(
-      () => container
+  test(
+    'automatic health disconnect does not cancel a queued Connect',
+    () async {
+      final intent = container
           .read(synchingProvider(syncId: 1).notifier)
-          .persistGoogleDriveConnectionIfIntentCurrent(
-            intent: intent,
-            mediaSelection: null,
-          ),
-      returnsNormally,
-    );
-    expect(database.syncPreferences.getSync(1)?.googleDriveConnected, isTrue);
-  });
+          .captureGoogleDriveConnectionIntent();
 
-  test('mode away-and-back invalidates a queued Connect', () {
+      // Token expiry and other health updates are not explicit user intent.
+      await container
+          .read(synchingProvider(syncId: 1).notifier)
+          .setGoogleDriveConnected(false);
+      expect(
+        database.syncPreferences.getSync(1)?.googleDriveConnected,
+        isFalse,
+      );
+
+      await _persistIntent(container, intent);
+      expect(database.syncPreferences.getSync(1)?.googleDriveConnected, isTrue);
+    },
+  );
+
+  test('mode away-and-back invalidates a queued Connect', () async {
     final intent = _captureIntent(container);
 
-    container
+    await container
         .read(synchingProvider(syncId: 1).notifier)
         .setSyncMode(SyncMode.native);
-    container
+    await container
         .read(synchingProvider(syncId: 1).notifier)
         .setSyncMode(SyncMode.chimahon);
 
-    expect(
-      () => _persistIntent(container, intent),
+    await expectLater(
+      _persistIntent(container, intent),
       throwsA(isA<GoogleDriveConnectionIntentChangedException>()),
     );
   });
 
-  test('provider away-and-back invalidates a queued Connect', () {
+  test('provider away-and-back invalidates a queued Connect', () async {
     final intent = _captureIntent(container);
 
-    container
+    await container
         .read(synchingProvider(syncId: 1).notifier)
         .setChimahonSyncProvider(ChimahonSyncProvider.syncYomi);
-    container
+    await container
         .read(synchingProvider(syncId: 1).notifier)
         .setChimahonSyncProvider(ChimahonSyncProvider.googleDrive);
 
-    expect(
-      () => _persistIntent(container, intent),
+    await expectLater(
+      _persistIntent(container, intent),
       throwsA(isA<GoogleDriveConnectionIntentChangedException>()),
     );
   });
 
-  test('explicit disconnect intent invalidates a queued Connect', () {
+  test(
+    'a mode change already queued behind Connect still cancels it',
+    () async {
+      final intent = _captureIntent(container);
+
+      // Neither write is awaited: the mode change is recorded when requested,
+      // not when its queued transaction runs.
+      final persist = _persistIntent(container, intent);
+      final modeChange = container
+          .read(synchingProvider(syncId: 1).notifier)
+          .setSyncMode(SyncMode.native);
+
+      await expectLater(
+        persist,
+        throwsA(isA<GoogleDriveConnectionIntentChangedException>()),
+      );
+      await modeChange;
+      expect(database.syncPreferences.getSync(1)?.syncMode, SyncMode.native);
+    },
+  );
+
+  test('explicit disconnect intent invalidates a queued Connect', () async {
     final intent = _captureIntent(container);
 
     container
         .read(synchingProvider(syncId: 1).notifier)
         .invalidateGoogleDriveConnectionIntent();
 
-    expect(
-      () => _persistIntent(container, intent),
+    await expectLater(
+      _persistIntent(container, intent),
       throwsA(isA<GoogleDriveConnectionIntentChangedException>()),
     );
   });
+
+  test('a frequency edit requested before a failed-Connect restore wins', () async {
+    final notifier = container.read(synchingProvider(syncId: 1).notifier);
+    await notifier.setAutoSyncFrequency(300);
+    final pause = await notifier.pauseAutoSyncForExternalOperation();
+    expect(database.syncPreferences.getSync(1)?.autoSyncFrequency, 0);
+
+    // The user explicitly picks Off while the restore is waiting in the queue.
+    final edit = notifier.setAutoSyncFrequency(0);
+    final restored = await notifier.restoreAutoSyncAfterFailedExternalOperation(
+      pause,
+    );
+    await edit;
+
+    expect(restored, isFalse);
+    expect(database.syncPreferences.getSync(1)?.autoSyncFrequency, 0);
+  });
+
+  test(
+    'a preference write waits for an in-flight queued async write',
+    () async {
+      final notifier = container.read(synchingProvider(syncId: 1).notifier);
+      final release = Completer<void>();
+      // Stands in for a reading-progress save holding an async transaction.
+      final progressSave = dbWriteQueue.run(
+        () => database.writeTxn(() => release.future),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final deviceId = notifier.ensureChimahonDeviceId();
+      release.complete();
+      await progressSave;
+
+      expect(await deviceId, isNotEmpty);
+      expect(database.syncPreferences.getSync(1)?.chimahonDeviceId, isNotEmpty);
+    },
+  );
 }
 
 GoogleDriveConnectionIntentToken _captureIntent(ProviderContainer container) =>
@@ -125,7 +184,7 @@ GoogleDriveConnectionIntentToken _captureIntent(ProviderContainer container) =>
         .read(synchingProvider(syncId: 1).notifier)
         .captureGoogleDriveConnectionIntent();
 
-void _persistIntent(
+Future<void> _persistIntent(
   ProviderContainer container,
   GoogleDriveConnectionIntentToken intent,
 ) => container

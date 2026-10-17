@@ -7,6 +7,7 @@ import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupPreference.pb.dart';
 import 'package:mangayomi/services/mihon_source_preferences.dart';
 import 'package:mangayomi/services/sync/chimahon_preferences.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 /// Lossless bridge for preferences owned by installed Mihon source factories.
 ///
@@ -96,7 +97,8 @@ class ChimahonSourcePreferencesAdapter {
 
   /// Async transaction variant for independent factory groups refreshed in
   /// parallel. Each caller can limit work to its own [candidateSources], while
-  /// Isar safely serializes the resulting writes.
+  /// the write queue serializes the resulting writes with every other queued
+  /// write. Callers must not already be running inside a queued write.
   Future<ChimahonSourcePreferencesImportResult> importIntoAsync({
     required Isar database,
     required Iterable<BackupSourcePreferences> sourcePreferences,
@@ -112,14 +114,16 @@ class ChimahonSourcePreferencesAdapter {
         valueChangedSourceIds: changes.valueChangedSourceIds,
       );
     }
-    await database.writeTxn(() async {
-      if (changes.sources.isNotEmpty) {
-        await database.sources.putAll(changes.sources);
-      }
-      if (changes.preferences.isNotEmpty) {
-        await database.sourcePreferences.putAll(changes.preferences);
-      }
-    });
+    await dbWriteQueue.run(
+      () => database.writeTxn(() async {
+        if (changes.sources.isNotEmpty) {
+          await database.sources.putAll(changes.sources);
+        }
+        if (changes.preferences.isNotEmpty) {
+          await database.sourcePreferences.putAll(changes.preferences);
+        }
+      }),
+    );
     return ChimahonSourcePreferencesImportResult(
       valueChangedSourceIds: changes.valueChangedSourceIds,
     );

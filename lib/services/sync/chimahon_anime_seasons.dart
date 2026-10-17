@@ -143,11 +143,6 @@ class ChimahonSeasonNamespace {
   }
 }
 
-List<BackupAnime> rebaseChimahonSeasonIds(
-  Iterable<BackupAnime> local,
-  Iterable<BackupAnime> remote,
-) => ChimahonSeasonNamespace(local, remote).local;
-
 /// A source refresh knows the fetch type but may not supply display flags or
 /// background art. An older client knows none of these fields. Fill only these
 /// representation gaps; a known parent's absent parentId is an explicit detach.

@@ -18,10 +18,28 @@ BackupMihon rebaseChimahonBackupReferences(
     final targetByName = {
       for (final category in target) category.name: category,
     };
+    final targetOrders = {for (final category in target) category.order};
+    final usedOrders = {
+      ...targetOrders,
+      for (final category in source) category.order,
+    };
+    var placeholder = Int64(-1);
     final remapped = <Int64, Int64>{};
     for (final category in source) {
       final match = targetByName[category.name];
-      if (match == null) continue;
+      if (match == null) {
+        // A category the reference lacks keeps its own order, which may be a
+        // reference category's order. Move it to an unused placeholder so its
+        // memberships cannot merge into that category's and look equal.
+        if (!targetOrders.contains(category.order)) continue;
+        while (usedOrders.contains(placeholder)) {
+          placeholder -= 1;
+        }
+        usedOrders.add(placeholder);
+        remapped[category.order] = placeholder;
+        category.order = placeholder;
+        continue;
+      }
       remapped[category.order] = match.order;
       if (match.hasOrder()) {
         category.order = match.order;

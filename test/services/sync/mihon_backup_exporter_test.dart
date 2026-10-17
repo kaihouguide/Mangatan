@@ -985,8 +985,8 @@ void main() {
       unorderedEquals([readingId, studyId]),
     );
     expect(novelsByTitle['Volume Three']!.categoryIds, ['default']);
+    // The uncategorized row is implied by membership, never exported.
     expect(backup.backupNovelCategories.map((category) => category.id), [
-      'default',
       studyId,
       readingId,
     ]);

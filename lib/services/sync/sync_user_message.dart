@@ -41,15 +41,16 @@ String safeSyncUserMessage(
   }
   if (error is SyncCredentialAccessException) {
     return switch (error.reason) {
-      SyncCredentialAccessFailureReason.denied =>
-        'macOS Keychain access was denied. Restart Mangatan, retry, and approve the Keychain prompt.',
-      SyncCredentialAccessFailureReason.locked =>
-        'The system credential store is locked. Unlock it and try syncing again.',
+      SyncCredentialAccessFailureReason.denied => 'macOS Keychain access was denied. Restart Mangatan, retry, and approve the Keychain prompt.',
+      SyncCredentialAccessFailureReason.locked => 'The system credential store is locked. Unlock it and try syncing again.',
       SyncCredentialAccessFailureReason.missing =>
         'Google Drive is not connected. Connect it again before syncing.',
-      SyncCredentialAccessFailureReason.unavailable =>
-        'The system credential store is unavailable. Try again after restarting Mangatan.',
+      SyncCredentialAccessFailureReason.unavailable => 'The system credential store is unavailable. Try again after restarting Mangatan.',
     };
+  }
+  if (error is SyncLocalDataChangedException) {
+    return 'Your library changed during sync, so nothing was overwritten. '
+        'Sync again.';
   }
   if (error is SyncConflictException) {
     return 'Sync data changed on another device. Try syncing again.';

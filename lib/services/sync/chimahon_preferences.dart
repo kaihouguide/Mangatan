@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:fixnum/fixnum.dart';
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupPreference.pb.dart';
 import 'package:mangayomi/services/mining/anki_markers.dart';
+import 'package:protobuf/protobuf.dart';
 
 enum ChimahonPreferenceKind {
   integer,
@@ -38,6 +39,25 @@ class ChimahonPreferenceCodec {
   DecodedChimahonPreference decode(BackupPreference preference) {
     final type = preference.value.type.split('.').last;
     final bytes = preference.value.value;
+    try {
+      return _decode(preference, type, bytes);
+    } on InvalidProtocolBufferException {
+      // A damaged value is kept exactly like a type from a newer Chimahon:
+      // opaque, and still carried in [DecodedChimahonPreference.encoded].
+      return DecodedChimahonPreference(
+        key: preference.key,
+        kind: ChimahonPreferenceKind.unknown,
+        value: null,
+        encoded: preference.deepCopy(),
+      );
+    }
+  }
+
+  DecodedChimahonPreference _decode(
+    BackupPreference preference,
+    String type,
+    List<int> bytes,
+  ) {
     final (kind, value) = switch (type) {
       'IntPreferenceValue' => (
         ChimahonPreferenceKind.integer,

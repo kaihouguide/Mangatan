@@ -4,7 +4,13 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'sync_connection_status_provider.g.dart';
 
-enum SyncConnectionStatus { notConfigured, checking, connected, unauthorized, unreachable }
+enum SyncConnectionStatus {
+  notConfigured,
+  checking,
+  connected,
+  unauthorized,
+  unreachable,
+}
 
 @riverpod
 class SyncConnectionState extends _$SyncConnectionState {
@@ -40,7 +46,13 @@ class SyncConnectionState extends _$SyncConnectionState {
     SyncConnectionStatus result;
     try {
       final response = await http
-          .get(Uri.parse('$url/api/settings'), headers: {'Cookie': 'id=$authToken'})
+          .get(
+            Uri.parse('$url/api/account/settings'),
+            headers: {
+              'Cookie': 'id=$authToken',
+              'Authorization': 'Bearer $authToken',
+            },
+          )
           .timeout(const Duration(seconds: 6));
       if (response.statusCode == 200 || response.statusCode == 404) {
         result = SyncConnectionStatus.connected;

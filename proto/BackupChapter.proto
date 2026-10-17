@@ -14,4 +14,6 @@ message BackupChapter {
     int64 lastModifiedAt = 11;
     int64 version = 12;
     bytes memo = 13;
+    // Chimahon 2.4: resume fraction for novel chapters. Manga ignores it.
+    double progress = 14;
 }

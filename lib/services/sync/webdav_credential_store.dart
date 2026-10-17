@@ -42,7 +42,14 @@ class SecureWebDavCredentialStore implements WebDavCredentialStore {
   Future<WebDavCredentials?> readCredentials() async {
     final raw = await backend.read(key: storageKey);
     if (raw == null || raw.trim().isEmpty) return null;
-    final decoded = jsonDecode(raw);
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } on FormatException {
+      // Unreadable stored credentials mean signing in again, as for any
+      // other unusable value.
+      return null;
+    }
     if (decoded is! Map<String, Object?>) return null;
     final credentials = WebDavCredentials.fromJson(decoded);
     return credentials.isUsable ? credentials : null;

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupMihon.pb.dart';
+import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupPreference.pb.dart';
 import 'package:mangayomi/services/sync/chimahon_preferences.dart';
 
 void main() {
@@ -20,6 +21,23 @@ void main() {
       final decoded = codec.decode(codec.encode(entry.key, entry.value));
       expect(decoded.value, entry.value);
     }
+  });
+
+  test('keeps a damaged preference value as an opaque envelope', () {
+    final damaged = BackupPreference(
+      key: 'library_entries',
+      value: BackupPreferenceValue(
+        type: 'eu.kanade.tachiyomi.data.backup.models.BooleanPreferenceValue',
+        // A field tag with a truncated length-delimited payload.
+        value: [10, 200],
+      ),
+    );
+
+    final decoded = codec.decode(damaged);
+
+    expect(decoded.kind, ChimahonPreferenceKind.unknown);
+    expect(decoded.value, isNull);
+    expect(decoded.encoded.writeToBuffer(), damaged.writeToBuffer());
   });
 
   test('decodes a fixture emitted by Chimahon kotlinx serialization', () {

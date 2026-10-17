@@ -22,7 +22,9 @@ OcrEnginePreference? importChimahonOcrEngine(
   required OcrHostPlatform platform,
 }) => switch (engine) {
   'cloud' => OcrEnginePreference.googleLens,
-  'local' => localOcrEngineForPlatform(platform),
+  // Chimahon 2.4 added Paddle as a second on-device engine. Mangatan's
+  // closest equivalent is the same platform engine `local` selects.
+  'local' || 'paddle' => localOcrEngineForPlatform(platform),
   _ => null,
 };
 

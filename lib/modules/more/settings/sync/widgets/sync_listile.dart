@@ -40,11 +40,11 @@ class SyncListile extends ConsumerWidget {
         leading: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            color: const Color.fromRGBO(18, 25, 35, 1),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
           ),
           width: 60,
           height: 70,
-          child: Icon(icon, size: 30, color: Colors.grey),
+          child: Icon(icon, size: 30, color: context.secondaryColor),
         ),
         trailing: (isLogged
             ? const Icon(Icons.check, size: 30, color: Colors.green)

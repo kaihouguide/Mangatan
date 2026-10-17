@@ -1,4 +1,5 @@
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupPreference.pb.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 /// Reconstructs preference intent after an explicit manual restore.
 ///
@@ -146,15 +147,7 @@ class ChimahonPendingPreferenceIntent {
 
   bool _sameNullableMessage(BackupPreference? first, BackupPreference? second) {
     if (first == null || second == null) return first == second;
-    return _sameBytes(first.writeToBuffer(), second.writeToBuffer());
-  }
-
-  bool _sameBytes(List<int> first, List<int> second) {
-    if (first.length != second.length) return false;
-    for (var index = 0; index < first.length; index++) {
-      if (first[index] != second[index]) return false;
-    }
-    return true;
+    return sameBytes(first.writeToBuffer(), second.writeToBuffer());
   }
 
   T _wireClone<T extends Object>(T value) {

@@ -35,6 +35,20 @@ void main() {
     expect(message, isNot(contains(privatePath)));
   });
 
+  test('a local change during sync says so, not that the service is down', () {
+    final message = safeSyncUserMessage(
+      const SyncLocalDataChangedException('$secret at $privatePath'),
+    );
+
+    expect(
+      message,
+      'Your library changed during sync, so nothing was overwritten. '
+      'Sync again.',
+    );
+    expect(message, isNot(contains(secret)));
+    expect(message, isNot(contains(privatePath)));
+  });
+
   test('OAuth mapping uses only its fixed code', () {
     final message = safeSyncUserMessage(
       const GoogleDriveOAuthException(

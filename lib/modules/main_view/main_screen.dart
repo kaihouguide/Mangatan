@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mangayomi/eval/model/m_bridge.dart';
 import 'package:mangayomi/main.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/repositories/source_repository.dart';
@@ -21,6 +20,7 @@ import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.da
 import 'package:mangayomi/modules/widgets/error_state.dart';
 import 'package:mangayomi/modules/widgets/loading_icon.dart';
 import 'package:mangayomi/services/fetch_item_sources.dart';
+import 'package:mangayomi/modules/main_view/auto_sync_timer_controller.dart';
 import 'package:mangayomi/modules/main_view/providers/migration.dart';
 import 'package:mangayomi/modules/main_view/providers/tv_mode_provider.dart';
 import 'package:mangayomi/modules/more/about/providers/check_for_update.dart';
@@ -30,12 +30,9 @@ import 'package:mangayomi/router/router.dart';
 import 'package:mangayomi/services/fetch_sources_list.dart';
 import 'package:mangayomi/services/sync_server.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
+import 'package:mangayomi/utils/log/logger.dart';
 import 'package:mangayomi/modules/manga/detail/providers/state_providers.dart';
 import 'package:mangayomi/modules/more/providers/incognito_mode_state_provider.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/models/chapter.dart';
-import 'package:mangayomi/models/source.dart';
-import 'package:mangayomi/models/update.dart';
 
 final libLocationRegex = RegExp(r"^/(Manga|Anime|Novel)Library$");
 
@@ -55,11 +52,16 @@ class MainScreen extends ConsumerStatefulWidget {
 
 class _MainScreenState extends ConsumerState<MainScreen> {
   Timer? _backupTimer;
-  Timer? _syncTimer;
+  late final AutoSyncTimerController _autoSync = AutoSyncTimerController(
+    onTick: _runAutoSync,
+    onError: (error, stackTrace) => AppLogger.log(
+      'Automatic sync failed: $error\n$stackTrace',
+      logLevel: LogLevel.error,
+    ),
+  );
 
   late final String _defaultLocation;
   late final List<String> _navigationOrder;
-  late final int _autoSyncFrequency;
 
   static final Map<String, String> _hyphenatedLabelsCache = {};
 
@@ -96,9 +98,6 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     super.initState();
 
     _navigationOrder = ref.read(navigationOrderStateProvider);
-    _autoSyncFrequency = ref
-        .read(synchingProvider(syncId: 1))
-        .autoSyncFrequency;
     final hiddenItems = ref.read(hideItemsStateProvider);
 
     // On the anime-only TV layout, never land on a hidden manga/novel library.
@@ -125,32 +124,45 @@ class _MainScreenState extends ConsumerState<MainScreen> {
       _onBackupTimerTick,
     );
 
-    if (_autoSyncFrequency != 0) {
-      _syncTimer = Timer.periodic(
-        Duration(seconds: _autoSyncFrequency),
-        _onSyncTimerTick,
-      );
-    }
+    _configureAutoSync();
 
-    // Pauses the auto-sync timer for the duration of a restore (and its
+    // Pauses automatic sync for the duration of a restore (and its
     // post-restore upload), instead of just rescheduling it — a restore can
     // outlast one sync interval, so a reschedule alone could still let the
     // timer fire mid-restore. syncServerProvider.startSync also checks this
     // guard directly, covering a manual sync trigger too.
-    ref.listenManual<bool>(restoreSyncGuardProvider, (_, restoring) {
-      if (restoring) {
-        _syncTimer?.cancel();
-        return;
-      }
-      // Re-read the live setting rather than the _autoSyncFrequency snapshot
-      // taken at init — a restore can turn sync off (frequency reset to 0),
-      // and that must take effect immediately, not just on next app launch.
-      final freq = ref.read(synchingProvider(syncId: 1)).autoSyncFrequency;
-      _syncTimer?.cancel();
-      if (freq != 0) {
-        _syncTimer = Timer.periodic(Duration(seconds: freq), _onSyncTimerTick);
-      }
+    ref.listenManual<bool>(restoreSyncGuardProvider, (_, _) {
+      _configureAutoSync();
     });
+    // Frequency and on/off changes (including a restore resetting them) take
+    // effect immediately instead of on the next app launch.
+    ref.listenManual(synchingProvider(syncId: 1), (_, _) {
+      _configureAutoSync();
+    });
+  }
+
+  void _configureAutoSync() {
+    if (!mounted) return;
+    if (ref.read(restoreSyncGuardProvider)) {
+      _autoSync.configure((syncOn: false, frequencySeconds: 0));
+      return;
+    }
+    final preference = ref.read(synchingProvider(syncId: 1));
+    _autoSync.configure((
+      syncOn: preference.syncOn,
+      frequencySeconds: preference.autoSyncFrequency,
+    ));
+  }
+
+  /// A silent sync reports its own failures and is retried on the next tick,
+  /// so an offline interval does not permanently stop automatic sync.
+  Future<void> _runAutoSync() async {
+    if (!mounted) return;
+    final l10n = l10nLocalizations(context);
+    if (l10n == null) return;
+    await ref
+        .read(syncServerProvider(syncId: 1).notifier)
+        .startSync(l10n, true, scheduled: true);
   }
 
   void _initializeProviders() {
@@ -201,27 +213,10 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     ref.read(checkAndBackupProvider);
   }
 
-  void _onSyncTimerTick(Timer timer) {
-    if (!mounted) {
-      timer.cancel();
-      return;
-    }
-    try {
-      final l10n = l10nLocalizations(context)!;
-      ref.read(syncServerProvider(syncId: 1).notifier).startSync(l10n, true);
-    } catch (e) {
-      botToast(
-        "Failed to sync! Maybe the sync server is down. "
-        "Restart the app to resume auto sync.",
-      );
-      timer.cancel();
-    }
-  }
-
   @override
   void dispose() {
     _backupTimer?.cancel();
-    _syncTimer?.cancel();
+    _autoSync.dispose();
     discordRpc?.disconnect();
     super.dispose();
   }

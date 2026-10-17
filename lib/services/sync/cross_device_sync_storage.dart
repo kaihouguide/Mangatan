@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/http/idle_timeout_client.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_codec.dart';
 
 class RemoteSyncSnapshot {
@@ -63,6 +64,12 @@ class SyncStorageException implements Exception {
       statusCode == null ? message : '$message (HTTP status $statusCode)';
 }
 
+/// Local data changed while a sync was in progress, so the sync stopped
+/// before overwriting it. Retrying uses the newer local state.
+class SyncLocalDataChangedException extends SyncStorageException {
+  const SyncLocalDataChangedException(super.message);
+}
+
 class SyncConflictException extends SyncStorageException {
   const SyncConflictException()
     : super('The remote sync payload changed during synchronization');
@@ -75,7 +82,7 @@ class SyncYomiStorage implements CrossDeviceSyncStorage, ClosableSyncStorage {
     required this.baseUrl,
     required this.apiToken,
     http.Client? client,
-  }) : _client = client ?? http.Client(),
+  }) : _client = client ?? IdleTimeoutClient(http.Client()),
        _ownsClient = client == null;
 
   final Uri baseUrl;

@@ -103,6 +103,25 @@ void main() {
       updated.value,
     );
   });
+
+  test('names the local areas that changed, and only those', () async {
+    final projection = BackupMihon();
+    final before = await ChimahonLocalRevision.capture(database, projection);
+    expect(before.changedSections(before), isEmpty);
+
+    database.writeTxnSync(
+      () => database.sources.putSync(Source(id: 3, name: 'Source')),
+    );
+    final after = await ChimahonLocalRevision.capture(database, projection);
+
+    expect(after.value, isNot(before.value));
+    expect(before.changedSections(after), ['source']);
+  });
+
+  test('a revision built without sections reports none', () {
+    const plain = ChimahonLocalRevision('a');
+    expect(plain.changedSections(const ChimahonLocalRevision('b')), isEmpty);
+  });
 }
 
 Future<String> _isarLibraryPath() async {

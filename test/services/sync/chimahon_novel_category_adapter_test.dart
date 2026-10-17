@@ -51,10 +51,7 @@ void main() {
     final readingId = adapter.stableId('READING');
     expect(readingId, adapter.stableId(' reading '));
     expect(readingId, isNot(anyOf('17', '18')));
-    expect(projection.categories.map((category) => category.id), [
-      ChimahonNovelCategoryAdapter.uncategorizedId,
-      readingId,
-    ]);
+    expect(projection.categories.map((category) => category.id), [readingId]);
     expect(projection.categories.last.name, 'Reading');
     expect(projection.categories.last.order.toInt(), 3);
     expect(projection.categories.last.hasFlags(), isFalse);

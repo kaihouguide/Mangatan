@@ -39,6 +39,7 @@ const BackupChapter$json = {
     {'1': 'lastModifiedAt', '3': 11, '4': 1, '5': 3, '10': 'lastModifiedAt'},
     {'1': 'version', '3': 12, '4': 1, '5': 3, '10': 'version'},
     {'1': 'memo', '3': 13, '4': 1, '5': 12, '10': 'memo'},
+    {'1': 'progress', '3': 14, '4': 1, '5': 1, '10': 'progress'},
   ],
   '8': [
     {'1': '_scanlator'},
@@ -54,4 +55,4 @@ final $typed_data.Uint8List backupChapterDescriptor = $convert.base64Decode(
     'UgpkYXRlVXBsb2FkEiQKDWNoYXB0ZXJOdW1iZXIYCSABKAJSDWNoYXB0ZXJOdW1iZXISIAoLc2'
     '91cmNlT3JkZXIYCiABKANSC3NvdXJjZU9yZGVyEiYKDmxhc3RNb2RpZmllZEF0GAsgASgDUg5s'
     'YXN0TW9kaWZpZWRBdBIYCgd2ZXJzaW9uGAwgASgDUgd2ZXJzaW9uEhIKBG1lbW8YDSABKAxSBG'
-    '1lbW9CDAoKX3NjYW5sYXRvcg==');
+    '1lbW8SGgoIcHJvZ3Jlc3MYDiABKAFSCHByb2dyZXNzQgwKCl9zY2FubGF0b3I=');

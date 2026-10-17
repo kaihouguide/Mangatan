@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+// Chimahon 2.4 favorites from novel extensions (BackupMihon field 702).
+// Mangatan only reads their identity; the field itself stays an unmodelled
+// pass-through on the wire, so only the fields read here are declared.
+message BackupSourceNovel {
+    int64 source = 1;
+    string url = 2;
+    string title = 3;
+    optional string author = 5;
+}

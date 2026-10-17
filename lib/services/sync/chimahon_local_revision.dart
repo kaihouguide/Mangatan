@@ -20,9 +20,22 @@ import 'package:mangayomi/services/mining/mining_preferences.dart';
 /// Revision of every local collection that can change an authoritative
 /// Download-only plan or one of its settings projections.
 final class ChimahonLocalRevision {
-  const ChimahonLocalRevision(this.value);
+  const ChimahonLocalRevision(this.value, {this.sections = const {}});
 
   final String value;
+
+  /// One digest per local area (`manga`, `source`, `settings`, ...), so a
+  /// failed comparison can say which areas changed without revealing data.
+  final Map<String, String> sections;
+
+  /// The areas whose contents differ from [other], sorted by name.
+  List<String> changedSections(ChimahonLocalRevision other) {
+    final names = {...sections.keys, ...other.sections.keys}.toList()..sort();
+    return [
+      for (final name in names)
+        if (sections[name] != other.sections[name]) name,
+    ];
+  }
 
   static Future<ChimahonLocalRevision> capture(
     Isar database,
@@ -30,7 +43,9 @@ final class ChimahonLocalRevision {
   ) async {
     final miningSnapshot = MiningPreferences.writableSnapshot();
     final digestReceiver = _DigestReceiver();
-    final digestSink = sha256.startChunkedConversion(digestReceiver);
+    final digestSink = _SectionedDigestSink(
+      sha256.startChunkedConversion(digestReceiver),
+    );
 
     // Stream framed values into SHA-256. The previous implementation built a
     // second, base64-expanded copy of the projection and one very large JSON
@@ -79,26 +94,55 @@ final class ChimahonLocalRevision {
       _jsonEncoder.convert((await miningSnapshot).revisionEntries),
     );
     digestSink.close();
-    return ChimahonLocalRevision(digestReceiver.value.toString());
+    return ChimahonLocalRevision(
+      digestReceiver.value.toString(),
+      sections: digestSink.sectionDigests(),
+    );
   }
 
   static final _jsonEncoder = JsonUtf8Encoder();
 
   static void _addValue(
-    ByteConversionSink digestSink,
+    _SectionedDigestSink digestSink,
     String name,
     List<int> value,
   ) {
     final nameBytes = utf8.encode(name);
-    digestSink
+    digestSink.overall
       ..add(_lengthBytes(nameBytes.length))
       ..add(nameBytes)
       ..add(_lengthBytes(value.length))
       ..add(value);
+    digestSink.section(name).add(value);
   }
 
   static Uint8List _lengthBytes(int length) =>
       Uint8List(8)..buffer.asByteData().setUint64(0, length);
+}
+
+/// Feeds the overall revision digest and one digest per named section.
+final class _SectionedDigestSink {
+  _SectionedDigestSink(this.overall);
+
+  final ByteConversionSink overall;
+  final Map<String, (_DigestReceiver, ByteConversionSink)> _sections = {};
+
+  ByteConversionSink section(String name) => _sections.putIfAbsent(name, () {
+    final receiver = _DigestReceiver();
+    return (receiver, sha256.startChunkedConversion(receiver));
+  }).$2;
+
+  void close() {
+    overall.close();
+    for (final (_, sink) in _sections.values) {
+      sink.close();
+    }
+  }
+
+  Map<String, String> sectionDigests() => {
+    for (final MapEntry(:key, :value) in _sections.entries)
+      key: value.$1.value.toString(),
+  };
 }
 
 final class _DigestReceiver implements Sink<Digest> {

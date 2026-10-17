@@ -14,6 +14,10 @@ class SyncPreference {
 
   String? authToken;
 
+  int? since;
+
+  String? sessionToken;
+
   bool googleDriveConnected = false;
 
   String? chimahonDeviceId;
@@ -46,23 +50,13 @@ class SyncPreference {
   /// when a switch changes away and back during network I/O.
   int chimahonMediaSelectionGeneration = 0;
 
-  int? lastSyncManga;
-
-  int? lastSyncHistory;
-
-  int? lastSyncUpdate;
-
   String? server;
 
   bool syncOn = false;
 
   int autoSyncFrequency = 0;
 
-  bool syncHistories = false;
-
-  bool syncUpdates = false;
-
-  bool syncSettings = false;
+  int? lastSync;
 
   @enumerated
   SyncMode syncMode = SyncMode.native;
@@ -74,6 +68,8 @@ class SyncPreference {
     this.syncId,
     this.email,
     this.authToken,
+    this.since,
+    this.sessionToken,
     this.googleDriveConnected = false,
     this.chimahonDeviceId,
     this.syncYomiServer,
@@ -85,12 +81,10 @@ class SyncPreference {
     this.chimahonMediaSelectionUserSelected = false,
     this.chimahonMediaSelectionScopeToken,
     this.chimahonMediaSelectionGeneration = 0,
-    this.lastSyncManga,
-    this.lastSyncHistory,
-    this.lastSyncUpdate,
     this.server,
     this.syncOn = false,
     this.autoSyncFrequency = 0,
+    this.lastSync,
     this.syncMode = SyncMode.native,
     this.chimahonSyncProvider = ChimahonSyncProvider.syncYomi,
   });
@@ -99,6 +93,8 @@ class SyncPreference {
     syncId = json['syncId'];
     email = json['email'];
     authToken = json['authToken'];
+    since = json['since'];
+    sessionToken = json['sessionToken'];
     googleDriveConnected = json['googleDriveConnected'] ?? false;
     chimahonDeviceId = json['chimahonDeviceId'];
     syncYomiServer = json['syncYomiServer'];
@@ -113,15 +109,10 @@ class SyncPreference {
     chimahonMediaSelectionScopeToken = json['chimahonMediaSelectionScopeToken'];
     chimahonMediaSelectionGeneration =
         json['chimahonMediaSelectionGeneration'] ?? 0;
-    lastSyncManga = json['lastSyncManga'];
-    lastSyncHistory = json['lastSyncHistory'];
-    lastSyncUpdate = json['lastSyncUpdate'];
     server = json['server'];
     syncOn = json['syncOn'] ?? false;
     autoSyncFrequency = json['autoSyncFrequency'] ?? 0;
-    syncHistories = json['syncHistories'] ?? false;
-    syncUpdates = json['syncUpdates'] ?? false;
-    syncSettings = json['syncSettings'] ?? false;
+    lastSync = json['lastSync'];
     syncMode = SyncMode.values[json['syncMode'] ?? SyncMode.native.index];
     chimahonSyncProvider =
         ChimahonSyncProvider.values[json['chimahonSyncProvider'] ??
@@ -132,6 +123,8 @@ class SyncPreference {
     'syncId': syncId,
     'email': email,
     'authToken': authToken,
+    'since': since,
+    'sessionToken': sessionToken,
     'googleDriveConnected': googleDriveConnected,
     'chimahonDeviceId': chimahonDeviceId,
     'syncYomiServer': syncYomiServer,
@@ -143,15 +136,10 @@ class SyncPreference {
     'chimahonMediaSelectionUserSelected': chimahonMediaSelectionUserSelected,
     'chimahonMediaSelectionScopeToken': chimahonMediaSelectionScopeToken,
     'chimahonMediaSelectionGeneration': chimahonMediaSelectionGeneration,
-    'lastSyncManga': lastSyncManga,
-    'lastSyncHistory': lastSyncHistory,
-    'lastSyncUpdate': lastSyncUpdate,
     'server': server,
     'syncOn': syncOn,
     'autoSyncFrequency': autoSyncFrequency,
-    'syncHistories': syncHistories,
-    'syncUpdates': syncUpdates,
-    'syncSettings': syncSettings,
+    'lastSync': lastSync,
     'syncMode': syncMode.index,
     'chimahonSyncProvider': chimahonSyncProvider.index,
   };

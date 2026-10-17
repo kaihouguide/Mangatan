@@ -16,6 +16,11 @@ class SyncPreferenceRepository {
   Future<void> save(SyncPreference preference) => dbWriteQueue.run(
     () => isar.writeTxnSync(() => isar.syncPreferences.putSync(preference)),
   );
+
+  // Queued read-modify-write: [body] reads the current row and writes it back
+  // inside one synchronous transaction, so compare-and-set checks stay atomic.
+  Future<T> writeTransaction<T>(T Function() body) =>
+      dbWriteQueue.run(() => isar.writeTxnSync(body));
 }
 
 final syncPreferenceRepository = SyncPreferenceRepository();

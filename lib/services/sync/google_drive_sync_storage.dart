@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
 import 'package:mangayomi/modules/more/data_and_storage/providers/proto/BackupMihon.pb.dart';
+import 'package:mangayomi/services/http/idle_timeout_client.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_codec.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_merger.dart';
 import 'package:mangayomi/services/sync/cross_device_sync_storage.dart';
@@ -25,7 +26,7 @@ class GoogleDriveSyncStorage
     required this.deviceId,
     this.remoteFileName = chimahonRemoteFileName,
     http.Client? client,
-  }) : _client = client ?? http.Client(),
+  }) : _client = client ?? IdleTimeoutClient(http.Client()),
        _ownsClient = client == null;
 
   static const chimahonRemoteFileName = 'Chimahon_sync.proto.gz';

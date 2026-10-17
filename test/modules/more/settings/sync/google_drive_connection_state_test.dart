@@ -127,6 +127,32 @@ void main() {
     expect(disconnected, isFalse);
   });
 
+  test('an asynchronously failed connection row still rolls back', () async {
+    final store = _TokenStore(null);
+    var disconnected = false;
+
+    // Preference writes are queued, so a failure arrives after a gap.
+    await expectLater(
+      persistGoogleDriveConnectionWithTokenRollback(
+        tokenStore: store,
+        newRefreshToken: 'new-account-token',
+        persistConnection: () async {
+          await Future<void>.delayed(Duration.zero);
+          throw StateError('database failed');
+        },
+        markDisconnected: () async {
+          await Future<void>.delayed(Duration.zero);
+          disconnected = true;
+        },
+      ),
+      throwsStateError,
+    );
+
+    expect(store.refreshToken, isNull);
+    expect(store.clearCount, 1);
+    expect(disconnected, isTrue);
+  });
+
   test('failed first connection clears token and marks disconnected', () async {
     final store = _TokenStore(null);
     var disconnected = false;

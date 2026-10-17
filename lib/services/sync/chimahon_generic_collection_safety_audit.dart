@@ -13,6 +13,7 @@ import 'package:mangayomi/services/sync/chimahon_feed_identity.dart';
 import 'package:mangayomi/services/sync/chimahon_opaque_rows.dart';
 import 'package:mangayomi/services/sync/chimahon_unknown_field_safety.dart';
 import 'package:protobuf/protobuf.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 /// Symmetric preservation checks for non-media Chimahon root collections.
 ///
@@ -403,7 +404,7 @@ class ChimahonGenericCollectionSafetyAudit {
   bool _sameKnownFields<T extends GeneratedMessage>(T first, T second) {
     final left = _withoutUnknownFields(first);
     final right = _withoutUnknownFields(second);
-    return _sameBytes(left.writeToBuffer(), right.writeToBuffer());
+    return sameBytes(left.writeToBuffer(), right.writeToBuffer());
   }
 
   T _withoutUnknownFields<T extends GeneratedMessage>(T value) {
@@ -414,14 +415,6 @@ class ChimahonGenericCollectionSafetyAudit {
       if (copy.hasSavedSearch()) copy.savedSearch.unknownFields.clear();
     }
     return copy;
-  }
-
-  bool _sameBytes(List<int> first, List<int> second) {
-    if (first.length != second.length) return false;
-    for (var index = 0; index < first.length; index++) {
-      if (first[index] != second[index]) return false;
-    }
-    return true;
   }
 
   String _sourceKey(BackupSource source) =>

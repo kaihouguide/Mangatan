@@ -90,13 +90,14 @@ void main() {
     controller.dispose();
   });
 
-  test('a reported sync failure stops only the active schedule', () async {
+  test('an unexpected tick error stops only the active schedule', () async {
     final timers = <_TestTimer>[];
     final errors = <Object>[];
     var shouldFail = true;
-    Future<bool> startSync() async => !shouldFail;
     final controller = AutoSyncTimerController(
-      onTick: () => runAutoSyncOrThrow(startSync),
+      onTick: () async {
+        if (shouldFail) throw StateError('tick failed');
+      },
       onError: (error, _) => errors.add(error),
       timerFactory: _timerFactory(timers),
     );
@@ -105,11 +106,8 @@ void main() {
 
     timers.single.fire();
     await pumpEventQueue();
-    expect(errors.single, isA<AutoSyncAttemptFailed>());
+    expect(errors.single, isA<StateError>());
     expect(timers.single.isActive, isFalse);
-
-    // The same failed result remains nonthrowing for a manual caller.
-    expect(await startSync(), isFalse);
 
     shouldFail = false;
     controller.configure(settings);

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:mangayomi/services/http/idle_timeout_client.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_codec.dart';
 import 'package:mangayomi/services/sync/google_drive_chimahon_preview_runner.dart';
 import 'package:mangayomi/services/sync/google_drive_conditional_write_probe.dart';
@@ -161,7 +162,7 @@ class GoogleDriveDebugDiagnosticHandler {
     this.referenceTransferTimeout = const Duration(seconds: 30),
     this.callbackTransferTimeout = const Duration(seconds: 10),
   }) : _runner = runner ?? GoogleDriveAppDiagnosticRunner(),
-       _client = client ?? http.Client(),
+       _client = client ?? IdleTimeoutClient(http.Client()),
        _ownsClient = client == null,
        assert(referenceTransferTimeout > Duration.zero),
        assert(callbackTransferTimeout > Duration.zero);

@@ -7,6 +7,7 @@ import 'package:mangayomi/models/epub_book_progress.dart';
 import 'package:mangayomi/models/history.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/services/sync/chimahon_local_chapter_policy.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 import 'package:path/path.dart' as p;
 
 typedef ChimahonLocalChapterPathDeleter = Future<void> Function(String path);
@@ -121,37 +122,44 @@ class ChimahonLocalChapterOverlayService {
     }
 
     late bool hasRemainingOverlay;
-    database.writeTxnSync(() {
-      for (final chapter in deleted) {
-        database.historys.filter().chapterIdEqualTo(chapter.id).deleteAllSync();
-        database.downloads.deleteSync(chapter.id!);
-        database.chapters.deleteSync(chapter.id!);
-      }
-
-      final remaining = database.chapters
-          .filter()
-          .mangaIdEqualTo(mangaId)
-          .findAllSync();
-      hasRemainingOverlay = remaining.any(policy.isDeviceLocal);
-
-      for (final chapter in deleted) {
-        final archivePath = chapter.archivePath?.trim() ?? '';
-        if (archivePath.isEmpty ||
-            remaining.any(
-              (candidate) => candidate.archivePath == archivePath,
-            )) {
-          continue;
+    // Queued: Isar rejects a synchronous transaction while a queued async
+    // write (such as reading progress) is still open.
+    await dbWriteQueue.run(
+      () => database.writeTxnSync(() {
+        for (final chapter in deleted) {
+          database.historys
+              .filter()
+              .chapterIdEqualTo(chapter.id)
+              .deleteAllSync();
+          database.downloads.deleteSync(chapter.id!);
+          database.chapters.deleteSync(chapter.id!);
         }
-        database.epubBookProgress.deleteByMangaIdArchivePathSync(
-          mangaId,
-          archivePath,
-        );
-      }
 
-      final storedManga = database.mangas.getSync(mangaId) ?? manga;
-      storedManga.hasLocalChapterOverlay = hasRemainingOverlay;
-      database.mangas.putSync(storedManga);
-    });
+        final remaining = database.chapters
+            .filter()
+            .mangaIdEqualTo(mangaId)
+            .findAllSync();
+        hasRemainingOverlay = remaining.any(policy.isDeviceLocal);
+
+        for (final chapter in deleted) {
+          final archivePath = chapter.archivePath?.trim() ?? '';
+          if (archivePath.isEmpty ||
+              remaining.any(
+                (candidate) => candidate.archivePath == archivePath,
+              )) {
+            continue;
+          }
+          database.epubBookProgress.deleteByMangaIdArchivePathSync(
+            mangaId,
+            archivePath,
+          );
+        }
+
+        final storedManga = database.mangas.getSync(mangaId) ?? manga;
+        storedManga.hasLocalChapterOverlay = hasRemainingOverlay;
+        database.mangas.putSync(storedManga);
+      }),
+    );
 
     return ChimahonLocalChapterOverlayDeletionResult(
       deleted: deleted,

@@ -17,6 +17,7 @@ import 'package:mangayomi/services/sync/chimahon_media_identity.dart';
 import 'package:mangayomi/services/sync/chimahon_sync_merger.dart';
 import 'package:mangayomi/services/sync/chimahon_unknown_field_safety.dart';
 import 'package:protobuf/protobuf.dart';
+import 'package:mangayomi/services/sync/sync_bytes.dart';
 
 /// Symmetric, wire-level preservation checks for Chimahon's manga and anime.
 ///
@@ -1305,7 +1306,7 @@ class ChimahonMediaSafetyAudit {
       if (!_sameKnownMessage(expected, merged, _clearTrackingUnknownFields)) {
         valuesChanged.add(qualified);
       }
-      if (!_sameBytes(
+      if (!sameBytes(
         _unknownEnvelopeBytes(expected),
         _unknownEnvelopeBytes(merged),
       )) {
@@ -1785,7 +1786,7 @@ class ChimahonMediaSafetyAudit {
     final actual = _mangaPortableProjection(proposed).writeToBuffer();
     for (final winner in allowedWinners) {
       final expected = _expectedMangaProjection(pair, winner).writeToBuffer();
-      if (_sameBytes(actual, expected)) return true;
+      if (sameBytes(actual, expected)) return true;
     }
     return false;
   }
@@ -1875,7 +1876,7 @@ class ChimahonMediaSafetyAudit {
     final actual = _animePortableProjection(proposed).writeToBuffer();
     for (final winner in allowedWinners) {
       final expected = _expectedAnimeProjection(pair, winner).writeToBuffer();
-      if (_sameBytes(actual, expected)) return true;
+      if (sameBytes(actual, expected)) return true;
     }
     return false;
   }
@@ -1983,7 +1984,7 @@ class ChimahonMediaSafetyAudit {
     final actual = _chapterPortableProjection(proposed).writeToBuffer();
     for (final winner in allowedWinners) {
       final expected = _expectedChapterProjection(pair, winner).writeToBuffer();
-      if (_sameBytes(actual, expected)) return true;
+      if (sameBytes(actual, expected)) return true;
     }
     return false;
   }
@@ -2034,7 +2035,7 @@ class ChimahonMediaSafetyAudit {
     final actual = _episodePortableProjection(proposed).writeToBuffer();
     for (final winner in allowedWinners) {
       final expected = _expectedEpisodeProjection(pair, winner).writeToBuffer();
-      if (_sameBytes(actual, expected)) return true;
+      if (sameBytes(actual, expected)) return true;
     }
     return false;
   }
@@ -2366,7 +2367,7 @@ class ChimahonMediaSafetyAudit {
     final expected = winner.createEmptyInstance();
     if (loser != null) expected.mergeUnknownFields(loser.unknownFields);
     expected.mergeUnknownFields(winner.unknownFields);
-    return _sameBytes(
+    return sameBytes(
       _unknownEnvelopeBytes(expected),
       _unknownEnvelopeBytes(proposed),
     );
@@ -2382,18 +2383,10 @@ class ChimahonMediaSafetyAudit {
     T expected,
     T actual,
     T Function(T) withoutUnknownFields,
-  ) => _sameBytes(
+  ) => sameBytes(
     withoutUnknownFields(expected).writeToBuffer(),
     withoutUnknownFields(actual).writeToBuffer(),
   );
-
-  bool _sameBytes(List<int> left, List<int> right) {
-    if (left.length != right.length) return false;
-    for (var index = 0; index < left.length; index++) {
-      if (left[index] != right[index]) return false;
-    }
-    return true;
-  }
 
   bool _sameList<T>(List<T> left, List<T> right) {
     if (left.length != right.length) return false;
@@ -2581,7 +2574,7 @@ class ChimahonMediaSafetyAudit {
       )) {
         changedValues.add(entry.key);
       }
-      if (!_sameBytes(
+      if (!sameBytes(
         _unknownEnvelopeBytes(entry.value),
         _unknownEnvelopeBytes(candidate),
       )) {
