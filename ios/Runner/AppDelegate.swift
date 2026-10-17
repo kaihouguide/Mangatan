@@ -80,7 +80,11 @@ import Libmtorrentserver
       switch call.method {
       case "start":
         let args = call.arguments as? [String: Any]
-        let port = Int32(args?["port"] as? Int ?? 0)
+        // Int32(_:) traps on overflow. Treat anything that is not a TCP port
+        // as a request for an ephemeral one instead of crashing the app.
+        let requestedPort = args?["port"] as? Int ?? 0
+        let port: Int32 =
+          (0...65535).contains(requestedPort) ? Int32(requestedPort) : 0
         self?.embeddedMihonRequested = true
         MangatanEmbeddedMihonStart(port) { startedPort, error in
           if let error = error {
