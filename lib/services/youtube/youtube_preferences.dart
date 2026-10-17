@@ -59,11 +59,13 @@ class YouTubePreferences {
   static Future<void> rememberSearch(String query) async {
     final normalized = query.trim();
     if (normalized.isEmpty) return;
-    final history = await searchHistory();
-    history
+    // Before deferred storage is ready there is nowhere to keep the search.
+    final box = await _box();
+    if (box == null) return;
+    final history = List<String>.of(await searchHistory())
       ..removeWhere((entry) => entry.toLowerCase() == normalized.toLowerCase())
       ..insert(0, normalized);
-    await (await _box())?.put(_historyKey, history.take(10).toList());
+    await box.put(_historyKey, history.take(10).toList());
   }
 
   static Future<void> clearSearchHistory() async {

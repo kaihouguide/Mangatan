@@ -40,13 +40,12 @@ void main() {
     final source = File('lib/services/youtube/youtube_service.dart')
         .readAsStringSync();
 
-    expect(
-      source,
-      contains('isar.writeTxnSync(() => isar.mangas.putSync(createdManga))'),
-    );
-    expect(source, contains('isar.writeTxnSync(() {'));
-    expect(source, contains('isar.chapters.putSync(createdChapter)'));
-    expect(source, contains('createdChapter.manga.saveSync()'));
+    // Async transactions: a synchronous one throws while a sync import holds
+    // an async write transaction.
+    expect(source, contains('() => isar.mangas.put(createdManga)'));
+    expect(source, contains('chapterRepository.writeTransactionAsync('));
+    expect(source, contains('await isar.chapters.put(createdChapter)'));
+    expect(source, contains('await createdChapter.manga.save()'));
   });
 
   test('prefers the cross-platform NewPipe bridge before Dart extraction', () {

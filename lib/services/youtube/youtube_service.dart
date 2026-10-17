@@ -8,6 +8,7 @@ import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/models/video.dart' as mangatan;
 import 'package:mangayomi/services/m_extension_server.dart';
 import 'package:mangayomi/services/youtube/youtube_preferences.dart';
+import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as youtube;
 
 export 'youtube_preferences.dart';
@@ -42,9 +43,36 @@ class YouTubeBrowseItem {
   bool get isVideo => type == YouTubeBrowseItemType.video;
 }
 
+/// A youtube_explode client whose requests cannot hang forever.
+///
+/// The library sets no timeouts, so one stalled connection would leave the
+/// browser or player loading until the app is closed.
+youtube.YoutubeExplode newYouTubeClient({
+  http.Client? inner,
+  Duration responseTimeout = const Duration(seconds: 30),
+}) => youtube.YoutubeExplode(
+  httpClient: youtube.YoutubeHttpClient(
+    _TimeoutClient(inner ?? http.Client(), responseTimeout),
+  ),
+);
+
+class _TimeoutClient extends http.BaseClient {
+  _TimeoutClient(this._inner, this._responseTimeout);
+
+  final http.Client _inner;
+  final Duration _responseTimeout;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) =>
+      _inner.send(request).timeout(_responseTimeout);
+
+  @override
+  void close() => _inner.close();
+}
+
 class YouTubeService {
   YouTubeService({youtube.YoutubeExplode? client})
-    : _client = client ?? youtube.YoutubeExplode();
+    : _client = client ?? newYouTubeClient();
 
   final youtube.YoutubeExplode _client;
 
@@ -94,7 +122,7 @@ class YouTubeService {
     }
 
     final results = await _client.search.searchContent(query);
-    return results.map(_fromSearchResult).toList();
+    return results.map(_fromSearchResult).nonNulls.toList();
   }
 
   Future<List<YouTubeBrowseItem>> loadCollection(
@@ -195,7 +223,9 @@ class YouTubeService {
         lastUpdate: now,
       );
       final createdManga = manga;
-      isar.writeTxnSync(() => isar.mangas.putSync(createdManga));
+      await chapterRepository.writeTransactionAsync(
+        () => isar.mangas.put(createdManga),
+      );
     }
 
     var chapter = isar.chapters
@@ -215,9 +245,9 @@ class YouTubeService {
         duration: _formatDuration(duration),
       )..manga.value = manga;
       final createdChapter = chapter;
-      isar.writeTxnSync(() {
-        isar.chapters.putSync(createdChapter);
-        createdChapter.manga.saveSync();
+      await chapterRepository.writeTransactionAsync(() async {
+        await isar.chapters.put(createdChapter);
+        await createdChapter.manga.save();
       });
     }
     return chapter.id!;
@@ -225,7 +255,9 @@ class YouTubeService {
 
   static Future<List<mangatan.Video>> resolveVideoStreams(String url) async {
     final bridgeVideo = await _resolveWithBridge(url);
-    if (bridgeVideo != null) {
+    // A bridge answer without streams would surface as "no video"; the
+    // in-process resolver can still find them.
+    if (bridgeVideo != null && bridgeVideo.streams.isNotEmpty) {
       final preferredQuality = await YouTubePreferences.preferredQuality();
       final preferredHeight =
           int.tryParse(preferredQuality.replaceAll('p', '')) ?? 1080;
@@ -253,7 +285,7 @@ class YouTubeService {
       ];
     }
 
-    final client = youtube.YoutubeExplode();
+    final client = newYouTubeClient();
     try {
       final id = youtube.VideoId.parseVideoId(url);
       if (id == null) {
@@ -387,7 +419,9 @@ class YouTubeService {
     return null;
   }
 
-  static YouTubeBrowseItem _fromSearchResult(youtube.SearchResult result) {
+  /// Returns null for result kinds this browser cannot open, so one new
+  /// YouTube result type does not fail the whole search.
+  static YouTubeBrowseItem? _fromSearchResult(youtube.SearchResult result) {
     return switch (result) {
       youtube.SearchVideo video => YouTubeBrowseItem(
         id: video.id.value,
@@ -422,9 +456,7 @@ class YouTubeService {
             : playlist.thumbnails.last.url.toString(),
         url: 'https://www.youtube.com/playlist?list=${playlist.id}',
       ),
-      _ => throw UnsupportedError(
-        'Unsupported YouTube search result: ${result.runtimeType}',
-      ),
+      _ => null,
     };
   }
 
@@ -460,25 +492,27 @@ class YouTubeService {
   }
 
   static final Map<String, _BridgeCacheEntry> _bridgeCache = {};
+  static const _bridgeCacheLifetime = Duration(minutes: 10);
 
   static Future<_BridgeYouTubeVideo?> _resolveWithBridge(String url) async {
     final videoId = youtube.VideoId.parseVideoId(url);
     if (videoId == null) return null;
+    final now = DateTime.now();
+    // Entries are only reused for ten minutes; drop expired ones so the cache
+    // does not keep every video ever opened.
+    _bridgeCache.removeWhere(
+      (_, entry) => now.difference(entry.fetchedAt) >= _bridgeCacheLifetime,
+    );
     final cached = _bridgeCache[videoId];
-    if (cached != null &&
-        DateTime.now().difference(cached.fetchedAt) <
-            const Duration(minutes: 10)) {
-      return cached.video;
-    }
+    if (cached != null) return cached.video;
 
     try {
       final baseUrl = await prepareYouTubeResolverBridge();
       if (baseUrl == null) return null;
       final response = await http
           .get(
-            Uri.parse(
-              '$baseUrl/youtube/resolve',
-            ).replace(queryParameters: {'url': url}),
+            Uri.parse('$baseUrl/youtube/resolve')
+                .replace(queryParameters: {'url': url}),
           )
           .timeout(const Duration(seconds: 45));
       if (response.statusCode != 200) return null;
@@ -528,8 +562,9 @@ class _BridgeYouTubeVideo {
         channelUrl: json['channelUrl']?.toString() ?? '',
         streams: [
           for (final stream in (json['streams'] as List<dynamic>? ?? const []))
-            _BridgeYouTubeStream.fromJson(stream as Map<String, dynamic>),
-        ],
+            if (stream is Map<String, dynamic>)
+              _BridgeYouTubeStream.fromJson(stream),
+        ].where((stream) => stream.url.isNotEmpty).toList(),
       );
 
   final String title;

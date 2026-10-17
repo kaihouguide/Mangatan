@@ -12,6 +12,7 @@ import 'package:mangayomi/models/settings.dart';
 import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/models/track.dart';
 import 'package:mangayomi/modules/anime/providers/anime_player_controller_provider.dart';
+import 'package:mangayomi/repositories/settings_repository.dart';
 
 import '../../test_utils/isar_library.dart';
 
@@ -55,11 +56,31 @@ void main() {
     }
   });
 
+  test('a queued sync write waits for an in-flight progress save', () async {
+    final episode = Chapter(mangaId: 1, name: 'Episode 1', isRead: false);
+    await database.writeTxn(() => database.chapters.put(episode));
+
+    // Isar rejects a synchronous transaction while an async one is open. Both
+    // writes go through the write queue, so the settings write waits.
+    final progress = container
+        .read(animeStreamControllerProvider(episode: episode).notifier)
+        .setCurrentPosition(
+          const Duration(seconds: 30),
+          const Duration(minutes: 24),
+          save: true,
+        );
+    final settings = settingsRepository.update((s) => s.cropBorders = true);
+    await Future.wait([progress, settings]);
+
+    expect((await database.chapters.get(episode.id!))?.lastPageRead, '30000');
+    expect((await database.settings.get(227))?.cropBorders, isTrue);
+  });
+
   test('saving anime progress persists its total duration for sync', () async {
     final episode = Chapter(mangaId: 1, name: 'Episode 1', isRead: false);
     await database.writeTxn(() => database.chapters.put(episode));
 
-    container
+    await container
         .read(animeStreamControllerProvider(episode: episode).notifier)
         .setCurrentPosition(
           const Duration(seconds: 49),

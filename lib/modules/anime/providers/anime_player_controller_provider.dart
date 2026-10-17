@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/misc.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:mangayomi/repositories/track_repository.dart';
 import 'package:mangayomi/models/chapter.dart';
@@ -10,10 +9,8 @@ import 'package:mangayomi/services/aniskip.dart';
 import 'package:mangayomi/utils/chapter_recognition.dart';
 import 'package:mangayomi/utils/riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/settings.dart';
-import 'package:mangayomi/models/track.dart';
+import 'package:mangayomi/repositories/chapter_repository.dart';
 part 'anime_player_controller_provider.g.dart';
 
 final fullscreenProvider = StateProvider<bool>(() => false);
@@ -67,11 +64,13 @@ class AnimeStreamController extends _$AnimeStreamController
     );
   }
 
-  void setCurrentPosition(
+  /// Uses a queued async transaction: playback can overlap a sync import, and
+  /// Isar rejects a synchronous transaction while an async one is open.
+  Future<void> setCurrentPosition(
     Duration duration,
     Duration? totalDuration, {
     bool save = false,
-  }) {
+  }) async {
     if (episode.isRead!) return;
     if (incognitoMode) return;
     final markEpisodeAsSeenType = ref.read(markEpisodeAsSeenTypeStateProvider);
@@ -84,14 +83,14 @@ class AnimeStreamController extends _$AnimeStreamController
         : false;
     if (isWatch || save) {
       final ep = episode;
-      isar.writeTxnSync(() {
+      await chapterRepository.writeTransactionAsync(() async {
         ep.isRead = isWatch;
         ep.lastPageRead = (duration.inMilliseconds).toString();
         if (totalDuration != null && totalDuration > Duration.zero) {
           ep.duration = totalDuration.inMilliseconds.toString();
         }
         ep.updatedAt = DateTime.now().millisecondsSinceEpoch;
-        isar.chapters.putSync(ep);
+        await isar.chapters.put(ep);
       });
       if (isWatch) {
         episode.updateTrackChapterRead(ref);
@@ -112,7 +111,7 @@ class AnimeStreamController extends _$AnimeStreamController
     final completedPosition = totalDuration > Duration.zero
         ? totalDuration
         : Duration(milliseconds: int.tryParse(episode.lastPageRead ?? '') ?? 0);
-    setCurrentPosition(completedPosition, totalDuration, save: true);
+    await setCurrentPosition(completedPosition, totalDuration, save: true);
     await setHistoryUpdate(elapsedSeconds: elapsedSeconds);
   }
 

@@ -210,8 +210,11 @@ class _DesktopControllerWidgetState
     });
   }
 
-  final bool modifyVolumeOnScroll = true; // TODO. The variable is never changed
-  final bool toggleFullscreenOnDoublePress = true; // TODO. variable not changed
+  void _changeVolume(double delta) {
+    final player = widget.videoController.player;
+    player.setVolume((player.state.volume + delta).clamp(0.0, 100.0));
+  }
+
   static const _spaceDoublePressWindow = Duration(milliseconds: 360);
 
   void _handleSpaceShortcut() {
@@ -361,32 +364,22 @@ class _DesktopControllerWidgetState
           Focus(
             autofocus: true,
             child: Listener(
-              onPointerSignal: modifyVolumeOnScroll
-                  ? (e) {
-                      if (e is PointerScrollEvent) {
-                        if (e.delta.dy > 0) {
-                          final volume =
-                              widget.videoController.player.state.volume - 5.0;
-                          widget.videoController.player.setVolume(
-                            volume.clamp(0.0, 100.0),
-                          );
-                        }
-                        if (e.delta.dy < 0) {
-                          final volume =
-                              widget.videoController.player.state.volume + 5.0;
-                          widget.videoController.player.setVolume(
-                            volume.clamp(0.0, 100.0),
-                          );
-                        }
-                      }
-                    }
-                  : null,
+              onPointerSignal: (e) {
+                if (e is PointerScrollEvent) {
+                  if (e.delta.dy > 0) {
+                    _changeVolume(-5.0);
+                  } else if (e.delta.dy < 0) {
+                    _changeVolume(5.0);
+                  }
+                }
+              },
               child: GestureDetector(
                 onTap: () {
-                  // use own timer with onTapUp instead of onDoubleTap.
-                  // onDoubleTap uses 300ms which feels laggy when pausing
-                  // https://github.com/flutter/flutter/blob/master/packages/flutter/lib/src/gestures/constants.dart#L35
-                  _tapTimer = Timer(const Duration(milliseconds: 100), () {
+                  // Own timer with onTapUp instead of onDoubleTap, whose 300ms
+                  // delay feels laggy when pausing. It must outlast a double
+                  // click so the click that toggles fullscreen can cancel it.
+                  _tapTimer?.cancel();
+                  _tapTimer = Timer(const Duration(milliseconds: 250), () {
                     widget.videoController.player.playOrPause();
                   });
                 },
@@ -407,37 +400,17 @@ class _DesktopControllerWidgetState
                     widget.doubleSpeed(false);
                   }
                 },
-                onTapUp: !toggleFullscreenOnDoublePress
-                    ? null
-                    : (e) async {
-                        final now = DateTime.now();
-                        final difference = now.difference(last);
-                        last = now;
-                        if (difference < const Duration(milliseconds: 400)) {
-                          _tapTimer?.cancel();
-                          _tapTimer = null;
-                          final fullScreen = widget.desktopFullScreenPlayer;
-                          await _changeFullScreen(ref, fullScreen);
-                        }
-                      },
-                onPanUpdate: modifyVolumeOnScroll
-                    ? (e) {
-                        if (e.delta.dy > 0) {
-                          final volume =
-                              widget.videoController.player.state.volume - 5.0;
-                          widget.videoController.player.setVolume(
-                            volume.clamp(0.0, 100.0),
-                          );
-                        }
-                        if (e.delta.dy < 0) {
-                          final volume =
-                              widget.videoController.player.state.volume + 5.0;
-                          widget.videoController.player.setVolume(
-                            volume.clamp(0.0, 100.0),
-                          );
-                        }
-                      }
-                    : null,
+                onTapUp: (e) async {
+                  final now = DateTime.now();
+                  final difference = now.difference(last);
+                  last = now;
+                  if (difference < const Duration(milliseconds: 350)) {
+                    _tapTimer?.cancel();
+                    _tapTimer = null;
+                    final fullScreen = widget.desktopFullScreenPlayer;
+                    await _changeFullScreen(ref, fullScreen);
+                  }
+                },
                 child: MouseRegion(
                   onHover: (_) => onHover(),
                   onEnter: (_) => onEnter(),
