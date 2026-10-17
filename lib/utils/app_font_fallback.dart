@@ -22,24 +22,14 @@ ThemeData applyAppFontFallback(ThemeData theme) {
   );
 }
 
-TextStyle appBottomNavigationLabelStyle(ThemeData theme, int destinationCount) {
-  final fontSize = destinationCount >= 7 ? 9.5 : 11.0;
-  return (theme.textTheme.labelSmall ?? const TextStyle()).copyWith(
-    fontSize: fontSize,
-    height: 1,
-    letterSpacing: 0,
-    overflow: TextOverflow.ellipsis,
-  );
-}
-
 TextTheme _applyTextThemeFallback(TextTheme theme) {
   TextStyle? withFallback(TextStyle? style) {
     if (style == null) return null;
     return style.copyWith(
-      fontFamilyFallback: <String>[
+      fontFamilyFallback: <String>{
         ...?style.fontFamilyFallback,
         ...appFontFamilyFallback,
-      ].toSet().toList(),
+      }.toList(),
     );
   }
 

@@ -42,7 +42,7 @@ final class AnimationDurationScaleProvider
 }
 
 String _$animationDurationScaleHash() =>
-    r'de0de3400e4acfacdaaec62e93416b5b6050c7ef';
+    r'07a6990893df150df9b580ce191f495ecabfee37';
 
 abstract class _$AnimationDurationScale extends $Notifier<double> {
   double build();

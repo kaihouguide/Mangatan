@@ -1,6 +1,7 @@
 import 'package:mangayomi/main.dart';
 import 'package:mangayomi/models/settings.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:mangayomi/repositories/settings_repository.dart';
 
 part 'animation_duration_scale_provider.g.dart';
 
@@ -41,13 +42,6 @@ class AnimationDurationScale extends _$AnimationDurationScale {
     state = normalizeAnimationDurationScale(value);
     if (!persist) return;
 
-    final settings = isar.settings.getSync(227);
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..animationDurationScale = state
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.animationDurationScale = state);
   }
 }

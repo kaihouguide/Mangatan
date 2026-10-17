@@ -78,3 +78,6 @@ AGENTS.override.md
 # Chapters downloaded by the debug build
 downloads/
 .codegraph/
+
+# Crash reports written by debug runs; they contain local library paths
+crash_reports.json

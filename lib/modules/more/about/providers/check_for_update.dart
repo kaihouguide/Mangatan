@@ -3,7 +3,6 @@ import 'dart:developer';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:mangayomi/services/fetch_sources_list.dart';
 import 'package:mangayomi/services/http/m_client.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
@@ -11,7 +10,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:mangayomi/main.dart';
 import 'package:mangayomi/models/settings.dart';
-import 'package:mangayomi/utils/extensions/string_extensions.dart';
+import 'package:mangayomi/repositories/settings_repository.dart';
 part 'check_for_update.g.dart';
 
 /// Convenience alias: (version, body, htmlUrl, assets).
@@ -37,9 +36,6 @@ Future<UpdateInfo?> _getUpdateIfAvailable() async {
     log(info.data.toString());
   }
   final latest = await _fetchLatestRelease();
-  if (latest == null) {
-    return null;
-  }
   if (compareVersions(info.version, latest.$1) >= 0) {
     return null;
   }
@@ -98,15 +94,8 @@ class CheckForAppUpdates extends _$CheckForAppUpdates {
   bool build() => isar.settings.getSync(227)?.checkForAppUpdates ?? true;
 
   void set(bool value) {
-    final settings = isar.settings.getSync(227);
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..checkForAppUpdates = value
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.checkForAppUpdates = value);
   }
 }
 

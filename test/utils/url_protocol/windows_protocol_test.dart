@@ -27,11 +27,11 @@ void main() {
 
   test('Windows command quoting preserves Unicode paths', () {
     final command = WindowsProtocolHandler.buildCommand(
-      r'C:\Users\ラフル\読書アプリ\mangayomi.exe',
+      r'C:\Users\ユーザー\読書アプリ\mangayomi.exe',
       const ['%s'],
     );
 
-    expect(command, r'"C:\Users\ラフル\読書アプリ\mangayomi.exe" "%1"');
+    expect(command, r'"C:\Users\ユーザー\読書アプリ\mangayomi.exe" "%1"');
   });
 
   test(

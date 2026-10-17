@@ -2,7 +2,6 @@ import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/utils/source_lookup.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/repositories/source_repository.dart';
 
 Source? getSource(
   String lang,

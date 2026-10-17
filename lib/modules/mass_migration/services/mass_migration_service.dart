@@ -8,11 +8,9 @@ import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/modules/mass_migration/models/mass_migration_models.dart';
 import 'package:mangayomi/modules/manga/detail/providers/isar_providers.dart';
 import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/history_repository.dart';
 import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/repositories/track_repository.dart';
-import 'package:mangayomi/repositories/update_repository.dart';
 import 'package:mangayomi/services/get_detail.dart';
 import 'package:mangayomi/services/search.dart';
 import 'package:mangayomi/utils/chapter_recognition.dart';
@@ -20,7 +18,6 @@ import 'package:mangayomi/services/sync/chimahon_local_chapter_policy.dart';
 import 'package:mangayomi/utils/extensions/string_extensions.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/track.dart';
 import 'package:mangayomi/models/update.dart';
 
 Future<void> migrateLibraryItem({
@@ -94,7 +91,8 @@ Future<_MigrationSnapshot> _captureMigrationSnapshot({
   oldManga.hasLocalChapterOverlay = localOverlayChapterIds.isNotEmpty;
   final sourceTitle = oldManga.name ?? '';
 
-  isar.writeTxnSync(() {
+  final syncNotifier = ref.read(synchingProvider(syncId: 1).notifier);
+  await mangaRepository.writeTransaction(() {
     final histories = isar.historys
         .filter()
         .mangaIdEqualTo(oldManga.id)
@@ -110,15 +108,13 @@ Future<_MigrationSnapshot> _captureMigrationSnapshot({
     historyDate = portableHistories.lastOrNull?.date;
     for (final history in portableHistories) {
       isar.historys.deleteSync(history.id!);
-      ref
-          .read(synchingProvider(syncId: 1).notifier)
-          .addChangedPart(
-            ActionType.removeHistory,
-            history.id,
-            '{}',
-            false,
-            clientId: history.clientId,
-          );
+      syncNotifier.addChangedPart(
+        ActionType.removeHistory,
+        history.id,
+        '{}',
+        false,
+        clientId: history.clientId,
+      );
     }
     for (final chapter in existingChapters) {
       // The parent keeps its stable Isar ID during migration, so local file
@@ -131,15 +127,13 @@ Future<_MigrationSnapshot> _captureMigrationSnapshot({
           .chapterNameEqualTo(chapter.name)
           .deleteAllSync();
       isar.chapters.deleteSync(chapter.id!);
-      ref
-          .read(synchingProvider(syncId: 1).notifier)
-          .addChangedPart(
-            ActionType.removeChapter,
-            chapter.id,
-            '{}',
-            false,
-            clientId: chapter.clientId,
-          );
+      syncNotifier.addChangedPart(
+        ActionType.removeChapter,
+        chapter.id,
+        '{}',
+        false,
+        clientId: chapter.clientId,
+      );
     }
   });
 

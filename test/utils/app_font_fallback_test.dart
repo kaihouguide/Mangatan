@@ -22,15 +22,4 @@ void main() {
       contains('MangatanCJK'),
     );
   });
-
-  test('uses a compact label size when the bottom menu is crowded', () {
-    final theme = applyAppFontFallback(ThemeData());
-
-    expect(appBottomNavigationLabelStyle(theme, 5).fontSize, 11);
-    expect(appBottomNavigationLabelStyle(theme, 7).fontSize, 9.5);
-    expect(
-      appBottomNavigationLabelStyle(theme, 7).fontFamilyFallback,
-      contains('MangatanCJK'),
-    );
-  });
 }

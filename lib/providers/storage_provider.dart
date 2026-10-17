@@ -25,7 +25,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path/path.dart' as path;
 import 'package:mangayomi/utils/platform_utils.dart';
-import 'package:mangayomi/main.dart';
 
 @visibleForTesting
 String? linuxDocumentsFallbackPath(Map<String, String> environment) {
