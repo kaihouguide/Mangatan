@@ -113,6 +113,19 @@ void main() {
       expect(find()?.pagesDirectory?.path, startsWith(localFolder.path));
     });
 
+    test('rejects a finished page folder with a missing page', () {
+      writePages(downloads, 4);
+      File(p.join(downloads.path, 'Chapter 1', '003.jpg')).deleteSync();
+      expect(find(), isNull);
+    });
+
+    test('a damaged folder does not hide an intact copy elsewhere', () {
+      writePages(downloads, 4);
+      File(p.join(downloads.path, 'Chapter 1', '002.jpg')).deleteSync();
+      writePages(localFolder, 2);
+      expect(find()?.pagesDirectory?.path, startsWith(localFolder.path));
+    });
+
     test('ignores a page folder while the download is still running', () {
       writePages(downloads, 3);
       expect(find(isComplete: false), isNull);

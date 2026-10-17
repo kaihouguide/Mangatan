@@ -18,13 +18,9 @@ import 'package:mangayomi/models/chapter.dart'; // Has Chapter model with archiv
 import 'package:mangayomi/providers/storage_provider.dart'; // Provides storage directory selection
 import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/manga_repository.dart';
-import 'package:mangayomi/repositories/settings_repository.dart';
-import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
-import 'package:mangayomi/modules/manga/archive_reader/providers/archive_reader_providers.dart';
-import 'package:mangayomi/utils/downloaded_page_file.dart';
-import 'package:mangayomi/utils/local_directory_access.dart';
-import 'package:mangayomi/utils/localized_message.dart';
+import 'package:mangayomi/repositories/settings_repository.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart'; // Annotations for code generation
 part 'file_scanner.g.dart';
 
@@ -66,15 +62,8 @@ class LocalFoldersState extends _$LocalFoldersState {
   }
 
   void set(List<String> value) {
-    final settings = isar.settings.getSync(227)!;
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings
-          ..localFolders = state
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((settings) => settings.localFolders = value);
   }
 }
 
@@ -125,8 +114,11 @@ Future<void> _scanDirectory(Ref ref, Directory? dir) async {
       .or()
       .linkContains("Mangayomi\\local")
       .findAll();
+  // A restored or hand-edited row can lack its path; it cannot be matched to
+  // a folder, and must not abort the whole scan.
   final mangaMap = {
-    for (var m in existingMangas) localLibraryPathKey(m.link!): m,
+    for (var m in existingMangas)
+      if (m.link case final link?) localLibraryPathKey(link): m,
   };
 
   // Fetch all chapters for existing mangas
@@ -140,7 +132,9 @@ Future<void> _scanDirectory(Ref ref, Directory? dir) async {
 
   // Add manga.Ids with all the corresponding relative! paths (Manga/Chapter)
   for (var chap in existingChapters) {
-    final path = localLibraryPathKey(chap.archivePath!);
+    final archivePath = chap.archivePath;
+    if (archivePath == null || chap.mangaId == null) continue;
+    final path = localLibraryPathKey(archivePath);
     // For the given manga ID, add the path to its associated set.
     // If there's no entry for the manga ID yet, create a new empty set.
     chaptersMap.putIfAbsent(chap.mangaId!, () => <String>{}).add(path);
@@ -355,11 +349,13 @@ Future<void> _scanDirectory(Ref ref, Directory? dir) async {
     // Save all retrieved Manga objects (now with id) matching the processedMangas list
     final newAddedMangas = [
       ...savedMangas.where(
-        (m) => processedMangas.any(
-          (newManga) =>
-              localLibraryPathKey(newManga.link!) ==
-              localLibraryPathKey(m.link!),
-        ),
+        (m) =>
+            m.link != null &&
+            processedMangas.any(
+              (newManga) =>
+                  localLibraryPathKey(newManga.link!) ==
+                  localLibraryPathKey(m.link!),
+            ),
       ),
       ...pendingCloudParents,
     ];
@@ -460,21 +456,23 @@ Future<void> _scanDirectory(Ref ref, Directory? dir) async {
   }
   try {
     if (chaptersToSave.isNotEmpty) {
-      await isar.writeTxn(() async {
-        // insert chapters
-        await isar.chapters.putAll(chaptersToSave);
-        if (epubProgressToSave.isNotEmpty) {
-          await isar.epubBookProgress.putAll(epubProgressToSave);
-        }
+      await dbWriteQueue.run(
+        () => isar.writeTxn(() async {
+          // insert chapters
+          await isar.chapters.putAll(chaptersToSave);
+          if (epubProgressToSave.isNotEmpty) {
+            await isar.epubBookProgress.putAll(epubProgressToSave);
+          }
 
-        // for each one, set its link and save it
-        for (final chap in chaptersToSave) {
-          chap.manga.value = processedMangas.firstWhere(
-            (m) => m.id == chap.mangaId,
-          );
-          await chap.manga.save();
-        }
-      });
+          // for each one, set its link and save it
+          for (final chap in chaptersToSave) {
+            chap.manga.value = processedMangas.firstWhere(
+              (m) => m.id == chap.mangaId,
+            );
+            await chap.manga.save();
+          }
+        }),
+      );
     }
   } catch (e) {
     BotToast.showText(

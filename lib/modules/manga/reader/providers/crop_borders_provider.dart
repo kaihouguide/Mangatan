@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+
 import 'package:flutter/foundation.dart';
 import 'package:mangayomi/modules/manga/reader/u_chap_data_preload.dart';
 import 'package:mangayomi/src/rust/api/image.dart';
@@ -28,39 +29,54 @@ Future<Uint8List?> cropBorders(
   return null;
 }
 
+/// Crops reader pages on one long-lived Rust worker isolate.
+///
+/// The reader preloads several pages at once, so the worker is started once
+/// and shared. If it fails to start or dies, every waiting crop resolves to
+/// null (the page shows uncropped) and the next request starts a new worker.
 class ImageCropIsolate {
-  bool _isRunning = false;
-  Isolate? _rustIsolate;
+  ImageCropIsolate({this.entryPoint = _rustIsolateEntryPoint});
+
+  /// The worker's entry point; tests replace it to avoid the Rust library.
+  @visibleForTesting
+  final void Function(SendPort mainSendPort) entryPoint;
+  final Set<Completer<Uint8List?>> _pending = {};
+  Future<SendPort?>? _worker;
+  Isolate? _isolate;
   ReceivePort? _receivePort;
-  SendPort? _sendPort;
+  ReceivePort? _exitPort;
 
-  Future<void> start() async {
-    if (!_isRunning) {
-      try {
-        await _initRustIsolate();
-      } catch (_) {
-        await stop();
-      }
-    }
-  }
+  Future<void> start() => _workerPort();
 
-  Future<void> _initRustIsolate() async {
-    _receivePort = ReceivePort();
+  Future<SendPort?> _workerPort() => _worker ??= _spawn();
 
-    _rustIsolate = await Isolate.spawn(
-      _rustIsolateEntryPoint,
-      _receivePort!.sendPort,
-    );
-
-    final completer = Completer<SendPort>();
-    _receivePort!.listen((message) {
-      if (message is SendPort) {
-        completer.complete(message);
-      }
+  Future<SendPort?> _spawn() async {
+    final receivePort = ReceivePort();
+    final exitPort = ReceivePort();
+    final ready = Completer<SendPort?>();
+    _receivePort = receivePort;
+    _exitPort = exitPort;
+    receivePort.listen((message) {
+      if (message is SendPort && !ready.isCompleted) ready.complete(message);
     });
-
-    _sendPort = await completer.future;
-    _isRunning = true;
+    // Uncaught errors are fatal to the worker, so its exit covers a failed
+    // RustLib.init as well as a crash mid-request.
+    exitPort.listen((_) {
+      if (!ready.isCompleted) ready.complete(null);
+      _reset();
+    });
+    try {
+      _isolate = await Isolate.spawn(
+        entryPoint,
+        receivePort.sendPort,
+        onExit: exitPort.sendPort,
+      );
+    } catch (error) {
+      if (kDebugMode) print('Image crop isolate failed to start: $error');
+      _reset();
+      return null;
+    }
+    return ready.future;
   }
 
   static Future<void> _rustIsolateEntryPoint(SendPort mainSendPort) async {
@@ -70,15 +86,12 @@ class ImageCropIsolate {
     mainSendPort.send(receivePort.sendPort);
     receivePort.listen((message) async {
       if (message is Map<String, dynamic>) {
+        final responsePort = message['responsePort'] as SendPort;
         try {
           final imageBytes = message['imageBytes'] as Uint8List;
-          final responsePort = message['responsePort'] as SendPort;
-
           final croppedImage = processCropImage(image: imageBytes);
-
           responsePort.send({'success': true, 'data': croppedImage});
         } catch (e) {
-          final responsePort = message['responsePort'] as SendPort;
           responsePort.send({'success': false, 'error': e.toString()});
         }
       } else if (message == 'dispose') {
@@ -89,51 +102,59 @@ class ImageCropIsolate {
   }
 
   Future<Uint8List?> process(Uint8List imageBytes) async {
-    await start();
-    if (_sendPort == null) {
-      if (kDebugMode) {
-        print('Image crop isolate is not running');
-      }
+    final worker = await _workerPort();
+    if (worker == null) {
+      if (kDebugMode) print('Image crop isolate is not running');
       return null;
     }
 
     final responsePort = ReceivePort();
     final completer = Completer<Uint8List?>();
-
+    _pending.add(completer);
     responsePort.listen((response) {
-      responsePort.close();
-      if (response is Map<String, dynamic>) {
-        if (response['success'] == true) {
-          completer.complete(response['data'] as Uint8List);
-        } else {
-          if (kDebugMode) {
-            print('Image cropping failed: ${response['error']}');
-          }
-          completer.complete(Future.value(null));
+      if (completer.isCompleted) return;
+      if (response is Map && response['success'] == true) {
+        completer.complete(response['data'] as Uint8List?);
+      } else {
+        if (kDebugMode) {
+          print(
+            'Image cropping failed: ${response is Map ? response['error'] : response}',
+          );
         }
+        completer.complete(null);
       }
     });
-
-    _sendPort!.send({
+    worker.send({
       'imageBytes': imageBytes,
       'responsePort': responsePort.sendPort,
     });
-
-    return completer.future;
+    try {
+      return await completer.future;
+    } finally {
+      _pending.remove(completer);
+      responsePort.close();
+    }
   }
 
   Future<void> stop() async {
-    if (!_isRunning) {
-      return;
-    }
+    final worker = _worker;
+    if (worker == null) return;
+    (await worker)?.send('dispose');
+    _reset();
+  }
 
-    _sendPort?.send('dispose');
-    _rustIsolate?.kill(priority: Isolate.immediate);
+  /// Tears the worker down and resolves every waiting crop to null.
+  void _reset() {
+    _isolate?.kill(priority: Isolate.immediate);
     _receivePort?.close();
-    _sendPort = null;
-    _rustIsolate = null;
+    _exitPort?.close();
+    _isolate = null;
     _receivePort = null;
-    _isRunning = false;
+    _exitPort = null;
+    _worker = null;
+    for (final completer in _pending.toList()) {
+      if (!completer.isCompleted) completer.complete(null);
+    }
   }
 }
 

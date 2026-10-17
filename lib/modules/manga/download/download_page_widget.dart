@@ -7,17 +7,12 @@ import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/providers/l10n_providers.dart';
 import 'package:mangayomi/providers/storage_provider.dart';
 import 'package:mangayomi/modules/manga/download/providers/download_provider.dart';
-import 'package:mangayomi/services/download_manager/downloaded_manga_artifact.dart';
-import 'package:mangayomi/services/mining/mokuro_sidecar_path.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:mangayomi/utils/extensions/string_extensions.dart';
 import 'package:mangayomi/utils/global_style.dart';
 import 'package:mangayomi/utils/share.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path/path.dart' as p;
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/download.dart';
 import 'package:mangayomi/repositories/download_repository.dart';
 
 class ChapterPageDownload extends ConsumerWidget {

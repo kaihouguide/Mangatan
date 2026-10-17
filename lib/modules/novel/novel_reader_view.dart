@@ -52,7 +52,6 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:flutter/widgets.dart' as widgets;
-import 'package:mangayomi/modules/novel/utils/novel_reader_fonts.dart';
 
 typedef DoubleClickAnimationListener = void Function();
 
@@ -336,9 +335,11 @@ class _NovelWebViewState extends ConsumerState<NovelWebView>
           _lastProjectedOverallPermille != overallPermille) {
         _lastProjectedEpubSpineIndex = epubSpineIndex;
         _lastProjectedOverallPermille = overallPermille;
-        _readerController.updateEpubShortcutPosition(
-          spineIndex: epubSpineIndex,
-          overallProgress: overallProgress,
+        unawaited(
+          _readerController.updateEpubShortcutPosition(
+            spineIndex: epubSpineIndex,
+            overallProgress: overallProgress,
+          ),
         );
       }
     }
@@ -353,12 +354,14 @@ class _NovelWebViewState extends ConsumerState<NovelWebView>
 
   void _persistProgress() {
     if (_epubPositionLocked) return;
-    _readerController.setChapterOffset(
-      offset,
-      maxOffset,
-      epubChapterIndex: _epubChapterIndex,
-      epubChapterProgress: _epubChapterProgress,
-      epubCharacterCount: _epubCharacterCount,
+    unawaited(
+      _readerController.setChapterOffset(
+        offset,
+        maxOffset,
+        epubChapterIndex: _epubChapterIndex,
+        epubChapterProgress: _epubChapterProgress,
+        epubCharacterCount: _epubCharacterCount,
+      ),
     );
   }
 
@@ -635,12 +638,8 @@ class _NovelWebViewState extends ConsumerState<NovelWebView>
     if (_readerController.incognitoMode) return;
     final activeChapter = _activeBookmarkChapter();
     final nextValue = !(activeChapter.isBookmarked ?? false);
-    isar.writeTxnSync(() {
-      activeChapter
-        ..isBookmarked = nextValue
-        ..updatedAt = DateTime.now().millisecondsSinceEpoch;
-      isar.chapters.putSync(activeChapter);
-    });
+    activeChapter.isBookmarked = nextValue;
+    unawaited(chapterRepository.save(activeChapter));
     setState(() => _isBookmarked = nextValue);
   }
 
@@ -817,16 +816,20 @@ class _NovelWebViewState extends ConsumerState<NovelWebView>
     final overall = snapshot.maxOffset > 0
         ? (snapshot.offset / snapshot.maxOffset).clamp(0.0, 1.0).toDouble()
         : snapshot.offset.clamp(0.0, 1.0).toDouble();
-    _readerController.setChapterOffset(
-      snapshot.offset,
-      snapshot.maxOffset,
-      epubChapterIndex: snapshot.chapterIndex,
-      epubChapterProgress: snapshot.chapterProgress,
-      epubCharacterCount: snapshot.characterCount,
+    unawaited(
+      _readerController.setChapterOffset(
+        snapshot.offset,
+        snapshot.maxOffset,
+        epubChapterIndex: snapshot.chapterIndex,
+        epubChapterProgress: snapshot.chapterProgress,
+        epubCharacterCount: snapshot.characterCount,
+      ),
     );
-    _readerController.updateEpubShortcutPosition(
-      spineIndex: snapshot.spineIndex,
-      overallProgress: overall,
+    unawaited(
+      _readerController.updateEpubShortcutPosition(
+        spineIndex: snapshot.spineIndex,
+        overallProgress: overall,
+      ),
     );
     if (updateSavedPosition) {
       _savedEpubPositionExists = _snapshotHasProgress(snapshot);

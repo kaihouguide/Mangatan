@@ -1,7 +1,6 @@
 import 'package:mangayomi/models/settings.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:mangayomi/main.dart';
 part 'color_filter_provider.g.dart';
 
 @riverpod
@@ -13,20 +12,13 @@ class CustomColorFilterState extends _$CustomColorFilterState {
   }
 
   void set(int a, int r, int g, int b, bool _) {
-    final settings = isar.settings.getSync(227);
     var value = CustomColorFilter()
       ..a = a
       ..r = r
       ..g = g
       ..b = b;
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..customColorFilter = value
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.customColorFilter = value);
   }
 }
 

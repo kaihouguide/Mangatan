@@ -13,15 +13,8 @@ class AutomaticBackgroundState extends _$AutomaticBackgroundState {
   }
 
   void set(bool value) {
-    final settings = isar.settings.getSync(227);
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..automaticBackground = value
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.automaticBackground = value);
   }
 }
 
@@ -33,16 +26,13 @@ class DefaultReadingModeState extends _$DefaultReadingModeState {
   }
 
   void set(ReaderMode value) {
-    final settings = isar.settings.getSync(227);
-    final readingDirection = settings!.effectiveDefaultReadingDirection;
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings
-          ..defaultReaderMode = value.normalized
-          ..defaultReadingDirectionIndex ??= readingDirection.index
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
+    settingsRepository.update(
+      (s) => s
+        // Pin the direction the old mode implied before switching modes.
+        ..defaultReadingDirectionIndex ??=
+            s.effectiveDefaultReadingDirection.index
+        ..defaultReaderMode = value.normalized,
     );
   }
 }
@@ -55,14 +45,9 @@ class DefaultReadingDirectionState extends _$DefaultReadingDirectionState {
   }
 
   void set(ReadingDirection value) {
-    final settings = isar.settings.getSync(227);
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..defaultReadingDirectionIndex = value.index
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
+    settingsRepository.update(
+      (s) => s.defaultReadingDirectionIndex = value.index,
     );
   }
 }
@@ -75,15 +60,8 @@ class DefaultPageModeState extends _$DefaultPageModeState {
   }
 
   void set(PageMode value) {
-    final settings = isar.settings.getSync(227);
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..defaultPageMode = value
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.defaultPageMode = value);
   }
 }
 
@@ -312,15 +290,8 @@ class NovelReaderPaddingState extends _$NovelReaderPaddingState {
 
   void set(int value) {
     final safeValue = value.clamp(0, 25);
-    final settings = isar.settings.getSync(227);
     state = safeValue;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..novelReaderPadding = safeValue
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.novelReaderPadding = safeValue);
   }
 }
 
@@ -376,15 +347,8 @@ class NovelReaderParagraphSpacingState
 
   void set(double value) {
     final safeValue = value.clamp(0.0, 2.0);
-    final settings = isar.settings.getSync(227);
     state = safeValue;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..novelReaderParagraphSpacing = safeValue
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.novelReaderParagraphSpacing = safeValue);
   }
 }
 
@@ -411,14 +375,9 @@ class NovelShowReturnToSavedPositionButtonState
   }
 
   void set(bool value) {
-    final settings = isar.settings.getSync(227);
     state = value;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..novelShowReturnToSavedPositionButton = value
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
+    settingsRepository.update(
+      (s) => s.novelShowReturnToSavedPositionButton = value,
     );
   }
 }
@@ -433,15 +392,8 @@ class NovelEpubReadingLayoutState extends _$NovelEpubReadingLayoutState {
 
   void set(int value) {
     final safeValue = value.clamp(0, 3);
-    final settings = isar.settings.getSync(227);
     state = safeValue;
-    isar.writeTxnSync(
-      () => isar.settings.putSync(
-        settings!
-          ..novelEpubReadingLayout = safeValue
-          ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
+    settingsRepository.update((s) => s.novelEpubReadingLayout = safeValue);
   }
 }
 

@@ -108,8 +108,9 @@ class DownloadRepository {
               .findAllSync()) {
         if (pending.id != chapter.id &&
             pending.id != null &&
-            !order.contains(pending.id))
+            !order.contains(pending.id)) {
           order.add(pending.id!);
+        }
       }
       if (!order.contains(chapter.id!)) {
         order.add(chapter.id!);

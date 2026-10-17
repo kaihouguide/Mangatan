@@ -89,6 +89,7 @@ class ReaderController extends _$ReaderController
         : ReadingDirectionExtension.fromPersistedIndex(personalDirection);
   }
 
+  @override
   PageMode getPageMode() {
     final personalPageModeList = getIsarSetting().personalPageModeList ?? [];
     final personalPageMode = personalPageModeList.where(
@@ -139,6 +140,7 @@ class ReaderController extends _$ReaderController
     onSettingsMutated();
   }
 
+  @override
   void setPageMode(PageMode newPageMode) {
     List<PersonalPageMode>? personalPageModeLists = [];
     for (var personalPageMode in getIsarSetting().personalPageModeList ?? []) {

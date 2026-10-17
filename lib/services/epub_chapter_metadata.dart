@@ -6,6 +6,7 @@ import 'package:mangayomi/models/history.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/services/get_html_content.dart';
 import 'package:mangayomi/src/rust/api/epub.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 import 'package:path/path.dart' as p;
 
 const _epubChapterMetadataPrefix = 'mangatan:epub:v7:';
@@ -22,6 +23,8 @@ String epubChapterMetadata({
     '${logicalChapterSpineIndex ?? (navigationEntry ? spineIndex : -1)}:'
     '${characterStart ?? -1}';
 
+/// Marker of a legacy whole-book EPUB row. Imports no longer write it;
+/// [repairLocalEpubChapterMetadata] migrates such rows, and tests build them.
 String epubUnsplitChapterMetadata() => '${_epubChapterMetadataPrefix}unsplit:0';
 
 bool isManagedEpubChapter(Chapter chapter) =>
@@ -428,33 +431,35 @@ Future<void> repairLocalEpubChapterMetadata(Manga manga) async {
         .map((row) => row.id)
         .whereType<int>()
         .toList(growable: false);
-    await isar.writeTxn(() async {
-      await isar.epubBookProgress.put(progress);
-      await isar.chapters.putAll(shortcuts);
-      for (final chapter in shortcuts) {
-        await chapter.manga.save();
-      }
-      if (staleIds.isNotEmpty) await isar.chapters.deleteAll(staleIds);
+    await dbWriteQueue.run(
+      () => isar.writeTxn(() async {
+        await isar.epubBookProgress.put(progress);
+        await isar.chapters.putAll(shortcuts);
+        for (final chapter in shortcuts) {
+          await chapter.manga.save();
+        }
+        if (staleIds.isNotEmpty) await isar.chapters.deleteAll(staleIds);
 
-      final history = await isar.historys
-          .filter()
-          .mangaIdEqualTo(mangaId)
-          .findFirst();
-      final historyShortcut = _shortcutAtProgress(
-        shortcuts,
-        linearChapters,
-        progress.chapterIndex,
-        progress.progress,
-      );
-      if (history != null && history.chapterId != historyShortcut.id) {
-        history
-          ..chapterId = historyShortcut.id
-          ..chapter.value = historyShortcut
-          ..updatedAt = now;
-        await isar.historys.put(history);
-        await history.chapter.save();
-      }
-    });
+        final history = await isar.historys
+            .filter()
+            .mangaIdEqualTo(mangaId)
+            .findFirst();
+        final historyShortcut = _shortcutAtProgress(
+          shortcuts,
+          linearChapters,
+          progress.chapterIndex,
+          progress.progress,
+        );
+        if (history != null && history.chapterId != historyShortcut.id) {
+          history
+            ..chapterId = historyShortcut.id
+            ..chapter.value = historyShortcut
+            ..updatedAt = now;
+          await isar.historys.put(history);
+          await history.chapter.save();
+        }
+      }),
+    );
   }
 }
 

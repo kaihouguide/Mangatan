@@ -2,12 +2,11 @@ import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/history.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/models/settings.dart';
-import 'package:mangayomi/repositories/history_repository.dart';
-import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:mangayomi/utils/extensions/manga_extensions.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/main.dart';
+import 'package:mangayomi/repositories/chapter_repository.dart';
 
 /// Shared navigation and history logic used by [ReaderController],
 /// [NovelReaderController], and [AnimeStreamController].
@@ -109,8 +108,9 @@ mixin ChapterControllerMixin {
 
     // Async Isar transactions queue behind an authoritative sync restore.
     // A synchronous transaction here throws when the reader opens while sync
-    // already owns the isolate's write transaction.
-    await isar.writeTxn(() async {
+    // already owns the isolate's write transaction. Running it through the
+    // write queue also orders it after the reader's final progress write.
+    await chapterRepository.writeTransactionAsync(() async {
       final now = DateTime.now().millisecondsSinceEpoch;
       final manga = await isar.mangas.get(mangaId);
       final persistedChapter = await isar.chapters.get(chapterId);

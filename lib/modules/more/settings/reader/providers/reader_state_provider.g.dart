@@ -42,7 +42,7 @@ final class AutomaticBackgroundStateProvider
 }
 
 String _$automaticBackgroundStateHash() =>
-    r'adeef482a7630c03d0eee4eef7bf33aeff71d053';
+    r'8ce9bbadf216077306b444f18503cf57cdc02859';
 
 abstract class _$AutomaticBackgroundState extends $Notifier<bool> {
   bool build();
@@ -95,7 +95,7 @@ final class DefaultReadingModeStateProvider
 }
 
 String _$defaultReadingModeStateHash() =>
-    r'fa4a07dd8132c847fbe93e72f21f37c338fe6923';
+    r'59d184f3676f1b4c4135350b11bbd9a943a77e7a';
 
 abstract class _$DefaultReadingModeState extends $Notifier<ReaderMode> {
   ReaderMode build();
@@ -149,7 +149,7 @@ final class DefaultReadingDirectionStateProvider
 }
 
 String _$defaultReadingDirectionStateHash() =>
-    r'f80a55640b6cd19987a7247d193be621e61ef6ec';
+    r'5f12bb3791b97811ccdb1e15260edb915233811c';
 
 abstract class _$DefaultReadingDirectionState
     extends $Notifier<ReadingDirection> {
@@ -203,7 +203,7 @@ final class DefaultPageModeStateProvider
 }
 
 String _$defaultPageModeStateHash() =>
-    r'7bea65041fbfc552a2b25a14ce77764d950cae70';
+    r'f85899694b0b3a9c4ee95bc627fdbfffc63e51b8';
 
 abstract class _$DefaultPageModeState extends $Notifier<PageMode> {
   PageMode build();
@@ -1051,7 +1051,7 @@ final class NovelReaderPaddingStateProvider
 }
 
 String _$novelReaderPaddingStateHash() =>
-    r'0f353ceeceddf7d1b63d08fceb5533f8832c7ae0';
+    r'4db2a62147ea6a37027b09d9d19e47dcac3ce11d';
 
 abstract class _$NovelReaderPaddingState extends $Notifier<int> {
   int build();
@@ -1267,7 +1267,7 @@ final class NovelReaderParagraphSpacingStateProvider
 }
 
 String _$novelReaderParagraphSpacingStateHash() =>
-    r'5d07da6c2b2932729cadbf87f7fbf311af50b440';
+    r'3d74b3a38f4b835d55748fc9b5cb15010d1a61b9';
 
 abstract class _$NovelReaderParagraphSpacingState extends $Notifier<double> {
   double build();
@@ -1376,7 +1376,7 @@ final class NovelShowReturnToSavedPositionButtonStateProvider
 }
 
 String _$novelShowReturnToSavedPositionButtonStateHash() =>
-    r'17c1f522066204e75bdf0a1233ad74763c729fd6';
+    r'6957406fc355c4685555292a5d0d277e8a66f8c8';
 
 abstract class _$NovelShowReturnToSavedPositionButtonState
     extends $Notifier<bool> {
@@ -1431,7 +1431,7 @@ final class NovelEpubReadingLayoutStateProvider
 }
 
 String _$novelEpubReadingLayoutStateHash() =>
-    r'4142fa5a0cd435e944072a5878f0496d0105b8f9';
+    r'f86294c7cb2b155f9da47a78b8ad98f66dc8eab0';
 
 abstract class _$NovelEpubReadingLayoutState extends $Notifier<int> {
   int build();

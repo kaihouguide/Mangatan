@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
@@ -70,14 +71,18 @@ Future<void> onTapEntry({
 
   if (isMissingCloudNovelEntry(entry)) {
     botToast(chimahonMissingEpubGuidance, second: 4);
-    await ref.read(
-      importArchivesFromFileProvider(
-        itemType: ItemType.novel,
-        entry,
-        init: false,
-        splitChapters: false,
-      ).future,
-    );
+    try {
+      await ref.read(
+        importArchivesFromFileProvider(
+          itemType: ItemType.novel,
+          entry,
+          init: false,
+          splitChapters: false,
+        ).future,
+      );
+    } catch (error) {
+      botToast('Import failed: $error');
+    }
     if (context.mounted) {
       ref.invalidate(
         getAllMangaWithoutCategoriesStreamProvider(itemType: ItemType.novel),
@@ -176,9 +181,9 @@ class DownloadCountBadge extends ConsumerWidget {
     final downloadedIds =
         ref.watch(downloadedChapterIdsProvider).asData?.value ?? const <int>{};
 
-    final count = userFacingChapters(
-      entry,
-    ).where((c) => c.id != null && downloadedIds.contains(c.id)).length;
+    final count = userFacingChapters(entry)
+        .where((c) => c.id != null && downloadedIds.contains(c.id))
+        .length;
 
     if (count == 0) return const SizedBox.shrink();
 

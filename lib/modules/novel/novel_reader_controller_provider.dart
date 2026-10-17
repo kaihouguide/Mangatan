@@ -7,8 +7,8 @@ import 'package:mangayomi/modules/manga/reader/mixins/chapter_reader_settings_mi
 import 'package:mangayomi/modules/manga/reader/mixins/chapter_controller_mixin.dart';
 import 'package:mangayomi/services/epub_chapter_metadata.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
+import 'package:mangayomi/repositories/chapter_repository.dart';
 part 'novel_reader_controller_provider.g.dart';
 
 @riverpod
@@ -63,13 +63,16 @@ class NovelReaderController extends _$NovelReaderController
   // Scroll-position tracking
   // ---------------------------------------------------------------------------
 
-  void setChapterOffset(
+  // Progress writes run as queued async transactions: reading can overlap a
+  // sync import, and Isar rejects a synchronous transaction while an async one
+  // is open. The queue keeps them from overlapping other queued writes.
+  Future<void> setChapterOffset(
     double newOffset,
     double maxOffset, {
     int? epubChapterIndex,
     double? epubChapterProgress,
     int? epubCharacterCount,
-  }) {
+  }) async {
     if (incognitoMode) return;
     final progress = maxOffset != 0 ? newOffset / maxOffset : 0.0;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -92,17 +95,19 @@ class NovelReaderController extends _$NovelReaderController
         ..progress = nextProgress
         ..characterCount = nextCharacterCount
         ..lastModified = now;
-      isar.writeTxnSync(() => isar.epubBookProgress.putSync(bookmark));
+      await chapterRepository.writeTransactionAsync(
+        () => isar.epubBookProgress.put(bookmark),
+      );
       return;
     }
 
-    isar.writeTxnSync(() {
+    await chapterRepository.writeTransactionAsync(() async {
       if (ch.isRead ?? false) return;
       ch
         ..isRead = progress >= 0.9
         ..lastPageRead = progress.clamp(0.0, 1.0).toString()
         ..updatedAt = now;
-      isar.chapters.putSync(ch);
+      await isar.chapters.put(ch);
     });
   }
 
@@ -119,10 +124,10 @@ class NovelReaderController extends _$NovelReaderController
         .findFirstSync();
   }
 
-  void updateEpubShortcutPosition({
+  Future<void> updateEpubShortcutPosition({
     required int spineIndex,
     required double overallProgress,
-  }) {
+  }) async {
     if (incognitoMode) return;
     final mangaId = chapter.mangaId;
     final archivePath = chapter.archivePath;
@@ -147,6 +152,8 @@ class NovelReaderController extends _$NovelReaderController
     for (final shortcut in changed) {
       shortcut.updatedAt = now;
     }
-    isar.writeTxnSync(() => isar.chapters.putAllSync(changed));
+    await chapterRepository.writeTransactionAsync(
+      () => isar.chapters.putAll(changed),
+    );
   }
 }

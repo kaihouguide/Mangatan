@@ -30,32 +30,6 @@ int actualIndexToDoublePageView(int actualIndex, PageMode pageMode) {
   return ((actualIndex - 1) ~/ 2) + 1;
 }
 
-List<T?> doublePageSpreadItems<T>(
-  List<T> pages,
-  int viewIndex,
-  PageMode pageMode,
-) {
-  if (pages.isEmpty) return const [];
-  if (!pageMode.isDoublePage) {
-    final index = viewIndex.clamp(0, pages.length - 1).toInt();
-    return [pages[index]];
-  }
-  if (pageMode.usesCoverOffset && viewIndex <= 0) {
-    return [pages.first, null];
-  }
-
-  final firstIndex = doublePageViewToActualIndex(
-    viewIndex,
-    pages.length,
-    pageMode,
-  );
-  final secondIndex = firstIndex + 1;
-  return [
-    pages[firstIndex],
-    secondIndex < pages.length ? pages[secondIndex] : null,
-  ];
-}
-
 List<List<int?>> transitionAwareDoublePageSpreadIndices(
   int pageCount,
   PageMode pageMode, {

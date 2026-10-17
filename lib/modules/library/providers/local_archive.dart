@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:isar_community/isar.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
@@ -6,14 +7,13 @@ import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/epub_book_progress.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/modules/manga/archive_reader/models/models.dart';
-import 'package:mangayomi/repositories/chapter_repository.dart';
-import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/modules/manga/archive_reader/providers/archive_reader_providers.dart';
 import 'package:mangayomi/services/epub_chapter_metadata.dart';
 import 'package:mangayomi/services/sync/chimahon_novel_materializer.dart';
 import 'package:mangayomi/src/rust/api/epub.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:mangayomi/main.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 part 'local_archive.g.dart';
 
 @riverpod
@@ -37,12 +37,21 @@ Future importArchivesFromFile(
               .mangaIdEqualTo(currentParentId)
               .findAllSync()
         : const <EpubBookProgress>[];
-    final result = await FilePicker.pickFiles(
-      allowMultiple: allowMultipleArchiveImport(currentParent, progress),
-      type: FileType.custom,
-      allowedExtensions: supportedLocalArchiveExtensions(itemType),
-    );
-    if (result == null) return;
+    final extensions = supportedLocalArchiveExtensions(itemType);
+    final result = allowMultipleArchiveImport(currentParent, progress)
+        ? await FilePicker.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: extensions,
+            linuxOptions: const LinuxOptions(lockParentWindow: true),
+          )
+        : [
+            ?await FilePicker.pickFile(
+              type: FileType.custom,
+              allowedExtensions: extensions,
+              linuxOptions: const LinuxOptions(lockParentWindow: true),
+            ),
+          ];
+    if (result.isEmpty) return;
 
     final filePaths = result
         .map((file) => file.path)
@@ -158,138 +167,156 @@ Future<void> _importArchivesFromPaths(
         isar.epubBookProgress.where().findAllSync(),
       );
 
+  // One unreadable archive must not silently skip the rest of a multi-file
+  // import; finish the others and report every failure together.
+  final failures = <(String, Object, StackTrace)>[];
   for (final filePath in filePaths.reversed) {
-    final (String, LocalExtensionType, Uint8List, String)? data =
-        itemType == ItemType.manga
-        ? await ref.watch(getArchivesDataFromFileProvider(filePath).future)
-        : null;
-    final name = localArchiveName(filePath);
-    final book = itemType == ItemType.novel
-        ? await parseEpubFromPath(
-            epubPath: filePath,
-            fullData: persistEpubChapters,
-          )
-        : null;
-    final progressBeforeImport = itemType == ItemType.novel
-        ? isar.epubBookProgress.where().findAllSync()
-        : const <EpubBookProgress>[];
-    final mangasBeforeImport = itemType == ItemType.novel
-        ? isar.mangas.where().findAllSync()
-        : const <Manga>[];
-    final requestedParent = itemType == ItemType.novel
-        ? currentRequestedParent()
-        : initialRequestedParent;
-    final matchingSuppliedProgress = suppliedParentWasMissing
-        ? materializer.matchingCloudProgress(
-            progresses: progressBeforeImport,
-            title: book!.name,
-            author: book.author,
-            preferredMangaId: requestedParent?.id,
-            allowUnidentifiablePreferredParent: true,
-          )
-        : null;
-    final matchingCloudParent = itemType == ItemType.novel
-        ? materializer.matchingCloudParent(
-            mangas: mangasBeforeImport,
-            progresses: progressBeforeImport,
-            title: book!.name,
-            author: book.author,
-          )
-        : null;
-    final existingNovelParent = itemType == ItemType.novel
-        ? resolveExistingNovelImportParent(
-            requestedParent: requestedParent,
-            matchingCloudParent: matchingCloudParent,
-            matchingRequestedProgress: matchingSuppliedProgress,
-            requestedParentWasMissing: suppliedParentWasMissing,
-          )
-        : null;
-    final Manga manga;
-    if (itemType != ItemType.novel) {
-      manga = sharedParent!;
-    } else if (existingNovelParent != null) {
-      manga = existingNovelParent;
-    } else {
-      // A mismatched EPUB must not consume the selected ghost's bookmark.
-      // Generic Chimahon import semantics create a separate normal book.
-      manga = novelSharedParent ??= _newLocalArchiveParent(
-        itemType: itemType,
-        name: book!.name.trim().isEmpty ? name : book.name,
-        dateNow: dateNow,
-      );
-      if (suppliedParentWasMissing) {
-        botToast(
-          'This EPUB does not match the selected cloud novel; imported separately.',
-          second: 4,
+    try {
+      final (String, LocalExtensionType, Uint8List, String)? data =
+          itemType == ItemType.manga
+          ? await ref.watch(getArchivesDataFromFileProvider(filePath).future)
+          : null;
+      final name = localArchiveName(filePath);
+      final book = itemType == ItemType.novel
+          ? await parseEpubFromPath(
+              epubPath: filePath,
+              fullData: persistEpubChapters,
+            )
+          : null;
+      final progressBeforeImport = itemType == ItemType.novel
+          ? isar.epubBookProgress.where().findAllSync()
+          : const <EpubBookProgress>[];
+      final mangasBeforeImport = itemType == ItemType.novel
+          ? isar.mangas.where().findAllSync()
+          : const <Manga>[];
+      final requestedParent = itemType == ItemType.novel
+          ? currentRequestedParent()
+          : initialRequestedParent;
+      final matchingSuppliedProgress = suppliedParentWasMissing
+          ? materializer.matchingCloudProgress(
+              progresses: progressBeforeImport,
+              title: book!.name,
+              author: book.author,
+              preferredMangaId: requestedParent?.id,
+              allowUnidentifiablePreferredParent: true,
+            )
+          : null;
+      final matchingCloudParent = itemType == ItemType.novel
+          ? materializer.matchingCloudParent(
+              mangas: mangasBeforeImport,
+              progresses: progressBeforeImport,
+              title: book!.name,
+              author: book.author,
+            )
+          : null;
+      final existingNovelParent = itemType == ItemType.novel
+          ? resolveExistingNovelImportParent(
+              requestedParent: requestedParent,
+              matchingCloudParent: matchingCloudParent,
+              matchingRequestedProgress: matchingSuppliedProgress,
+              requestedParentWasMissing: suppliedParentWasMissing,
+            )
+          : null;
+      final Manga manga;
+      if (itemType != ItemType.novel) {
+        manga = sharedParent!;
+      } else if (existingNovelParent != null) {
+        manga = existingNovelParent;
+      } else {
+        // A mismatched EPUB must not consume the selected ghost's bookmark.
+        // Generic Chimahon import semantics create a separate normal book.
+        manga = novelSharedParent ??= _newLocalArchiveParent(
+          itemType: itemType,
+          name: book!.name.trim().isEmpty ? name : book.name,
+          dateNow: dateNow,
         );
-      }
-    }
-    final wasMissingEpub = materializer.isMissingEpubParent(
-      manga,
-      progressBeforeImport,
-    );
-    if (manga.isLocalArchive != true) manga.hasLocalChapterOverlay = true;
-
-    if (init && itemType == ItemType.manga) {
-      manga.customCoverImage = data!.$3.getCoverImage;
-    }
-    await isar.writeTxn(() async {
-      final mangaId = await isar.mangas.put(manga);
-      final List<Chapter> chapters = [];
-      if (itemType == ItemType.novel) {
-        if (book!.cover != null) {
-          await isar.mangas.put(
-            manga..customCoverImage = book.cover!.getCoverImage,
+        if (suppliedParentWasMissing) {
+          botToast(
+            'This EPUB does not match the selected cloud novel; imported separately.',
+            second: 4,
           );
         }
-        chapters.addAll(
-          epubShortcutChapters(
-            book: book,
-            manga: manga,
-            mangaId: mangaId,
-            archivePath: filePath,
-          ),
-        );
-        final progress = materializer.progressForImportedEpub(
-          progresses: progressBeforeImport,
-          mangaId: mangaId,
-          archivePath: filePath,
-          title: book.name,
-          author: book.author,
-          lang: book.language,
-          allowUnidentifiablePreferredParent:
-              wasMissingEpub && manga.id == requestedParent?.id,
-        );
-        await isar.epubBookProgress.put(progress);
-        if (wasMissingEpub && progress.id != Isar.autoIncrement) {
-          manga
-            ..source = 'archive'
-            ..link = filePath
-            ..description = manga.description == chimahonMissingEpubGuidance
-                ? ''
-                : manga.description
-            ..name = book.name.trim().isEmpty ? manga.name : book.name
-            ..sourceTitle = book.name
-            ..author = book.author
-            ..lang = book.language ?? manga.lang;
-          await isar.mangas.put(manga);
-        }
-      } else {
-        chapters.add(
-          Chapter(
-            name: itemType == ItemType.manga ? data!.$1 : name,
-            archivePath: itemType == ItemType.manga ? data!.$4 : filePath,
-            mangaId: manga.id,
-            updatedAt: DateTime.now().millisecondsSinceEpoch,
-          )..manga.value = manga,
-        );
       }
-      for (final chapter in chapters) {
-        await isar.chapters.put(chapter);
-        await chapter.manga.save();
+      final wasMissingEpub = materializer.isMissingEpubParent(
+        manga,
+        progressBeforeImport,
+      );
+      if (manga.isLocalArchive != true) manga.hasLocalChapterOverlay = true;
+
+      if (init && itemType == ItemType.manga) {
+        manga.customCoverImage = data!.$3.getCoverImage;
       }
-    });
+      await dbWriteQueue.run(
+        () => isar.writeTxn(() async {
+          final mangaId = await isar.mangas.put(manga);
+          final List<Chapter> chapters = [];
+          if (itemType == ItemType.novel) {
+            if (book!.cover != null) {
+              await isar.mangas.put(
+                manga..customCoverImage = book.cover!.getCoverImage,
+              );
+            }
+            chapters.addAll(
+              epubShortcutChapters(
+                book: book,
+                manga: manga,
+                mangaId: mangaId,
+                archivePath: filePath,
+              ),
+            );
+            final progress = materializer.progressForImportedEpub(
+              progresses: progressBeforeImport,
+              mangaId: mangaId,
+              archivePath: filePath,
+              title: book.name,
+              author: book.author,
+              lang: book.language,
+              allowUnidentifiablePreferredParent:
+                  wasMissingEpub && manga.id == requestedParent?.id,
+            );
+            await isar.epubBookProgress.put(progress);
+            if (wasMissingEpub && progress.id != Isar.autoIncrement) {
+              manga
+                ..source = 'archive'
+                ..link = filePath
+                ..description = manga.description == chimahonMissingEpubGuidance
+                    ? ''
+                    : manga.description
+                ..name = book.name.trim().isEmpty ? manga.name : book.name
+                ..sourceTitle = book.name
+                ..author = book.author
+                ..lang = book.language ?? manga.lang;
+              await isar.mangas.put(manga);
+            }
+          } else {
+            chapters.add(
+              Chapter(
+                name: itemType == ItemType.manga ? data!.$1 : name,
+                archivePath: itemType == ItemType.manga ? data!.$4 : filePath,
+                mangaId: manga.id,
+                updatedAt: DateTime.now().millisecondsSinceEpoch,
+              )..manga.value = manga,
+            );
+          }
+          for (final chapter in chapters) {
+            await isar.chapters.put(chapter);
+            await chapter.manga.save();
+          }
+        }),
+      );
+    } catch (error, stackTrace) {
+      failures.add((filePath, error, stackTrace));
+    }
   }
+  if (failures.isEmpty) return;
+  if (failures.length == 1 && filePaths.length == 1) {
+    final (_, error, stackTrace) = failures.single;
+    Error.throwWithStackTrace(error, stackTrace);
+  }
+  throw StateError(
+    'Could not import ${failures.length} of ${filePaths.length} files: '
+    '${failures.map((failure) => '${localArchiveName(failure.$1)} (${failure.$2})').join('; ')}',
+  );
 }
 
 Manga _newLocalArchiveParent({

@@ -21,8 +21,18 @@ class ReaderEInkState {
   }
 
   static Future<void> _load() async {
-    enabled.value = await MiningPreferences.getReaderEInkMode();
+    final stored = await MiningPreferences.getReaderEInkMode();
+    // A toggle made while the stored value was loading is newer; keep it.
+    if (_initialized) return;
+    enabled.value = stored;
     _initialized = true;
+  }
+
+  @visibleForTesting
+  static void resetForTesting() {
+    enabled.value = false;
+    _initialized = false;
+    _initializing = null;
   }
 
   static Future<void> setEnabled(bool value) async {

@@ -1,7 +1,6 @@
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:mangayomi/main.dart';
 import 'package:mangayomi/eval/mihon/image_proxy.dart';
 import 'package:mangayomi/models/settings.dart';
 import 'package:mangayomi/modules/manga/reader/image_view_paged.dart';
@@ -19,9 +18,6 @@ import 'package:mangayomi/utils/extensions/others.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'dart:async';
-import 'package:mangayomi/modules/manga/reader/image_view_vertical.dart';
-import 'package:mangayomi/modules/manga/reader/subsampling_scale_image_view/subsampling_scale_image_view.dart'
-    hide LoadState;
 import 'package:mangayomi/repositories/settings_repository.dart';
 
 /// Unified double page view for both paged and continuous reading modes.

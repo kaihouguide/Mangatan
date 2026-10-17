@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:mangayomi/models/chapter.dart';
-import 'package:mangayomi/models/download.dart';
 import 'package:mangayomi/models/settings.dart';
 import 'package:mangayomi/providers/storage_provider.dart';
 import 'package:mangayomi/repositories/download_repository.dart';
@@ -9,7 +8,6 @@ import 'package:mangayomi/utils/extensions/string_extensions.dart';
 import 'package:mangayomi/utils/downloaded_page_file.dart';
 import 'package:path/path.dart' as p;
 import 'package:mangayomi/main.dart';
-import 'package:mangayomi/modules/library/providers/file_scanner.dart';
 
 /// Where a downloaded chapter's pages actually sit on disk.
 ///
@@ -110,7 +108,9 @@ DownloadedChapter? findDownloadedChapterIn(
       p.join(mangaDirectory.path, chapterDirectoryName),
     );
     final pageCount = countDownloadedPages(pagesDirectory);
-    if (pageCount > 0) {
+    // A page after the first gap means one went missing. Reading the folder
+    // would silently truncate the chapter, so let the source serve it instead.
+    if (pageCount > 0 && !_hasPageAfter(pagesDirectory, pageCount)) {
       return DownloadedChapter.fromPages(pagesDirectory, pageCount: pageCount);
     }
   }
@@ -133,6 +133,20 @@ File? findChapterArchive(Directory mangaDirectory, String chapterName) {
     if (file.existsSync()) return file;
   }
   return null;
+}
+
+/// Whether [directory] holds a downloaded page numbered after [pageCount].
+bool _hasPageAfter(Directory directory, int pageCount) {
+  for (final entity in directory.listSync()) {
+    if (entity is! File) continue;
+    final name = p.basename(entity.path);
+    if (!knownPageImageExtensions.contains(p.extension(name).toLowerCase())) {
+      continue;
+    }
+    final number = int.tryParse(p.basenameWithoutExtension(name));
+    if (number != null && number > pageCount) return true;
+  }
+  return false;
 }
 
 /// How many pages of [directory] the reader can actually address.

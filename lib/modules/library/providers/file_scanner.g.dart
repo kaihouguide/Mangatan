@@ -41,7 +41,7 @@ final class LocalFoldersStateProvider
   }
 }
 
-String _$localFoldersStateHash() => r'7cf7902ad34ee5ae018b2c9ac3849e822bc5f0b7';
+String _$localFoldersStateHash() => r'e3a995f05c3d074156046cd8218685df813d13e6';
 
 abstract class _$LocalFoldersState extends $Notifier<List<String>> {
   List<String> build();

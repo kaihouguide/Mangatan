@@ -35,8 +35,6 @@ import 'package:marquee/marquee.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:mangayomi/modules/widgets/tv_menu.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
 
 class MangaHomeScreen extends ConsumerStatefulWidget {
   final Source source;

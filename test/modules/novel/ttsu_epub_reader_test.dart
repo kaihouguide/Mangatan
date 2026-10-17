@@ -21,8 +21,7 @@ void main() {
 
   test('builds a selectable, self-contained DOM reader', () {
     final document = buildTtsuEpubDocument(
-      html:
-          '<p>探偵はもう、死んでいる。</p><img src="../images/cover.png"><script>bad()</script>',
+      html: '<p>探偵はもう、死んでいる。</p><img src="../images/cover.png"><script>bad()</script>',
       book: book,
       title: '探偵',
       backgroundColor: '#101010',
@@ -63,6 +62,32 @@ void main() {
     expect(document, contains('break-after: column'));
     expect(document, contains('min-height: 100vh'));
     expect(document, contains('metrics,'));
+  });
+
+  test('drops script URLs from every attribute', () {
+    final document = buildTtsuEpubDocument(
+      html:
+          '<a href=" JaVa\tscript:bad1()">a</a>'
+          '<svg><a xlink:href="javascript:bad2()"><text>b</text></a></svg>'
+          '<form action="javascript:bad3()"><button formaction="vbscript:bad4">c</button></form>'
+          '<a href="data:text/html,bad5">d</a>'
+          '<a href="chapter2.xhtml#note">kept</a>',
+      book: book,
+      title: 'fixture',
+      backgroundColor: '#101010',
+      textColor: '#f0f0f0',
+      fontSize: 18,
+      lineHeight: 1.8,
+      padding: 24,
+      textAlign: 'left',
+      initialProgress: 0,
+      tapToScroll: false,
+    );
+
+    for (final payload in ['bad1', 'bad2', 'bad3', 'bad4', 'bad5']) {
+      expect(document, isNot(contains(payload)));
+    }
+    expect(document, contains('chapter2.xhtml#note'));
   });
 
   test('applies configurable logical paragraph spacing', () {
@@ -164,8 +189,7 @@ void main() {
 
   test('rewrites SVG xlink image references used by fixed-layout EPUBs', () {
     final document = buildTtsuEpubDocument(
-      html:
-          '<svg xmlns="http://www.w3.org/2000/svg"><image xlink:href="../images/cover.png"/></svg>',
+      html: '<svg xmlns="http://www.w3.org/2000/svg"><image xlink:href="../images/cover.png"/></svg>',
       book: book,
       title: 'fixture',
       backgroundColor: '#101010',

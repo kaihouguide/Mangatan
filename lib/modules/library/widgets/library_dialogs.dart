@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
@@ -20,9 +21,9 @@ import 'package:mangayomi/providers/storage_provider.dart';
 import 'package:mangayomi/repositories/download_repository.dart';
 import 'package:mangayomi/repositories/manga_repository.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
+import 'package:mangayomi/utils/error_toast.dart';
 import 'package:mangayomi/utils/extensions/chapter_extensions.dart';
 import 'package:path/path.dart' as p;
-import 'package:mangayomi/modules/library/providers/file_scanner.dart';
 import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.dart';
 
 /// Shows a dialog for deleting selected manga from library and/or device.
@@ -83,7 +84,7 @@ void showDeleteMangaDialog({
                         onPressed: () async {
                           // From Library
                           if (deleteFromLib) {
-                            isar.writeTxnSync(() {
+                            await mangaRepository.writeTransaction(() {
                               for (var manga in mangasList) {
                                 if (manga.isLocalArchive ?? false) {
                                   // Local archives have no remote source, so removing from the
@@ -274,16 +275,24 @@ void showImportLocalDialog(BuildContext context, ItemType itemType) {
                                       ),
                                       onPressed: () async {
                                         setState(() => isLoading = true);
-                                        await ref.watch(
-                                          importArchivesFromFileProvider(
-                                            itemType: itemType,
-                                            null,
-                                            init: true,
-                                            splitChapters: false,
-                                          ).future,
-                                        );
-                                        setState(() => isLoading = false);
+                                        try {
+                                          await ref.read(
+                                            importArchivesFromFileProvider(
+                                              itemType: itemType,
+                                              null,
+                                              init: true,
+                                              splitChapters: false,
+                                            ).future,
+                                          );
+                                        } catch (error, stack) {
+                                          toastError(
+                                            error,
+                                            stack: stack,
+                                            source: 'local-import',
+                                          );
+                                        }
                                         if (!context.mounted) return;
+                                        setState(() => isLoading = false);
                                         Navigator.pop(context);
                                       },
                                       child: Column(
@@ -294,9 +303,10 @@ void showImportLocalDialog(BuildContext context, ItemType itemType) {
                                           Text(
                                             "${l10n.import_files} ( $filesText )",
                                             style: TextStyle(
-                                              color: Theme.of(
-                                                context,
-                                              ).textTheme.bodySmall!.color,
+                                              color: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall!
+                                                  .color,
                                               fontSize: 10,
                                             ),
                                           ),
@@ -319,9 +329,8 @@ void showImportLocalDialog(BuildContext context, ItemType itemType) {
                             child: Container(
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(20),
-                                color: Theme.of(
-                                  context,
-                                ).scaffoldBackgroundColor,
+                                color: Theme.of(context)
+                                    .scaffoldBackgroundColor,
                               ),
                               height: 50,
                               width: 50,

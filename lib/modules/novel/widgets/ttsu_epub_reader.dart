@@ -799,8 +799,7 @@ class _TtsuEpubReaderState extends State<TtsuEpubReader> {
         return;
       }
       final hasRenderableContent = await controller.evaluateJavascript(
-        source:
-            'Boolean(document.body?.innerText?.trim()?.length || document.images?.length);',
+        source: 'Boolean(document.body?.innerText?.trim()?.length || document.images?.length);',
       );
       if (_javascriptBool(hasRenderableContent)) {
         if (!_initialLocationPending && !_isReady && mounted) {
@@ -1057,9 +1056,8 @@ class _EpubRenderBundle {
     required String? chapterHref,
   }) async {
     final temporary = await getTemporaryDirectory();
-    final base = await Directory(
-      p.join(temporary.path, 'mangatan-epub-reader'),
-    ).create(recursive: true);
+    final base = await Directory(p.join(temporary.path, 'mangatan-epub-reader'))
+        .create(recursive: true);
     final root = await base.createTemp('book-');
     final resources = <EpubResource>[...book.images, ...book.stylesheets];
     final urls = <String, String>{};
@@ -2622,9 +2620,8 @@ bool _hasSmallAuthoredDimension(dom.Element element) =>
     const ['width', 'height'].any((name) {
       final value = element.attributes[name];
       if (value == null) return false;
-      final match = RegExp(
-        r'^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$',
-      ).firstMatch(value);
+      final match = RegExp(r'^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$')
+          .firstMatch(value);
       final dimension = double.tryParse(match?.group(1) ?? '');
       return dimension != null && dimension < 300;
     });
@@ -2706,25 +2703,37 @@ void _sanitizeEpubDocument(dom.Document document) {
       )
       .forEach((element) => element.remove());
   for (final element in document.querySelectorAll('*')) {
-    final attributes = element.attributes.keys
-        .map((attribute) => attribute.toString())
-        .toList();
-    for (final name in attributes) {
-      final lower = name.toLowerCase();
-      if (lower.startsWith('on') || lower == 'srcdoc') {
-        element.attributes.remove(name);
+    // Foreign-content attributes such as SVG's `xlink:href` are keyed by
+    // [dom.AttributeName], so look them up by the original key.
+    for (final key in element.attributes.keys.toList()) {
+      final lower = (key is dom.AttributeName ? key.name : key.toString())
+          .toLowerCase();
+      final value = element.attributes[key] ?? '';
+      if (lower.startsWith('on') || lower == 'srcdoc' || _isScriptUrl(value)) {
+        element.attributes.remove(key);
+        continue;
       }
       if (lower == 'style') {
-        final value = element.attributes[name] ?? '';
         final sanitized = _sanitizeEpubStylesheet(value);
         if (sanitized.trim().isEmpty) {
-          element.attributes.remove(name);
+          element.attributes.remove(key);
         } else {
-          element.attributes[name] = sanitized;
+          element.attributes[key] = sanitized;
         }
       }
     }
   }
+}
+
+/// Matches URLs that run script when followed. The reader's click handler
+/// does not catch every navigation (an active selection, SVG `xlink:href`,
+/// form actions), so these never reach the page. Browsers ignore ASCII
+/// whitespace and control characters inside a scheme, hence the stripping.
+bool _isScriptUrl(String value) {
+  final scheme = value.replaceAll(RegExp(r'[\x00-\x20]'), '').toLowerCase();
+  return scheme.startsWith('javascript:') ||
+      scheme.startsWith('vbscript:') ||
+      scheme.startsWith('data:text/html');
 }
 
 /// Publisher CSS is valuable for typography and images, but real EPUBs also
@@ -2881,9 +2890,8 @@ String _resourceKey(EpubResource resource) =>
     _normalizeEpubPath(resource.name).toLowerCase();
 
 String _documentHrefFromDocument(String document) {
-  final match = RegExp(
-    r'data-mangatan-reader-href="([^"]+)"',
-  ).firstMatch(document);
+  final match = RegExp(r'data-mangatan-reader-href="([^"]+)"')
+      .firstMatch(document);
   return match?.group(1) ?? '';
 }
 
