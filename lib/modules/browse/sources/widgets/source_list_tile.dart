@@ -12,9 +12,6 @@ import 'package:mangayomi/services/mining/dictionary_profile_resolver.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/item_type_localization.dart';
 import 'package:mangayomi/utils/language.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
-import 'package:mangayomi/utils/cached_network.dart';
 
 class SourceListTile extends StatelessWidget {
   final ItemType itemType;
@@ -36,21 +33,7 @@ class SourceListTile extends StatelessWidget {
       builder: (context, ref, child) => ListTile(
         onTap: () {
           if (!isLocal) {
-            final sources = isar.sources
-                .filter()
-                .idIsNotNull()
-                .and()
-                .itemTypeEqualTo(itemType)
-                .findAllSync();
-            isar.writeTxnSync(() {
-              for (var src in sources) {
-                isar.sources.putSync(
-                  src
-                    ..lastUsed = src.id == source.id ? true : false
-                    ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-                );
-              }
-            });
+            sourceRepository.markLastUsed(itemType, source.id);
           }
           context.push('/mangaHome', extra: (source, false));
         },
@@ -58,9 +41,8 @@ class SourceListTile extends StatelessWidget {
           height: 37,
           width: 37,
           decoration: BoxDecoration(
-            color: Theme.of(
-              context,
-            ).secondaryHeaderColor.withValues(alpha: 0.5),
+            color: Theme.of(context).secondaryHeaderColor
+                .withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(5),
           ),
           child: SourceExtensionIcon(source: source, size: 37),
@@ -145,13 +127,7 @@ class SourceListTile extends StatelessWidget {
               IconButton(
                 padding: const EdgeInsets.all(0),
                 onPressed: () {
-                  isar.writeTxnSync(
-                    () => isar.sources.putSync(
-                      source
-                        ..isPinned = !source.isPinned!
-                        ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-                    ),
-                  );
+                  sourceRepository.save(source..isPinned = !source.isPinned!);
                 },
                 icon: Icon(
                   Icons.push_pin_outlined,
@@ -187,21 +163,7 @@ class TvSourceRow extends StatelessWidget {
 
   void _openPopular(BuildContext context) {
     if (!isLocal) {
-      final sources = isar.sources
-          .filter()
-          .idIsNotNull()
-          .and()
-          .itemTypeEqualTo(itemType)
-          .findAllSync();
-      isar.writeTxnSync(() {
-        for (final src in sources) {
-          isar.sources.putSync(
-            src
-              ..lastUsed = src.id == source.id
-              ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-          );
-        }
-      });
+      sourceRepository.markLastUsed(itemType, source.id);
     }
     context.push('/mangaHome', extra: (source, false));
   }
@@ -226,9 +188,8 @@ class TvSourceRow extends StatelessWidget {
                       height: 37,
                       width: 37,
                       decoration: BoxDecoration(
-                        color: Theme.of(
-                          context,
-                        ).secondaryHeaderColor.withValues(alpha: 0.5),
+                        color: Theme.of(context).secondaryHeaderColor
+                            .withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: SourceExtensionIcon(source: source, size: 37),

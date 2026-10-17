@@ -15,8 +15,9 @@ import 'package:mangayomi/utils/cached_network.dart';
 import 'package:mangayomi/utils/error_toast.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:isar_community/isar.dart';
+import 'package:mangayomi/l10n/generated/app_localizations.dart';
 import 'package:mangayomi/main.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 class SourceRepositories extends ConsumerStatefulWidget {
   final ItemType itemType;
@@ -31,7 +32,6 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
     r'^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$',
   );
   List<Repo> _entries = [];
-  String urlInput = "";
   bool isRefreshing = false;
 
   Future<void> _launchInBrowser(Uri url) async {
@@ -300,7 +300,9 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
         .map((s) => s.id!)
         .toList();
     if (orphanIds.isNotEmpty) {
-      await isar.writeTxn(() => isar.sources.deleteAll(orphanIds));
+      await dbWriteQueue.run(
+        () => isar.writeTxn(() => isar.sources.deleteAll(orphanIds)),
+      );
     }
   }
 
@@ -355,6 +357,36 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
     );
   }
 
+  /// Why [input] cannot be added, or null when it can. Index files and base
+  /// URLs are both accepted: [getRepoInfos] probes the usual index names.
+  String? _repoUrlError(String input, AppLocalizations l10n) {
+    final text = input.trim();
+    if (text.isEmpty) return l10n.url_cannot_be_empty;
+    final uri = Uri.tryParse(text);
+    if (uri == null ||
+        !uri.isAbsolute ||
+        (uri.scheme != 'http' && uri.scheme != 'https')) {
+      return l10n.invalid_url_format;
+    }
+    final alreadyExists = _entries.any(
+      (repo) => _sameRepoUrl(repo.jsonUrl, text),
+    );
+    return alreadyExists ? l10n.repo_already_exists : null;
+  }
+
+  /// Repository URLs match ignoring case, surrounding spaces and one trailing
+  /// slash.
+  static bool _sameRepoUrl(String? a, String? b) {
+    String? normalize(String? url) {
+      final clean = url?.trim().toLowerCase();
+      if (clean == null || clean.isEmpty) return null;
+      return clean.endsWith('/') ? clean.substring(0, clean.length - 1) : clean;
+    }
+
+    final first = normalize(a);
+    return first != null && first == normalize(b);
+  }
+
   void _showAddRepoDialog(BuildContext context) {
     bool isLoading = false;
     final controller = TextEditingController();
@@ -365,8 +397,6 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
           child: StatefulBuilder(
             builder: (context, setState) {
               final l10n = context.l10n;
-              final supportedRepoUrlHint = l10n.url_must_end_with_dot_json
-                  .replaceFirst('.json', '.json or .pb');
               return AlertDialog(
                 title: Text(l10n.add_extensions_repo),
                 content: TextFormField(
@@ -379,37 +409,10 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
                   autofocus: !isTv,
                   keyboardType: TextInputType.url,
                   onChanged: (value) => setState(() {}),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return l10n.url_cannot_be_empty;
-                    }
-                    if (!value.endsWith('.json') && !value.endsWith('.pb')) {
-                      return supportedRepoUrlHint;
-                    }
-                    try {
-                      final uri = Uri.parse(value);
-                      if (!uri.isAbsolute) {
-                        return l10n.invalid_url_format;
-                      }
-                      final clean = value.trim().toLowerCase();
-                      final alreadyExists = _entries.any((r) {
-                        final rUrl = r.jsonUrl?.trim().toLowerCase();
-                        if (rUrl == null) return false;
-                        return rUrl == clean ||
-                            rUrl == '$clean/' ||
-                            '$rUrl/' == clean;
-                      });
-                      if (alreadyExists) {
-                        return l10n.repo_already_exists;
-                      }
-                      return null;
-                    } catch (e) {
-                      return l10n.invalid_url_format;
-                    }
-                  },
+                  validator: (value) => _repoUrlError(value ?? '', l10n),
                   autovalidateMode: AutovalidateMode.onUserInteraction,
                   decoration: InputDecoration(
-                    hintText: supportedRepoUrlHint,
+                    hintText: l10n.url_must_end_with_dot_json_or_dot_pb,
                     filled: false,
                     contentPadding: const EdgeInsets.all(12),
                     enabledBorder: OutlineInputBorder(
@@ -440,18 +443,7 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
                       StatefulBuilder(
                         builder: (context, setState) {
                           final text = controller.text.trim();
-                          final clean = text.toLowerCase();
-                          final alreadyExists = _entries.any((repo) {
-                            final repoUrl = repo.jsonUrl?.trim().toLowerCase();
-                            if (repoUrl == null) return false;
-                            return repoUrl == clean ||
-                                repoUrl == '$clean/' ||
-                                '$repoUrl/' == clean;
-                          });
-                          final isValid =
-                              text.isNotEmpty &&
-                              !alreadyExists &&
-                              Uri.tryParse(text)?.isAbsolute == true;
+                          final isValid = _repoUrlError(text, l10n) == null;
                           return TextButton(
                             onPressed: !isValid
                                 ? null
@@ -479,24 +471,17 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
                                         botToast(l10n.unsupported_repo);
                                         return;
                                       }
-                                      final repoUrl = repo.jsonUrl
-                                          ?.trim()
-                                          .toLowerCase();
-                                      final isDuplicate = currentRepos.any((r) {
-                                        final rUrl = r.jsonUrl
-                                            ?.trim()
-                                            .toLowerCase();
-                                        return (rUrl != null &&
-                                                (rUrl == repoUrl ||
-                                                    rUrl == clean ||
-                                                    rUrl == '$clean/' ||
-                                                    '$rUrl/' == clean ||
-                                                    (repoUrl != null &&
-                                                        (rUrl == '$repoUrl/' ||
-                                                            '$rUrl/' ==
-                                                                repoUrl)))) ||
-                                            r == repo;
-                                      });
+                                      // The typed URL may be a base URL
+                                      // that resolved to an index file.
+                                      final isDuplicate = currentRepos.any(
+                                        (r) =>
+                                            r == repo ||
+                                            _sameRepoUrl(r.jsonUrl, text) ||
+                                            _sameRepoUrl(
+                                              r.jsonUrl,
+                                              repo.jsonUrl,
+                                            ),
+                                      );
                                       if (isDuplicate) {
                                         if (context.mounted) {
                                           setState(() => isLoading = false);
@@ -531,17 +516,8 @@ class _SourceRepositoriesState extends ConsumerState<SourceRepositories> {
                                     width: 20,
                                     child: CircularProgressIndicator(),
                                   )
-                                : Text(
-                                    l10n.add,
-                                    style: TextStyle(
-                                      color:
-                                          controller.text.isEmpty ||
-                                              !controller.text.endsWith(".json")
-                                          ? Theme.of(context).primaryColor
-                                                .withValues(alpha: 0.2)
-                                          : null,
-                                    ),
-                                  ),
+                                // The disabled button already dims itself.
+                                : Text(l10n.add),
                           );
                         },
                       ),

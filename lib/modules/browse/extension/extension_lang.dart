@@ -8,8 +8,6 @@ import 'package:mangayomi/modules/browse/extension/widgets/extension_lang_list_t
 import 'package:mangayomi/utils/global_style.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
 
 class ExtensionsLang extends ConsumerWidget {
   final ItemType itemType;
@@ -67,18 +65,20 @@ class ExtensionsLang extends ConsumerWidget {
               return ExtensionLangListTileWidget(
                 lang: lang,
                 onChanged: (val) {
-                  isar.writeTxnSync(() {
-                    for (final source in entries) {
-                      if ((source.lang ?? '').toLowerCase() ==
-                          lang.toLowerCase()) {
-                        isar.sources.putSync(
-                          source
-                            ..isActive = val
-                            ..updatedAt = DateTime.now().millisecondsSinceEpoch,
-                        );
-                      }
-                    }
-                  });
+                  final now = DateTime.now().millisecondsSinceEpoch;
+                  final toUpdate = entries
+                      .where(
+                        (source) =>
+                            (source.lang ?? '').toLowerCase() ==
+                            lang.toLowerCase(),
+                      )
+                      .map(
+                        (source) => source
+                          ..isActive = val
+                          ..updatedAt = now,
+                      )
+                      .toList();
+                  sourceRepository.putAll(toUpdate);
                 },
                 value: entries.any(
                   (source) =>

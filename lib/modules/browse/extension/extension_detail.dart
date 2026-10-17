@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http_interceptor/http_interceptor.dart';
 import 'package:mangayomi/eval/model/m_bridge.dart';
 import 'package:mangayomi/eval/model/source_preference.dart';
 import 'package:mangayomi/eval/mihon/bridge_protocol.dart';
@@ -32,9 +34,7 @@ import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/language.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:isar_community/isar.dart';
-import 'package:mangayomi/modules/widgets/extension_server_warning_banner.dart';
-import 'package:mangayomi/repositories/source_repository.dart';
-import 'package:mangayomi/utils/cached_network.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 class ExtensionDetail extends ConsumerStatefulWidget {
   final Source source;
@@ -49,6 +49,9 @@ class _ExtensionDetailState extends ConsumerState<ExtensionDetail> {
   late List<Source> _packageSources;
   List<SourcePreference>? sourcePreference;
   bool _isRefreshingPreferences = false;
+
+  /// Bumped by every refresh so older background polls stop applying results.
+  int _preferencePollGeneration = 0;
   String _dictionaryProfileLabel = 'Loading…';
 
   String? get _dictionaryProfileSourceId =>
@@ -104,6 +107,7 @@ class _ExtensionDetailState extends ConsumerState<ExtensionDetail> {
     final selectedSource = isar.sources.getSync(sourceId);
     if (selectedSource == null) return;
 
+    _preferencePollGeneration++;
     setState(() {
       source = selectedSource;
       sourcePreference = _loadSourcePreferences(selectedSource);
@@ -165,6 +169,7 @@ class _ExtensionDetailState extends ConsumerState<ExtensionDetail> {
       return;
     }
 
+    final generation = ++_preferencePollGeneration;
     setState(() => _isRefreshingPreferences = true);
     final previous = sourcePreference ?? const <SourcePreference>[];
     final client = MClient.init(reqcopyWith: {'useDartHttpClient': true});
@@ -211,7 +216,9 @@ class _ExtensionDetailState extends ConsumerState<ExtensionDetail> {
           setPreferenceSetting(acceptedPreference, source);
         }
       }
-      await isar.writeTxn(() => isar.sources.put(source));
+      await dbWriteQueue.run(
+        () => isar.writeTxn(() => isar.sources.put(source)),
+      );
       final descriptors = await fetchMihonSourceDescriptors(
         client,
         source,
@@ -231,36 +238,53 @@ class _ExtensionDetailState extends ConsumerState<ExtensionDetail> {
         }
       }
 
-      // Factory extensions can cache their server address and credentials in
-      // each child instance. Source discovery above recreates those children;
-      // preference screens fetched before that point would keep polling the
-      // stale instance and never expose asynchronously loaded values such as
-      // Jellyfin libraries.
-      if (changedPreference?.editTextPreference != null) {
-        for (final delay in const [
-          Duration.zero,
-          Duration(milliseconds: 750),
-          Duration(milliseconds: 1500),
-        ]) {
-          if (delay > Duration.zero) await Future<void>.delayed(delay);
-          final refreshed = await fetchPreferencesDalvik(
-            client,
-            source,
-            proxyServer,
-            preferences: merged,
-          );
-          if (refreshed != null) {
-            merged = mergeMihonPreferenceValues(refreshed, merged);
-          }
-        }
-        source.preferenceList = jsonEncode(
-          merged.map((preference) => preference.toJson()).toList(),
-        );
-        await isar.writeTxn(() => isar.sources.put(source));
-      }
       if (mounted) setState(() => sourcePreference = merged);
+      // A text setting such as a password can start work the screen reports
+      // only later, like a Jellyfin login that loads its libraries. Keep
+      // polling without locking the list, since that can take seconds.
+      if (changedPreference?.editTextPreference != null) {
+        unawaited(
+          _pollMihonPreferences(generation, client, proxyServer, merged),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isRefreshingPreferences = false);
+    }
+  }
+
+  Future<void> _pollMihonPreferences(
+    int generation,
+    InterceptedClient client,
+    String proxyServer,
+    List<SourcePreference> merged,
+  ) async {
+    bool current() => mounted && generation == _preferencePollGeneration;
+    for (final delay in const [
+      Duration.zero,
+      Duration(milliseconds: 750),
+      Duration(milliseconds: 1500),
+      Duration(seconds: 3),
+      Duration(seconds: 5),
+    ]) {
+      await Future<void>.delayed(delay);
+      if (!current()) return;
+      final refreshed = await fetchPreferencesDalvik(
+        client,
+        source,
+        proxyServer,
+        preferences: merged,
+      );
+      if (refreshed == null || !current()) continue;
+      final previousJson = jsonEncode(merged.map((p) => p.toJson()).toList());
+      merged = mergeMihonPreferenceValues(refreshed, merged);
+      final mergedJson = jsonEncode(merged.map((p) => p.toJson()).toList());
+      if (mergedJson == previousJson) continue;
+      source.preferenceList = mergedJson;
+      await dbWriteQueue.run(
+        () => isar.writeTxn(() => isar.sources.put(source)),
+      );
+      if (!current()) return;
+      setState(() => sourcePreference = merged);
     }
   }
 
@@ -304,9 +328,8 @@ class _ExtensionDetailState extends ConsumerState<ExtensionDetail> {
               padding: const EdgeInsets.only(top: 20),
               child: Container(
                 decoration: BoxDecoration(
-                  color: Theme.of(
-                    context,
-                  ).secondaryHeaderColor.withValues(alpha: 0.5),
+                  color: Theme.of(context).secondaryHeaderColor
+                      .withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: SourceExtensionIcon(
@@ -522,22 +545,22 @@ class _ExtensionDetailState extends ConsumerState<ExtensionDetail> {
                                 ),
                                 const SizedBox(width: 15),
                                 TextButton(
-                                  onPressed: () {
-                                    final result = uninstallExtension(source);
-                                    for (final sourceId
-                                        in result.removedObsoleteSourceIds) {
-                                      ref
-                                          .read(
-                                            synchingProvider(
-                                              syncId: 1,
-                                            ).notifier,
-                                          )
-                                          .addChangedPart(
+                                  onPressed: () async {
+                                    final syncNotifier = ref.read(
+                                      synchingProvider(syncId: 1).notifier,
+                                    );
+                                    await uninstallExtension(
+                                      source,
+                                      recordObsoleteRemoval: (sourceId) =>
+                                          syncNotifier.addChangedPart(
                                             ActionType.removeExtension,
                                             sourceId,
                                             "{}",
                                             false,
-                                          );
+                                          ),
+                                    );
+                                    if (!ctx.mounted || !context.mounted) {
+                                      return;
                                     }
 
                                     Navigator.pop(ctx);

@@ -13,6 +13,7 @@ import 'package:mangayomi/services/m_extension_server.dart';
 import 'package:mangayomi/services/mihon_source_preferences.dart';
 import 'package:mangayomi/services/sync/chimahon_source_preferences_adapter.dart';
 import 'package:mangayomi/utils/log/logger.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 final refreshInstalledMihonFactorySourcesProvider =
     FutureProvider<MihonFactoryRefreshResult>(
@@ -189,7 +190,9 @@ Future<MihonFactoryRefreshResult> refreshInstalledMihonFactorySources(
           source.preferenceList = jsonEncode(
             merged.map((preference) => preference.toJson()).toList(),
           );
-          await isar.writeTxn(() => isar.sources.put(source));
+          await dbWriteQueue.run(
+            () => isar.writeTxn(() => isar.sources.put(source)),
+          );
         }
         if (remoteSourcePreferences.isNotEmpty) {
           await sourcePreferencesAdapter.importIntoAsync(
@@ -237,8 +240,13 @@ Future<MihonFactoryRefreshResult> refreshInstalledMihonFactorySources(
           break;
         }
       }
-    } on Object {
+    } on Object catch (error) {
       groupFailed = true;
+      AppLogger.log(
+        'Mihon factory refresh failed for '
+        '${mihonExtensionGroupKey(template)}: $error',
+        logLevel: LogLevel.warning,
+      );
     }
     if (groupReconciled) {
       reconciledGroups++;
@@ -495,26 +503,28 @@ Future<MihonFactoryReconcileResult> reconcileMihonFactorySources(
   }
 
   await beforeReconciliationWrite?.call();
-  await isar.writeTxn(() async {
-    await isar.sources.putAll(updates);
-    if (mangaUpdates.isEmpty) return;
-    final currentMangas = await isar.mangas.getAll(
-      mangaUpdates.map((update) => update.id).toList(growable: false),
-    );
-    final rebinding = <Manga>[];
-    for (var index = 0; index < mangaUpdates.length; index++) {
-      final manga = currentMangas[index];
-      if (manga == null) continue;
-      final update = mangaUpdates[index];
-      manga
-        ..sourceId = update.sourceId
-        ..source = update.source
-        ..lang = update.lang
-        ..mihonSourceId = update.mihonSourceId;
-      rebinding.add(manga);
-    }
-    if (rebinding.isNotEmpty) await isar.mangas.putAll(rebinding);
-  });
+  await dbWriteQueue.run(
+    () => isar.writeTxn(() async {
+      await isar.sources.putAll(updates);
+      if (mangaUpdates.isEmpty) return;
+      final currentMangas = await isar.mangas.getAll(
+        mangaUpdates.map((update) => update.id).toList(growable: false),
+      );
+      final rebinding = <Manga>[];
+      for (var index = 0; index < mangaUpdates.length; index++) {
+        final manga = currentMangas[index];
+        if (manga == null) continue;
+        final update = mangaUpdates[index];
+        manga
+          ..sourceId = update.sourceId
+          ..source = update.source
+          ..lang = update.lang
+          ..mihonSourceId = update.mihonSourceId;
+        rebinding.add(manga);
+      }
+      if (rebinding.isNotEmpty) await isar.mangas.putAll(rebinding);
+    }),
+  );
   final detached = mangaUpdates
       .where(
         (update) => update.sourceId == null && update.mihonSourceId != null,

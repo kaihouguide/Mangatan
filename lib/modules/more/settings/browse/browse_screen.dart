@@ -20,7 +20,6 @@ import 'package:mangayomi/models/changed.dart';
 import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/download.dart';
 import 'package:mangayomi/models/history.dart';
-import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/models/update.dart';
 import 'package:mangayomi/modules/more/settings/sync/providers/sync_providers.dart';
 
@@ -401,7 +400,7 @@ void _showCleanNonLibraryDialog(BuildContext context, dynamic l10n) {
                     final provider = ref.read(
                       synchingProvider(syncId: 1).notifier,
                     );
-                    isar.writeTxnSync(() {
+                    mangaRepository.writeTransaction(() {
                       for (var manga in mangasList) {
                         final histories = isar.historys
                             .filter()

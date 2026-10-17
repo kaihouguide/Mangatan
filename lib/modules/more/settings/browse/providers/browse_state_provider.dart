@@ -10,12 +10,12 @@ import 'package:mangayomi/models/settings.dart';
 import 'package:mangayomi/services/extension_repository_catalog.dart';
 import 'package:mangayomi/services/fetch_item_sources.dart';
 import 'package:mangayomi/services/http/m_client.dart';
+import 'package:mangayomi/utils/log/logger.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:http_interceptor/http_interceptor.dart';
-import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/repositories/settings_repository.dart';
 import 'package:mangayomi/services/extension_store_service.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 part 'browse_state_provider.g.dart';
 
 @riverpod
@@ -182,23 +182,25 @@ class ExtensionsRepoState extends _$ExtensionsRepoState {
 
   Future<void> set(List<Repo> value) async {
     state = value;
-    await isar.writeTxn(() async {
-      final settings = await isar.settings.get(227);
-      if (settings == null) return;
-      switch (itemType) {
-        case ItemType.manga:
-          settings.mangaExtensionsRepo = value;
-          break;
-        case ItemType.anime:
-          settings.animeExtensionsRepo = value;
-          break;
-        case ItemType.novel:
-          settings.novelExtensionsRepo = value;
-          break;
-      }
-      settings.updatedAt = DateTime.now().millisecondsSinceEpoch;
-      await isar.settings.put(settings);
-    });
+    await dbWriteQueue.run(
+      () => isar.writeTxn(() async {
+        final settings = await isar.settings.get(227);
+        if (settings == null) return;
+        switch (itemType) {
+          case ItemType.manga:
+            settings.mangaExtensionsRepo = value;
+            break;
+          case ItemType.anime:
+            settings.animeExtensionsRepo = value;
+            break;
+          case ItemType.novel:
+            settings.novelExtensionsRepo = value;
+            break;
+        }
+        settings.updatedAt = DateTime.now().millisecondsSinceEpoch;
+        await isar.settings.put(settings);
+      }),
+    );
     unawaited(_refreshSources());
   }
 
@@ -249,6 +251,9 @@ Future<Repo?> getRepoInfos(Ref ref, {required String jsonUrl}) async {
   if (cleanUrl.isEmpty) return null;
 
   final urlsToTry = <String>[cleanUrl];
+  // Every format is tried in turn, so keep why each attempt failed: the
+  // user only sees "unsupported repository".
+  final failures = <String>[];
   if (!cleanUrl.endsWith('.json') && !cleanUrl.endsWith('.pb')) {
     final normalized = cleanUrl.endsWith('/')
         ? cleanUrl.substring(0, cleanUrl.length - 1)
@@ -268,12 +273,12 @@ Future<Repo?> getRepoInfos(Ref ref, {required String jsonUrl}) async {
       if (result != null &&
           (result.sources.isNotEmpty || result.name.isNotEmpty)) {
         var repoName = result.name;
-        if (repoName.isEmpty || repoName.endsWith('.json')) {
+        bool isIndexFile(String name) =>
+            name.endsWith('.json') || name.endsWith('.pb');
+        if (repoName.isEmpty || isIndexFile(repoName)) {
           final uri = Uri.parse(url);
           final segments = uri.pathSegments
-              .where(
-                (segment) => segment.isNotEmpty && !segment.endsWith('.json'),
-              )
+              .where((segment) => segment.isNotEmpty && !isIndexFile(segment))
               .toList();
           repoName = segments.lastOrNull ?? uri.host;
         }
@@ -283,7 +288,9 @@ Future<Repo?> getRepoInfos(Ref ref, {required String jsonUrl}) async {
           jsonUrl: result.indexUrl,
         );
       }
-    } catch (_) {}
+    } catch (error) {
+      failures.add('$url: $error');
+    }
   }
 
   // Mangatan's package-aware catalog parser remains available for its custom
@@ -308,7 +315,9 @@ Future<Repo?> getRepoInfos(Ref ref, {required String jsonUrl}) async {
           jsonUrl: url,
         );
       }
-    } catch (_) {}
+    } catch (error) {
+      failures.add('$url: $error');
+    }
   }
 
   // Legacy JSON list format.
@@ -341,9 +350,15 @@ Future<Repo?> getRepoInfos(Ref ref, {required String jsonUrl}) async {
         }
         return repo;
       }
-    } catch (_) {}
+    } catch (error) {
+      failures.add('$url: $error');
+    }
   }
 
+  AppLogger.log(
+    'Could not add extension repository $cleanUrl:\n${failures.join('\n')}',
+    logLevel: LogLevel.warning,
+  );
   return null;
 }
 

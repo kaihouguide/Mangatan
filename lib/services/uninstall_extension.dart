@@ -3,6 +3,7 @@ import 'package:mangayomi/eval/model/source_preference.dart';
 import 'package:mangayomi/eval/mihon/bridge_protocol.dart';
 import 'package:mangayomi/main.dart';
 import 'package:mangayomi/models/source.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 class UninstallExtensionResult {
   const UninstallExtensionResult({required this.removedObsoleteSourceIds});
@@ -10,7 +11,14 @@ class UninstallExtensionResult {
   final List<int> removedObsoleteSourceIds;
 }
 
-UninstallExtensionResult uninstallExtension(Source selectedSource) {
+/// Uninstalls [selectedSource] and, for a Mihon package, its sibling sources.
+///
+/// [recordObsoleteRemoval] runs inside the write transaction for each deleted
+/// obsolete source, so a sync change record can be written atomically with it.
+Future<UninstallExtensionResult> uninstallExtension(
+  Source selectedSource, {
+  void Function(int sourceId)? recordObsoleteRemoval,
+}) => dbWriteQueue.run(() {
   final sources = _extensionSources(selectedSource);
   final sourceIds = sources.map((source) => source.id).nonNulls.toList();
   final preferenceIds = isar.sourcePreferences
@@ -37,6 +45,7 @@ UninstallExtensionResult uninstallExtension(Source selectedSource) {
       if (source.id == null) continue;
       if (source.isObsolete ?? false) {
         isar.sources.deleteSync(source.id!);
+        recordObsoleteRemoval?.call(source.id!);
       } else {
         final locallyImported = isLocallyImportedMihonExtension(source);
         isar.sources.putSync(
@@ -54,7 +63,7 @@ UninstallExtensionResult uninstallExtension(Source selectedSource) {
   });
 
   return UninstallExtensionResult(removedObsoleteSourceIds: obsoleteIds);
-}
+});
 
 List<Source> _extensionSources(Source selectedSource) {
   if (selectedSource.sourceCodeLanguage != SourceCodeLanguage.mihon) {

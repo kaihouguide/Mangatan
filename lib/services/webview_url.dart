@@ -4,6 +4,7 @@ import 'package:mangayomi/models/chapter.dart';
 import 'package:mangayomi/models/manga.dart';
 import 'package:mangayomi/models/source.dart';
 import 'package:mangayomi/services/m_extension_server.dart';
+import 'package:mangayomi/utils/log/logger.dart';
 
 String resolveSourceUrl({required String baseUrl, required String url}) {
   final value = url.trim();
@@ -62,7 +63,17 @@ Future<String> _withMihonService(
   required Future<String> Function(MihonExtensionService service) getUrl,
 }) async {
   final server = MExtensionServerPlatform(ref);
-  await server.startServer();
+  try {
+    await server.startServer();
+  } catch (error) {
+    // The website URL needs no bridge. Opening or sharing it must still work;
+    // bridge failures surface where the bridge itself is required.
+    AppLogger.log(
+      'Mihon bridge unavailable for a WebView URL: $error',
+      logLevel: LogLevel.warning,
+    );
+    return fallback;
+  }
   final service = MihonExtensionService(source, server.baseUrl);
   try {
     final url = (await getUrl(service)).trim();

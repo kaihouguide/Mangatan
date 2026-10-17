@@ -328,7 +328,7 @@ final class ExtensionsRepoStateProvider
 }
 
 String _$extensionsRepoStateHash() =>
-    r'9af5212d996cc4471a1bb3d61f279b891f33587c';
+    r'a43390b42712afc97c1de3c59f9758c076ee5c89';
 
 final class ExtensionsRepoStateFamily extends $Family
     with

@@ -10,12 +10,6 @@ import 'package:mangayomi/providers/l10n_providers.dart';
 import 'package:mangayomi/services/uninstall_extension.dart';
 import 'package:mangayomi/utils/extensions/build_context_extensions.dart';
 import 'package:mangayomi/utils/language.dart';
-import 'package:mangayomi/models/source.dart';
-import 'package:mangayomi/modules/widgets/tv_row_button.dart';
-import 'package:mangayomi/repositories/source_repository.dart';
-import 'package:mangayomi/services/fetch_sources_list.dart';
-import 'package:mangayomi/utils/cached_network.dart';
-import 'package:mangayomi/utils/platform_utils.dart';
 
 class ExtensionListTileWidget extends ConsumerStatefulWidget {
   final ExtensionCatalogEntry entry;
@@ -135,25 +129,21 @@ class _ExtensionListTileWidgetState
                                 ),
                                 const SizedBox(width: 15),
                                 TextButton(
-                                  onPressed: () {
-                                    final result = uninstallExtension(
-                                      widget.entry.source,
+                                  onPressed: () async {
+                                    final syncNotifier = ref.read(
+                                      synchingProvider(syncId: 1).notifier,
                                     );
-                                    for (final sourceId
-                                        in result.removedObsoleteSourceIds) {
-                                      ref
-                                          .read(
-                                            synchingProvider(syncId: 1)
-                                                .notifier,
-                                          )
-                                          .addChangedPart(
+                                    await uninstallExtension(
+                                      widget.entry.source,
+                                      recordObsoleteRemoval: (sourceId) =>
+                                          syncNotifier.addChangedPart(
                                             ActionType.removeExtension,
                                             sourceId,
                                             "{}",
                                             false,
-                                          );
-                                    }
-
+                                          ),
+                                    );
+                                    if (!ctx.mounted) return;
                                     Navigator.pop(ctx);
                                   },
                                   child: Text(ctx.l10n.ok),

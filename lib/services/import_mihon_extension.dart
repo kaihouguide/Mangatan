@@ -10,6 +10,7 @@ import 'package:mangayomi/services/fetch_sources_list.dart';
 import 'package:mangayomi/services/http/m_client.dart';
 import 'package:mangayomi/services/m_extension_server.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
+import 'package:mangayomi/repositories/db_write_queue.dart';
 
 class MihonApkImportResult {
   const MihonApkImportResult({
@@ -251,7 +252,9 @@ Future<void> _markUnavailablePackageSources(
     updates.add(source);
   }
   if (updates.isEmpty) return;
-  await isar.writeTxn(() => isar.sources.putAll(updates));
+  await dbWriteQueue.run(
+    () => isar.writeTxn(() => isar.sources.putAll(updates)),
+  );
 }
 
 String _latestKnownVersion(String? current, String imported) {

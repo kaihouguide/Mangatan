@@ -25,8 +25,6 @@ import 'package:re_highlight/languages/dart.dart';
 import 'package:re_highlight/languages/javascript.dart';
 import 'package:re_highlight/styles/vs2015.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
-import 'package:mangayomi/main.dart';
-import 'package:mangayomi/models/source.dart';
 
 class CodeEditorPage extends ConsumerStatefulWidget {
   final int? sourceId;
@@ -42,6 +40,12 @@ class _CodeEditorPageState extends ConsumerState<CodeEditorPage> {
       ? null
       : sourceRepository.getById(widget.sourceId!);
   final CodeLineEditingController _controller = CodeLineEditingController();
+  Timer? _saveDebounceTimer;
+
+  void _persistSourceCodeNow() {
+    if (source == null) return;
+    sourceRepository.save(source!);
+  }
 
   List<(String, int)> _getServices(BuildContext context) => [
     ("getPopular", 0),
@@ -183,6 +187,10 @@ class _CodeEditorPageState extends ConsumerState<CodeEditorPage> {
 
   @override
   void dispose() {
+    if (_saveDebounceTimer?.isActive ?? false) {
+      _saveDebounceTimer!.cancel();
+      _persistSourceCodeNow();
+    }
     _logSubscription.cancel();
     _logsNotifier.value.clear();
     _scrollController.dispose();
@@ -192,11 +200,8 @@ class _CodeEditorPageState extends ConsumerState<CodeEditorPage> {
   }
 
   void _goBack(BuildContext context) {
-    isar.writeTxnSync(() {
-      isar.sources.putSync(
-        source!..updatedAt = DateTime.now().millisecondsSinceEpoch,
-      );
-    });
+    _saveDebounceTimer?.cancel();
+    sourceRepository.save(source!);
     Navigator.pop(context, source);
   }
 
@@ -286,13 +291,11 @@ class _CodeEditorPageState extends ConsumerState<CodeEditorPage> {
                         onChanged: (_) {
                           source?.sourceCode = _controller.text;
                           if (source != null && context.mounted) {
-                            isar.writeTxnSync(() {
-                              isar.sources.putSync(
-                                source!
-                                  ..updatedAt =
-                                      DateTime.now().millisecondsSinceEpoch,
-                              );
-                            });
+                            _saveDebounceTimer?.cancel();
+                            _saveDebounceTimer = Timer(
+                              const Duration(milliseconds: 1500),
+                              _persistSourceCodeNow,
+                            );
                           }
                         },
                         wordWrap: false,

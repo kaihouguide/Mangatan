@@ -13,8 +13,6 @@ import 'package:mangayomi/modules/widgets/extension_server_warning_banner.dart';
 import 'package:mangayomi/providers/l10n_providers.dart';
 import 'package:mangayomi/utils/language.dart';
 import 'package:mangayomi/utils/platform_utils.dart';
-import 'package:isar_community/isar.dart';
-import 'package:mangayomi/main.dart';
 
 final getSourcesStreamProvider = StreamProvider.family<List<Source>, ItemType>((
   ref,
